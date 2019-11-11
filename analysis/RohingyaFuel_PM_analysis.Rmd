@@ -1,0 +1,120 @@
+---
+title: "PM_analysis"
+author: "Laura Kwong"
+date: "11/06/2019"
+output:
+  word_document: default
+  html_document: default
+---
+R verion 3.6.1 downloaded 6 Nov 2019
+
+
+https://cran.r-project.org/web/packages/MakefileR/vignettes/demo.html
+
+sensor_pull_data.R is in the "munge" folder
+
+```{r setup, include=FALSE}
+library(tableone)
+library(janitor) #tabyl() adorn_...()
+library(dplyr)
+library(readxl)
+library(lubridate)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+knitr::opts_chunk$set(echo = TRUE)
+
+`%notin%` <- Negate(`%in%`)
+```
+
+
+```{r}
+# source(here::here("file_paths.Rmd"))
+
+file_pm_data_base <- here::here("data", "raw", "PATS+Data_20191110.rds")
+```
+
+The date on PM07751B_20190915_0_8wDH21291216 and PM07751B_20190921_0_8wD290417
+is 2000-01-01 and onwards -> fix this later and drop for now
+
+
+```{r load_data, include=FALSE} 
+pm_data <- 
+	readRDS(file = file_pm_data_base) %>%
+	mutate(
+		dateTime = 
+			if_else(
+				is.na(ymd_hms(dateTime)) == FALSE, 
+				ymd_hms(dateTime), 
+				mdy_hm(dateTime)
+			),
+		dateTime_min = round_date(dateTime, unit = "minute"),
+		dateTime_hour = round_date(dateTime, unit = "hour"),
+		arm =
+			if_else(
+				dateTime < "2019-10-03",
+				"pre-intervention",
+				"intervention"
+			),
+		arm = 
+			ordered(
+				arm,
+				levels = c("pre-intervention", "intervention")
+			)
+	) # %>%
+# select(file_name, dateTime, dateTime_hour, dateTime_min, PM_Estimate)
+
+pm_data_min <-
+	pm_data %>%
+	group_by(file_name, dateTime_min) %>%
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	)
+
+pm_data_hour <-
+	pm_data %>%
+	group_by(file_name, arm, dateTime_hour) %>%
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	mutate(
+		over_100 = if_else(PM_Estimate > 100, 1, 0),
+		over_500 = if_else(PM_Estimate > 500, 1, 0)
+	)
+
+pm_data_hour_summary <-
+	pm_data_hour %>%
+	summarize_at(
+		vars(over_100, over_500),
+		funs(sum)
+	) %>%
+	gather(-c(file_name, arm), key = "indicator", value = "hours")
+
+# View(pm_data)
+```
+
+```{r}
+pm_data_hour %>%
+	filter(file_name %notin% c("PM07751B_20190915_0_8wDH21291216", "PM07751B_20190921_0_8wD290417")) %>% 
+	# filter(file_name == "PM07682B_20191031_1_4E109511") %>%
+	ggplot(aes(dateTime_hour, PM_Estimate, color = file_name)) +
+	geom_line(na.rm = TRUE) +
+	theme(
+		legend.position = "none"
+	)
+
+
+pm_data_hour_summary %>%
+	ggplot(aes(y = hours, color = arm)) +
+	geom_boxplot() +
+	scale_color_discrete() + # viridus uses purple and yellow!
+	# theme(
+	# 	axis.ticks.x
+	# ) +
+	facet_grid(indicator ~ arm, scales = "free_y")
+```

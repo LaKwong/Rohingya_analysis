@@ -74,73 +74,571 @@ knitr::opts_chunk$set(echo = TRUE)
 file_survey_data_base <- here::here("data", "raw", "RohingyaFuelMaster_today.csv")
 ```
 
-
 ```{r load_data, include=FALSE} 
-
 survey_data_base <- read.csv(file_survey_data_base)
+```
 
-survey_data <-
+# Coalsce values that were accidentally separated into two variables
+
+There are many vars that have <var>1 and <var>.1 becuase of a change in the survey xlm that happened after hh 9I100788I3_5992, the last pre-intervention hh, which was in camp 9 and surveyed 10/2. The first intervention hh, 4E184565Pp21_514, was in camp 4 and surveyed 10/10. This change happened when we 
+
+```{r, eval=FALSE}
+survey_data_base %>%
+	select(ends_with("1")) %>%
+	names()
+```
+
+```{r, eval=FALSE}
+survey_data_base %>%
+	select(rice_source, rice_source0, rice_source.0)
+```
+
+```{r}
+survey_data_1 <- 
 	survey_data_base %>%
+	mutate_at(
+		vars(
+			starts_with("rice_source"),
+			starts_with("bread_source"),
+			starts_with("corn_source"),
+			starts_with("potatoes_source"),
+			starts_with("lentils_source"),
+			starts_with("eggs_source"),
+			starts_with("dairy_source"),
+			starts_with("veggies_source"),
+			starts_with("fruit_source"),
+			starts_with("fish_source"),
+			starts_with("poultry_source"),
+			starts_with("goat_sheep_source"),
+			starts_with("oil_source"),
+			starts_with("sugar_source"),
+			starts_with("food_cant_afford_action"),
+			starts_with("fuel_cant_afford_action"),
+			starts_with("reduce_meals"),
+			starts_with("not_eat"),
+			starts_with("gather_scraps_dead")
+		),
+		list(as.numeric)
+	) %>%
+	
+	mutate(
+		reduce_meals1 = coalesce(reduce_meals1, reduce_meals.1),
+		
+		not_eat1 = coalesce(as.numeric(not_eat1), as.numeric(not_eat.1)),
+		
+		gather_scraps_dead1 = coalesce(gather_scraps_dead1, gather_scraps_dead.1),
+		
+		lpg_changes_lifestyle1 = coalesce(lpg_changes_lifestyle1, lpg_changes_lifestyle.1),
+		lpg_changes_lifestyle2 = coalesce(lpg_changes_lifestyle2, lpg_changes_lifestyle.2),
+		lpg_changes_lifestyle3 = coalesce(lpg_changes_lifestyle3, lpg_changes_lifestyle.3),
+		lpg_changes_lifestyle4 = coalesce(lpg_changes_lifestyle4, lpg_changes_lifestyle.4),
+		lpg_changes_lifestyle5 = coalesce(lpg_changes_lifestyle5, lpg_changes_lifestyle.5),
+		lpg_changes_lifestyle6 = coalesce(lpg_changes_lifestyle6, lpg_changes_lifestyle.6),
+		
+		food_cant_afford_action1 = coalesce(food_cant_afford_action1, food_cant_afford_action.1),
+		food_cant_afford_action2 = coalesce(food_cant_afford_action2, food_cant_afford_action.2),
+		food_cant_afford_action3 = coalesce(food_cant_afford_action3, food_cant_afford_action.3),
+		food_cant_afford_action4 = coalesce(food_cant_afford_action4, food_cant_afford_action.4),
+		food_cant_afford_action5 = coalesce(food_cant_afford_action5, food_cant_afford_action.5),
+		food_cant_afford_action6 = coalesce(food_cant_afford_action6, food_cant_afford_action.6),
+		food_cant_afford_action7 = coalesce(food_cant_afford_action7, food_cant_afford_action.7),
+		food_cant_afford_action8 = coalesce(food_cant_afford_action8, food_cant_afford_action.8),
+		food_cant_afford_action9 = coalesce(food_cant_afford_action9, food_cant_afford_action.9),
+		food_cant_afford_action10 = coalesce(food_cant_afford_action10, food_cant_afford_action.10),
+		food_cant_afford_action11 = coalesce(food_cant_afford_action11, food_cant_afford_action.11),
+		food_cant_afford_action12 = coalesce(food_cant_afford_action12, food_cant_afford_action.12),
+		food_cant_afford_action13 = coalesce(food_cant_afford_action13, food_cant_afford_action.13),
+		food_cant_afford_action66 = coalesce(food_cant_afford_action66, food_cant_afford_action.66),
+		food_cant_afford_action88 = coalesce(food_cant_afford_action88, food_cant_afford_action.88),
+		
+		fuel_cant_afford_action1 = coalesce(fuel_cant_afford_action1, fuel_cant_afford_action.1),
+		fuel_cant_afford_action2 = coalesce(fuel_cant_afford_action2, fuel_cant_afford_action.2),
+		fuel_cant_afford_action3 = coalesce(fuel_cant_afford_action3, fuel_cant_afford_action.3),
+		fuel_cant_afford_action4 = coalesce(fuel_cant_afford_action4, fuel_cant_afford_action.4),
+		fuel_cant_afford_action5 = coalesce(fuel_cant_afford_action5, fuel_cant_afford_action.5),
+		fuel_cant_afford_action6 = coalesce(fuel_cant_afford_action6, fuel_cant_afford_action.6),
+		fuel_cant_afford_action7 = coalesce(fuel_cant_afford_action7, fuel_cant_afford_action.7),
+		fuel_cant_afford_action8 = coalesce(fuel_cant_afford_action8, fuel_cant_afford_action.8),
+		fuel_cant_afford_action9 = coalesce(fuel_cant_afford_action9, fuel_cant_afford_action.9),
+		fuel_cant_afford_action10 = coalesce(fuel_cant_afford_action10, fuel_cant_afford_action.10),
+		fuel_cant_afford_action11 = coalesce(fuel_cant_afford_action11, fuel_cant_afford_action.11),
+		fuel_cant_afford_action12 = coalesce(fuel_cant_afford_action12, fuel_cant_afford_action.12),
+		fuel_cant_afford_action13 = coalesce(fuel_cant_afford_action13, fuel_cant_afford_action.13),
+		fuel_cant_afford_action66 = coalesce(fuel_cant_afford_action66, fuel_cant_afford_action.66),
+		fuel_cant_afford_action88 = coalesce(fuel_cant_afford_action88, fuel_cant_afford_action.88),
+		
+		rice_source0 = coalesce(rice_source0, rice_source.0),
+		rice_source1 = coalesce(rice_source1, rice_source.1),
+		rice_source2 = coalesce(rice_source2, rice_source.2),
+		rice_source3 = coalesce(rice_source3, rice_source.3),
+		rice_source4 = coalesce(rice_source4, rice_source.4),
+		rice_source5 = coalesce(rice_source5, rice_source.5),
+		rice_source6 = coalesce(rice_source6, rice_source.6),
+		rice_source7 = coalesce(rice_source7, rice_source.7),
+		rice_source8 = coalesce(rice_source8, rice_source.8),
+		rice_source9 = coalesce(rice_source9, rice_source.9),
+		rice_source66 = coalesce(rice_source66, rice_source.66),
+		
+		bread_source0 = coalesce(bread_source0, bread_source.0),
+		bread_source1 = coalesce(bread_source1, bread_source.1),
+		bread_source2 = coalesce(bread_source2, bread_source.2),
+		bread_source3 = coalesce(bread_source3, bread_source.3),
+		bread_source4 = coalesce(bread_source4, bread_source.4),
+		bread_source5 = coalesce(bread_source5, bread_source.5),
+		bread_source6 = coalesce(bread_source6, bread_source.6),
+		bread_source7 = coalesce(bread_source7, bread_source.7),
+		bread_source8 = coalesce(bread_source8, bread_source.8),
+		bread_source9 = coalesce(bread_source9, bread_source.9),
+		bread_source66 = coalesce(bread_source66, bread_source.66),
+		
+		corn_source0 = coalesce(corn_source0, corn_source.0),
+		corn_source1 = coalesce(corn_source1, corn_source.1),
+		corn_source2 = coalesce(corn_source2, corn_source.2),
+		corn_source3 = coalesce(corn_source3, corn_source.3),
+		corn_source4 = coalesce(corn_source4, corn_source.4),
+		corn_source5 = coalesce(corn_source5, corn_source.5),
+		corn_source6 = coalesce(corn_source6, corn_source.6),
+		corn_source7 = coalesce(corn_source7, corn_source.7),
+		corn_source8 = coalesce(corn_source8, corn_source.8),
+		corn_source9 = coalesce(corn_source9, corn_source.9),
+		corn_source66 = coalesce(corn_source66, corn_source.66),
+		
+		potatoes_source0 = coalesce(potatoes_source0, potatoes_source.0),
+		potatoes_source1 = coalesce(potatoes_source1, potatoes_source.1),
+		potatoes_source2 = coalesce(potatoes_source2, potatoes_source.2),
+		potatoes_source3 = coalesce(potatoes_source3, potatoes_source.3),
+		potatoes_source4 = coalesce(potatoes_source4, potatoes_source.4),
+		potatoes_source5 = coalesce(potatoes_source5, potatoes_source.5),
+		potatoes_source6 = coalesce(potatoes_source6, potatoes_source.6),
+		potatoes_source7 = coalesce(potatoes_source7, potatoes_source.7),
+		potatoes_source8 = coalesce(potatoes_source8, potatoes_source.8),
+		potatoes_source9 = coalesce(potatoes_source9, potatoes_source.9),
+		potatoes_source66 = coalesce(potatoes_source66, potatoes_source.66),
+		
+		lentils_source0 = coalesce(lentils_source0, lentils_source.0),
+		lentils_source1 = coalesce(lentils_source1, lentils_source.1),
+		lentils_source2 = coalesce(lentils_source2, lentils_source.2),
+		lentils_source3 = coalesce(lentils_source3, lentils_source.3),
+		lentils_source4 = coalesce(lentils_source4, lentils_source.4),
+		lentils_source5 = coalesce(lentils_source5, lentils_source.5),
+		lentils_source6 = coalesce(lentils_source6, lentils_source.6),
+		lentils_source7 = coalesce(lentils_source7, lentils_source.7),
+		lentils_source8 = coalesce(lentils_source8, lentils_source.8),
+		lentils_source9 = coalesce(lentils_source9, lentils_source.9),
+		lentils_source66 = coalesce(lentils_source66, lentils_source.66),
+		
+		eggs_source0 = coalesce(eggs_source0, eggs_source.0),
+		eggs_source1 = coalesce(eggs_source1, eggs_source.1),
+		eggs_source2 = coalesce(eggs_source2, eggs_source.2),
+		eggs_source3 = coalesce(eggs_source3, eggs_source.3),
+		eggs_source4 = coalesce(eggs_source4, eggs_source.4),
+		eggs_source5 = coalesce(eggs_source5, eggs_source.5),
+		eggs_source6 = coalesce(eggs_source6, eggs_source.6),
+		eggs_source7 = coalesce(eggs_source7, eggs_source.7),
+		eggs_source8 = coalesce(eggs_source8, eggs_source.8),
+		eggs_source9 = coalesce(eggs_source9, eggs_source.9),
+		eggs_source66 = coalesce(eggs_source66, eggs_source.66),
+		
+		dairy_source0 = coalesce(dairy_source0, dairy_source.0),
+		dairy_source1 = coalesce(dairy_source1, dairy_source.1),
+		dairy_source2 = coalesce(dairy_source2, dairy_source.2),
+		dairy_source3 = coalesce(dairy_source3, dairy_source.3),
+		dairy_source4 = coalesce(dairy_source4, dairy_source.4),
+		dairy_source5 = coalesce(dairy_source5, dairy_source.5),
+		dairy_source6 = coalesce(dairy_source6, dairy_source.6),
+		dairy_source7 = coalesce(dairy_source7, dairy_source.7),
+		dairy_source8 = coalesce(dairy_source8, dairy_source.8),
+		dairy_source9 = coalesce(dairy_source9, dairy_source.9),
+		dairy_source66 = coalesce(dairy_source66, dairy_source.66),
+		
+		veggies_source0 = coalesce(veggies_source0, veggies_source.0),
+		veggies_source1 = coalesce(veggies_source1, veggies_source.1),
+		veggies_source2 = coalesce(veggies_source2, veggies_source.2),
+		veggies_source3 = coalesce(veggies_source3, veggies_source.3),
+		veggies_source4 = coalesce(veggies_source4, veggies_source.4),
+		veggies_source5 = coalesce(veggies_source5, veggies_source.5),
+		veggies_source6 = coalesce(veggies_source6, veggies_source.6),
+		veggies_source7 = coalesce(veggies_source7, veggies_source.7),
+		veggies_source8 = coalesce(veggies_source8, veggies_source.8),
+		veggies_source9 = coalesce(veggies_source9, veggies_source.9),
+		veggies_source66 = coalesce(veggies_source66, veggies_source.66),
+		
+		fruit_source0 = coalesce(fruit_source0, fruit_source.0),
+		fruit_source1 = coalesce(fruit_source1, fruit_source.1),
+		fruit_source2 = coalesce(fruit_source2, fruit_source.2),
+		fruit_source3 = coalesce(fruit_source3, fruit_source.3),
+		fruit_source4 = coalesce(fruit_source4, fruit_source.4),
+		fruit_source5 = coalesce(fruit_source5, fruit_source.5),
+		fruit_source6 = coalesce(fruit_source6, fruit_source.6),
+		fruit_source7 = coalesce(fruit_source7, fruit_source.7),
+		fruit_source8 = coalesce(fruit_source8, fruit_source.8),
+		fruit_source9 = coalesce(fruit_source9, fruit_source.9),
+		fruit_source66 = coalesce(fruit_source66, fruit_source.66),
+		
+		fish_source0 = coalesce(fish_source0, fish_source.0),
+		fish_source1 = coalesce(fish_source1, fish_source.1),
+		fish_source2 = coalesce(fish_source2, fish_source.2),
+		fish_source3 = coalesce(fish_source3, fish_source.3),
+		fish_source4 = coalesce(fish_source4, fish_source.4),
+		fish_source5 = coalesce(fish_source5, fish_source.5),
+		fish_source6 = coalesce(fish_source6, fish_source.6),
+		fish_source7 = coalesce(fish_source7, fish_source.7),
+		fish_source8 = coalesce(fish_source8, fish_source.8),
+		fish_source9 = coalesce(fish_source9, fish_source.9),
+		fish_source66 = coalesce(fish_source66, fish_source.66),
+		
+		poultry_source0 = coalesce(poultry_source0, poultry_source.0),
+		poultry_source1 = coalesce(poultry_source1, poultry_source.1),
+		poultry_source2 = coalesce(poultry_source2, poultry_source.2),
+		poultry_source3 = coalesce(poultry_source3, poultry_source.3),
+		poultry_source4 = coalesce(poultry_source4, poultry_source.4),
+		poultry_source5 = coalesce(poultry_source5, poultry_source.5),
+		poultry_source6 = coalesce(poultry_source6, poultry_source.6),
+		poultry_source7 = coalesce(poultry_source7, poultry_source.7),
+		poultry_source8 = coalesce(poultry_source8, poultry_source.8),
+		poultry_source9 = coalesce(poultry_source9, poultry_source.9),
+		poultry_source66 = coalesce(poultry_source66, poultry_source.66),
+		
+		goat_sheep_source0 = coalesce(goat_sheep_source0, goat_sheep_source.0),
+		goat_sheep_source1 = coalesce(goat_sheep_source1, goat_sheep_source.1),
+		goat_sheep_source2 = coalesce(goat_sheep_source2, goat_sheep_source.2),
+		goat_sheep_source3 = coalesce(goat_sheep_source3, goat_sheep_source.3),
+		goat_sheep_source4 = coalesce(goat_sheep_source4, goat_sheep_source.4),
+		goat_sheep_source5 = coalesce(goat_sheep_source5, goat_sheep_source.5),
+		goat_sheep_source6 = coalesce(goat_sheep_source6, goat_sheep_source.6),
+		goat_sheep_source7 = coalesce(goat_sheep_source7, goat_sheep_source.7),
+		goat_sheep_source8 = coalesce(goat_sheep_source8, goat_sheep_source.8),
+		goat_sheep_source9 = coalesce(goat_sheep_source9, goat_sheep_source.9),
+		goat_sheep_source66 = coalesce(goat_sheep_source66, goat_sheep_source.66),
+		
+		beef_source0 = coalesce(beef_source0, beef_source.0),
+		beef_source1 = coalesce(beef_source1, beef_source.1),
+		beef_source2 = coalesce(beef_source2, beef_source.2),
+		beef_source3 = coalesce(beef_source3, beef_source.3),
+		beef_source4 = coalesce(beef_source4, beef_source.4),
+		beef_source5 = coalesce(beef_source5, beef_source.5),
+		beef_source6 = coalesce(beef_source6, beef_source.6),
+		beef_source7 = coalesce(beef_source7, beef_source.7),
+		beef_source8 = coalesce(beef_source8, beef_source.8),
+		beef_source9 = coalesce(beef_source9, beef_source.9),
+		beef_source66 = coalesce(beef_source66, beef_source.66),
+		
+		oil_source0 = coalesce(oil_source0, oil_source.0),
+		oil_source1 = coalesce(oil_source1, oil_source.1),
+		oil_source2 = coalesce(oil_source2, oil_source.2),
+		oil_source3 = coalesce(oil_source3, oil_source.3),
+		oil_source4 = coalesce(oil_source4, oil_source.4),
+		oil_source5 = coalesce(oil_source5, oil_source.5),
+		oil_source6 = coalesce(oil_source6, oil_source.6),
+		oil_source7 = coalesce(oil_source7, oil_source.7),
+		oil_source8 = coalesce(oil_source8, oil_source.8),
+		oil_source9 = coalesce(oil_source9, oil_source.9),
+		oil_source66 = coalesce(oil_source66, oil_source.66),
+		
+		sugar_source0 = coalesce(sugar_source0, sugar_source.0),
+		sugar_source1 = coalesce(sugar_source1, sugar_source.1),
+		sugar_source2 = coalesce(sugar_source2, sugar_source.2),
+		sugar_source3 = coalesce(sugar_source3, sugar_source.3),
+		sugar_source4 = coalesce(sugar_source4, sugar_source.4),
+		sugar_source5 = coalesce(sugar_source5, sugar_source.5),
+		sugar_source6 = coalesce(sugar_source6, sugar_source.6),
+		sugar_source7 = coalesce(sugar_source7, sugar_source.7),
+		sugar_source8 = coalesce(sugar_source8, sugar_source.8),
+		sugar_source9 = coalesce(sugar_source9, sugar_source.9),
+		sugar_source66 = coalesce(sugar_source66, sugar_source.66)
+	)
+```
+
+```{r beautify_data}
+survey_data_2 <-
+	survey_data_1 %>%
 	filter(consent == "OK") %>%
 	select(
 		-X,
 		-starts_with("generated_note"),
 		-starts_with("reserved_name")
 	) %>%
+	
+	# clean up values
 	mutate(
-		enumerator = as.factor(enumerator),
-		enumerator_name = 
-			recode_factor(
-				enumerator,
-				"1" = "Tunajjina Alam (big tablet 1)", 
-				"2"	= "Rayhanul Jannat (big tablet 2)", 
-				"3"	= "Shamima Akter (big tablet 3)", 
-				"4" =	"Morsida Akter (big tablet 4)", 
-				"5" =	"Way May Marma (big tablet 5)",
-				"6" = "Morselina Akter (big tablet 6)", 
-				"7"	= "Farhana Suma (small tablet 1)", 
-				"8" =	"Nishat Farjana (small tablet 2)", 
-				"9" =	"Arefa Khanam (small tablet 3)",
-				"10" =	"Daliya Akter (small tablet 4)",
-				"11" =	"Md. Jamilur Rahman",
-				"12" =	"Md. Razu Ahmed",
-				"13" = "Mohammad Alamgir",
-				"14" =	"Nazrin Akter",
-				"15" = "dummy"
-			)
+		camp_id = 
+			str_to_upper(str_trim(camp_id)), # could use stringr in case there are other mis-matches
+		subblock_id = 
+			str_to_upper(str_trim(subblock_id)) # could use stringr in case there are other mis-matches
 	) %>%
-	rename( # rename(newname, oldname) renames (not copy and rename new column)
+	
+	# rename vars
+	# rename(newname, oldname) renames (not copy and rename new column)
+	rename( 
 		respondent_resp_rate  = resp_rate_reported_respondant,       
-		respondent_weight_loss = weight_loss_reported_respondant, 
+		respondent_weight_loss = weight_loss_reported_respondant,
+		
+		# coping strategies food and fuel sections both have "reduce_meals" and "not_eat" vars
+		reduce_meals_lack_food = reduce_meals,
+		not_eat_lack_food = not_eat,
+		reduce_meals_lack_fuel = reduce_meals1,
+		not_eat_lack_fuel = not_eat1,
+		
 		# "Are the scraps/leaves/twigs you collect all dead?" has the variable gather_scraps_dead 
 		# "Is all the wood you collect all dead?" accidentally has the variable gather_scraps_dead.1
-		gather_wood_dead = gather_scraps_dead.1, 
+		gather_wood_dead = gather_scraps_dead1, # there's also a gather_scraps_dead.1
+		
 		# When you depend on wood for cooking fuel, then how many times in one week do you go to the forest to collect wood?
 		collect_wood_times_week = times_wood_day,
 		reason_forest_defecation = reason_forest_defacation,
 		cook_to_sell_percent = cook_to_sell,
 		cook_sell_days_week = cook_sell_yesterday
+	)
+```
+
+```{r vars}
+asset_vars <- 
+	c(
+		"mattress", "blanket", "mosquito_net", "solar_lamp", "portable_lamp",
+		"umbrella", "table", "chair_bench", "almirah_wardrobe_show_case", 
+		"electric_fan", "refrigerator",
+		"shovel", "sickle", "weaving_tool", "fish_net",
+		"mobile_phone", "smartphone", "radio", 
+		"television", "DVD_VCD_player", "computer_laptop", 
+		"bicycle", "motorcycle", "rickshaw_van", "CNG_tempo_electric_bike",
+		"chicken_duck_pigeon", "goat_sheep", "cow_buffalo"
+	)
+
+spent_monthly_vars <- 
+	c(
+		"spent_food",
+		"spent_hh_items",
+		"spent_hygiene",
+		"spent_tobacco_pan",
+		"spent_transport",
+		"spent_phone",
+		"spent_total_month",
+		"spent_clothing_month", 
+		"spent_shelter_month",
+		"spent_celebrations_month",
+		"spent_debt_month",
+		"spent_medical_month",
+		"spent_education_month",
+		"spent_other_month"
+	)
+
+nonrespiratory_vars <- 
+	c(
+		"target_child_eye_red", "target_child_eye_itch",  
+		"respondent_eye_red", "respondent_eye_itch", "respondent_eye_sore",
+		"respondent_headache", "respondent_backache"
+	)
+
+respiratory_vars <- 
+	c(
+		"target_child_cough", "target_child_resp_rate", 
+		"target_child_clinic_resp", "target_child_wheezing", 
+		"target_child_disturbed_sleep", "target_child_distrubed_speech", 
+		"respondent_cough", "respondent_resp_rate", 
+		"respondent_weight_loss", "respondent_wheezing", 
+		"respondent_disturbed_sleep", "respondent_disturbed_speech"
+	)
+
+
+generalhealth_vars <-  
+	c(
+		"target_child_fever", "target_child_weight_loss", "target_child_lethargy"
+	)
+
+generalhealth_vars_yn <-  
+	map_chr(generalhealth_vars, ~ paste0(., "_yn"))
+
+MUAC_vars <- 
+	c(
+		"target_child_arm_measurements_yn", "target_child_mid_arm_circ_av"
+	)
+
+breathing_vars <- 
+	c(
+		"target_child_breathing_yn", "target_child_resp_rate_measured"
+	)
+
+mental_health_vars <-
+	c(
+		"hopeful", "happy", "enjoyed_life",
+		
+		"bothered", "sick", 
+		"no_appetite", "diff_concentrating", "restless_sleep",
+		"exert_effort", "less_talkative", 
+		"fearful", "self_worth",  
+		"lonely", "feeling_disliked", "unfriendly_people", 
+		"crying_spells",  
+		"cant_get_going", "feeling_down", "life_failure", "depressed", 
+		"suicidal_thoughts_30"
+	)
+```
+
+
+```{r, eval = FALSE}
+# Factor
+mtcars = mtcars %>%
+	apply_labels(
+		mpg = "Miles/(US) gallon"
+	)
+
+fct_reorder() # Reordering a factor by another variable.
+fct_infreq() # Reordering a factor by the frequency of values.
+fct_relevel() # Changing the order of a factor by hand.
+fct_lump() # Collapsing the least/most frequent values of a factor into “other”. n = min num of obs to collapse
+
+mydata$v1 <-
+	mydata %>%
+	factor(
+		v1,
+		levels = c(1,2,3),
+		labels = c("red", "blue", "green")
+	)
+
+mydata$v1 <-
+	mydata %>%
+	ordered(
+		y,
+		levels = c(1,3, 5),
+		labels = c("Low", "Medium", "High")
+	)
+
+
+library(ggplot2, warn.conflicts = FALSE)
+
+use_labels(mtcars, {
+	# '..data' is shortcut for all 'mtcars' data.frame inside expression
+	ggplot(..data) +
+		geom_point(aes(y = mpg, x = wt, color = qsec)) +
+		facet_grid(factor(am) ~ factor(vs))
+})
+```
+
+Responses for health questions are all categorical
+
+vars(
+mental_health_vars,
+borrow_food, reduce_food, 
+reduce_meals_lack_food, not_eat_lack_food,
+boorow_fuel, reduce_fuel, reduce_meals_lack_fuel, not_eat_lack_fuel,
+burn_plastic_frequency
+)
+choices: [weekly_choices]
+0	Never
+1	One or two days
+2	Three to four days
+3	Five to six days
+4	Every day
+
+vars(nonrespiratory_vars)
+choices: [illness_freq]
+0	Never
+1	A few  days (1-5 days) 
+2	Most days (5-12 days) 
+3	Almost every day (13-14 days) 
+
+vars(generalhealth_vars, respiratory_vars)
+choices: [yes_no_dk]	
+0	No
+1	Yes
+77	Refused
+99	Don't know
+
+```{r}
+survey_data_3 <-
+	survey_data_2 %>%
+	mutate(
+		# enumerator = as.factor(enumerator),
+		enumerator =
+			factor(
+				enumerator,
+				levels = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15), # why doesn't c(1:15) work?
+				labels =
+					c(
+						"Tunajjina Alam",
+						"Rayhanul Jannat",
+						"Shamima Akter",
+						"Morsida Akter",
+						"Way May Marma",
+						"Morselina Akter",
+						"Farhana Suma",
+						"Nishat Farjana",
+						"Arefa Khanam",
+						"Daliya Akter",
+						"Md. Jamilur Rahman",
+						"Md. Razu Ahmed",
+						"Mohammad Alamgir",
+						"Nazrin Akter",
+						"dummy"
+					)
+			)
 	) %>%
 	mutate_at(
 		vars(
-			income_cash_ngo, income_abroad, income_farming, income_own_business, 
-			income_wage_labor, income_skill_labor, income_handicrafts_tailoring, 
-			income_humanitarian_asst, income_selling_wood,     
-			happy, enjoyed_life, hopeful, 
-			bothered, feeling_down, self_worth, diff_concentrating, depressed, 
-			exert_effort,  life_failure, fearful, restless_sleep, less_talkative, 
-			lonely, unfriendly_people, crying_spells, sick, feeling_disliked, 
+			mental_health_vars, #noquote(mental_health_vars),
+			borrow_food, reduce_food, 
+			reduce_meals_lack_food, not_eat_lack_food,
+			borrow_fuel, reduce_fuel, reduce_meals_lack_fuel, not_eat_lack_fuel,
+			burn_plastic_frequency
+		),
+		funs(ordered),
+		levels = c(0, 1, 2, 3, 4),
+		labels = c("Never", "1-2 days/wk", "3-4 days/week", "5-6 days", "Every day")
+	) %>% 
+	mutate_at(
+		vars(nonrespiratory_vars), # all have "illness_freq" as choice set
+		funs(ordered),
+		levels = c(0, 1, 2, 3),
+		labels = c("Never", "A few days (1-2 days)", "Most days (5-12 days)", "Almost every day (13-14 days)")
+	) %>%
+	# Sep into "Never" and "Once or more" --> Note that this OVERWRITES nonrespiratory_vars
+	mutate_at(
+		vars(nonrespiratory_vars),
+		funs(
+			yn = case_when(
+				. == 0 ~ "Never",
+				TRUE ~ "1 or more days/wk"
+			)
+		)
+	) %>%
+	
+	mutate_at(
+		vars(generalhealth_vars, respiratory_vars), # all have "yes_no_dk" as choice set 
+		funs(ordered), # actual should be factor, but I want to know if ordered makes them show up in a consistent position in ggplot2
+		levels  = c(0, 1, 77, 99),
+		labels = c("No", "Yes", "Don't know", "Refused")
+	) %>%
+	# Sep into "Yes" and "No" - which includes don't know and refused
+		mutate_at(
+		vars(generalhealth_vars, respiratory_vars),
+		funs(
+			yn = case_when(
+				. == 1 ~ "Yes",
+				TRUE ~ "No" # Inclues don't know and refused
+			)
+		)
+	) %>%
+	
+	
+	mutate_at(
+		vars(
+			income_cash_ngo, income_abroad, income_farming, income_own_business,
+			income_wage_labor, income_skill_labor, income_handicrafts_tailoring,
+			income_humanitarian_asst, income_selling_wood,
+			happy, enjoyed_life, hopeful,
+			bothered, feeling_down, self_worth, diff_concentrating, depressed,
+			exert_effort,  life_failure, fearful, restless_sleep, less_talkative,
+			lonely, unfriendly_people, crying_spells, sick, feeling_disliked,
 			cant_get_going, suicidal_thoughts_30
 		),
 		list(as.numeric) # used to be funs()
-	) %>% 
+	) %>%
 	rowwise() %>%
 	mutate(
-		income = 
+		income =
 			sum(
-				income_cash_ngo, income_abroad, income_farming, income_own_business, 
-				income_wage_labor, income_skill_labor, income_handicrafts_tailoring, 
-				income_humanitarian_asst, income_selling_wood, 
+				income_cash_ngo, income_abroad, income_farming, income_own_business,
+				income_wage_labor, income_skill_labor, income_handicrafts_tailoring,
+				income_humanitarian_asst, income_selling_wood,
 				na.rm = TRUE
 			),
 		# Convert money spent in past 6 months to monthly estimate
@@ -151,10 +649,10 @@ survey_data <-
 		spent_medical_month = medical / 6,
 		spent_education_month = education / 6,
 		spent_other_month = other_expenditures / 6,
-		spent_total_month_with_6mo_monthly = 
+		spent_total_month_with_6mo_monthly =
 			sum(
 				spent_total_month,
-				spent_clothing_month, 
+				spent_clothing_month,
 				spent_shelter_month,
 				spent_celebrations_month,
 				spent_debt_month,
@@ -163,18 +661,18 @@ survey_data <-
 				spent_other_month,
 				na.rm = TRUE
 			),
-		target_child_resp_rate_measured_av = 
+		target_child_resp_rate_measured_av =
 			mean(
-				target_child_resp_rate_measured, 
-				target_child_resp_rate_measured_2, 
+				target_child_resp_rate_measured,
+				target_child_resp_rate_measured_2,
 				na.rm = TRUE,
-				trim = 0 # Don't usually need trim = 0 because that's the default, but not working without it. 
+				trim = 0 # Don't usually need trim = 0 because that's the default, but not working without it.
 			),
-		target_child_mid_arm_circ_measured_av = 
+		target_child_mid_arm_circ_measured_av =
 			mean(
-				target_child_mid_arm_circ, 
-				target_child_mid_arm_circ_2, 
-				target_child_mid_arm_circ_3, 
+				target_child_mid_arm_circ,
+				target_child_mid_arm_circ_2,
+				target_child_mid_arm_circ_3,
 				na.rm = TRUE,
 				trim = 0
 			)
@@ -196,7 +694,7 @@ survey_data <-
 	) %>%
 	mutate(
 		mattress_yn = if_else(mattress == 0, 0, 1),
-		blanket_yn = if_else(blanket == 0, 0, 1), 
+		blanket_yn = if_else(blanket == 0, 0, 1),
 		mosquito_net_yn = if_else(mosquito_net == 0, 0, 1),
 		solar_lamp_yn = if_else(solar_lamp == 0, 0, 1),
 		portable_lamp_yn = if_else(portable_lamp == 0, 0, 1),
@@ -216,60 +714,26 @@ survey_data <-
 		bicycle_yn = if_else(bicycle == 0, 0, 1),
 		chicken_duck_pigeon_yn = if_else(chicken_duck_pigeon == 0, 0, 1),
 		goat_sheep_yn = if_else(goat_sheep == 0, 0, 1),
-		cow_buffalo_yn = if_else(cow_buffalo == 0, 0, 1)
+		cow_buffalo_yn = if_else(cow_buffalo == 0, 0, 1),
+		suicidal_thoughts_yn = if_else(suicidal_thoughts_30 == 0, 0, 1)
 	)
 ```
 
-
-```{r vars}
-asset_vars <- 
-	c(
-		"mattress", "blanket", "mosquito_net", "solar_lamp", "portable_lamp",
-		"umbrella", "table", "chair_bench", "almirah_wardrobe_show_case", 
-		"electric_fan", "refrigerator",
-		"shovel", "sickle", "weaving_tool", "fish_net",
-		"mobile_phone", "smartphone", "radio", 
-		"television", "DVD_VCD_player", "computer_laptop", 
-		"bicycle", "motorcycle", "rickshaw_van", "CNG_tempo_electric_bike",
-		"chicken_duck_pigeon", "goat_sheep", "cow_buffalo"
-	)
+```{r}
+survey_data <- survey_data_3
+```
 
 
-spent_monthly_vars <- 
-	c(
-		"spent_food",
-		"spent_hh_items",
-		"spent_hygiene",
-		"spent_tobacco_pan",
-		"spent_transport",
-		"spent_phone",
-		"spent_total_month",
-		"spent_clothing_month", 
-		"spent_shelter_month",
-		"spent_celebrations_month",
-		"spent_debt_month",
-		"spent_medical_month",
-		"spent_education_month",
-		"spent_other_month"
-	)
+```{r}
 
-nonrespiratory_vars <- 
-	c("target_child_eye_red", "target_child_eye_itch",  "respondent_eye_red", "respondent_eye_sore", "respondent_headache", "respondent_backache")
-
-respiratory_vars <- 
-	c(
-		"target_child_cough", "target_child_resp_rate", "target_child_clinic_resp", "target_child_wheezing", "target_child_disturbed_sleep", "target_child_distrubed_speech", 
-		"respondent_cough", "respondent_resp_rate", "respondent_weight_loss", "respondent_wheezing", "respondent_disturbed_sleep", "respondent_disturbed_speech"
-	)
-
-generalhealth_vars <-  
-	c("target_child_fever", "target_child_weight_loss", "target_child_lethargy")
-
-MUAC_vars <- 
-	c("target_child_arm_measurements_yn", "target_child_mid_arm_circ_av")
-
-breathing_vars <- 
-	c("target_child_breathing_yn", "target_child_resp_rate_measured")
+# survey_data_2 %>%
+# 	mutate_at(
+# 		vars(generalhealth_vars, respiratory_vars), # all have "yes_no_dk" as choice set
+# 		funs(factor),
+# 		levels  = c(0, 1, 77, 99),
+# 		labels = c("No", "Yes", "Don't know", "Refused")
+# 	) %>%
+# 		select(target_child_cough)
 ```
 
 Practice that data viz!
@@ -351,6 +815,7 @@ table1FactorVars <-
 ## Create a TableOne object
 tab1 <- CreateTableOne(data = survey_data, vars = table1Vars, factorVars = table1FactorVars, strata = "study_arm")
 
+tab1
 # survey_data %>%
 #   tabyl(target_child_sex, study_arm) %>%
 #   # adorn_totals(c("row", "col")) %>%
@@ -363,25 +828,7 @@ tab1 <- CreateTableOne(data = survey_data, vars = table1Vars, factorVars = table
 ```
 
 
-Responses for health questions are all categorical
 
-nonrespiratory_vars
-[illness_freq]	0	Never
-[illness_freq]	1	A few  days (1-5 days) 
-[illness_freq]	2	Most days (5-12 days) 
-[illness_freq]	3	Almost every day (13-14 days) 
-
-generalhealth_vars
-[yes_no_dk]	0	No
-[yes_no_dk]	1	Yes
-[yes_no_dk]	77	Refused
-[yes_no_dk]	99	Don't know
-
-respiratory_vars
-[yes_no_dk]	0	No
-[yes_no_dk]	1	Yes
-[yes_no_dk]	77	Refused
-[yes_no_dk]	99	Don't know
 
 
 MAUC_vars: continuous numeric
@@ -393,33 +840,37 @@ Associate health variables with % of time using biomass AND whether or not ppl i
 hh_ppl_smoke
 
 ```{r child_health}
-# "target_child_arm_measurements_yn" and "target_child_breathing_yn" don't need to be in the table but the show refusal rates equal across groups
-
-survey_data %>%
-	select(nonrespiratory_vars, respiratory_vars, generalhealth_vars, MUAC_vars, breathing_vars) %>%
-	View()
-
-# survey_data %>%
-#   group_by(study_arm) %>%
-#   summarise_at(
-#     vars(
-#       nonrespiratory_vars, 
-#       generalhealth_vars,  
-#       respiratory_vars
-#     ), 
-#     list(mean), 
-#     na.rm = TRUE
-#   ) %>%
-#   gather(-study_arm, key = "var", value = "mean")
+# "target_child_arm_measurements_yn" and "target_child_breathing_yn" 
+# don't need to be in the table but the show refusal rates equal across groups
 
 ## Vector of variables to summarize
-table2Vars <- c(nonrespiratory_vars, respiratory_vars, generalhealth_vars, MUAC_vars, breathing_vars)
+table2Vars <- 
+	c(
+		nonrespiratory_vars, 
+		respiratory_vars, 
+		generalhealth_vars, 
+		MUAC_vars, 
+		breathing_vars
+	)
 
 ## Vector of categorical variables that need transformation
-table2FactorVars <- c(nonrespiratory_vars, respiratory_vars, generalhealth_vars)
+table2FactorVars <- 
+	c(
+		nonrespiratory_vars, 
+		respiratory_vars, 
+		generalhealth_vars
+	)
 
 ## Create a TableOne object
-tab2 <- CreateTableOne(data = survey_data, vars = table2Vars, factorVars = table2FactorVars, strata = "study_arm")
+tab2 <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table2Vars, 
+		factorVars = table2FactorVars, 
+		strata = "study_arm"
+	)
+
+tab2
 
 ```
 
@@ -455,30 +906,63 @@ tab3 <- CreateTableOne(data = survey_data, vars = table3Vars, strata = "study_ar
 
 
 
+
 ```{r mental_health}
 ## Vector of variables to summarize
 # Use Hmisc::Cs to quote each variable
-table4Vars <- 
-	Hmisc::Cs(
-		happy, enjoyed_life, hopeful,
-		bothered, no_appetite, feeling_down, self_worth,
-		diff_concentrating, depressed, exert_effort,
-		life_failure, fearful, restless_sleep, less_talkative, lonely, 
-		unfriendly_people, crying_spells, sick, feeling_disliked, 
-		cant_get_going, suicidal_thoughts_30
-	)
+table4Vars <- mental_health_vars
 
 # ## Vector of categorical variables that need transformation
-table4FactorVars <- table4Vars
+table4FactorVars <- mental_health_vars
 
 ## Create a TableOne object
-tab4 <- CreateTableOne(data = survey_data, vars = table4Vars, factorVars = table4FactorVars, strata = "study_arm")
+tab4 <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table4Vars, 
+		factorVars = table4FactorVars, 
+		strata = "study_arm"
+	)
+
+tab4
 
 ```
 
+## Suicidal thoughts
+```{r}
+survey_data %>%
+	tabyl(suicidal_thoughts_yn) 
 
-```{r SES}
+survey_data %>%
+	# filter(suicidal_thoughts_yn == 1) %>%
+	tabyl(camp_id, suicidal_thoughts_yn) %>%
+	# adorn_totals(c("row", "col")) %>%
+	adorn_percentages("row") %>%
+	adorn_pct_formatting(rounding = "half up", digits = 0) %>%
+	adorn_ns() %>%
+	adorn_title("combined") %>%
+	knitr::kable()
+```
+
+
 # Income
+```{r income}
+## Vector of variables to summarize
+# Use Hmisc::Cs to quote each variable
+table5Vars <- 
+	Hmisc::Cs(
+		income_cash_ngo, income_own_business, income_wage_labor, income_skill_labor, income_selling_wood, income_abroad, income_humanitarian_asst, income_handicrafts_tailoring, income_farming
+	)
+
+# ## Vector of categorical variables that need transformation
+# table5FactorVars <- table5Vars
+
+## Create a TableOne object
+# tab5 <- CreateTableOne(data = survey_data, vars = table5Vars, factorVars = table5FactorVars, strata = "study_arm")
+tab5 <- CreateTableOne(data = survey_data, vars = table5Vars, strata = "study_arm")
+
+
+# Visualize
 survey_data %>%
 	ggplot(aes(x = income)) +
 	geom_histogram(binwidth = 500) + 

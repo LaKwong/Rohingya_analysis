@@ -1,0 +1,2478 @@
+---
+title: "Rohingya_Analysis"
+author: "Laura Kwong"
+date: "11/06/2019"
+output:
+  word_document: default
+  html_document: default
+---
+R verion 3.6.1 downloaded 6 Nov 2019
+
+Errors:
+# There was MORE beef in the pre-intervention communities? Look for outliers/mistakes
+# fuel_ever_receive_lpg = 1 is not true for all the intervention hh and it should be!!
+# fuel_30_receive_lpg = 1 (%) is not all true for all the intervention hh!!
+# What is the "other fuel"  - need to ask in FGD
+
+# We can use this question and the price of firewood in August / Sep (when the survey was conducted), to estimate the number of bundles of firewood purchased, then get the average weight of 100 bundles to calculate demand
+buy_wood_cost 
+"In the past 30 days, how much money (taka) did you spend on firewood?"
+
+
+Considerations:
+
+# buy_wood_cost There are 4 hh above 3000 - check their hh size and if they are cooking for others or cooking to sell or boiling frequently
+
+"Who in your family gathers scraps/leaves/twigs?" - is this question interpreted as who has EVER gathered? Or only, who currently gathers? If so, do we think this is a problem?
+
+Add question: fuel_30_other is 10% of homes - what is this other?
+
+Almost 150 of 393 hh report burning plastic every day!  We need to better understand how many meals and if they are relying on plastic for all of the fuel they need or if it is used in combination with other fuel sources --> ask about how often they burned plastic
+
+1. fuel_ever_plastic 
+0. How often per week do you burn plastic? --> Need a recall period?
+2. When you burned plastic, was the only fuel you used plastic or did you combine plastic with other fuels?
+3. Why did you burn plastic
+Select_multiple
+a. We can't access other fuels
+b. If we burn plastic, we don't have to spend money buying other fuels 
+c. Burning plastic is a good way to get rid of trash
+d. Other
+Specify other
+
+Add questions about burning plastic to the focus group discussions - doesn't quite fit with any of the FGDs, but add to distribution and training. 
+
+Many hh have drudgery_most_diff == drudgery_second_most_diff == drudgery_easiest! Need to train that this shouldn't happen. 
+The drudgery questions were accidentally not required, but still why did many skip them?  
+Will probably have to throw this question out. = (
+
+The dates are in three different formats. 
+
+
+
+Need to factor everything -- look at DataChallenge notes
+
+Instead of refactoring or labeling everything, why not just have the label equal the choices tab "name"? Or does the name have to be a number. 
+
+I averaged as many MUAC measurements as were taken - is that right?
+
+Need to know what breathing rate and MUAC should be for each age group to know if ther are fewer out of the ordinary. 
+
+How does icddrb do PCR for wealth? Should have some way to see if the hh are different in terms of SES. 
+
+
+
+This script is to analyze the Rohingya LPG Assessment household survey data
+
+```{r setup, include=FALSE}
+library(tableone)
+library(janitor) #tabyl() adorn_...()
+library(dplyr)
+library(readxl)
+library(lubridate)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# source(here::here("file_paths.Rmd"))
+
+file_survey_data_base <- here::here("data", "raw", "RohingyaFuelMaster_today.csv")
+```
+
+```{r load_data, include=FALSE} 
+survey_data_base <- read.csv(file_survey_data_base)
+```
+
+# Coalsce values that were accidentally separated into two variables
+
+There are many vars that have <var>1 and <var>.1 becuase of a change in the survey xlm that happened after hh 9I100788I3_5992, the last pre-intervention hh, which was in camp 9 and surveyed 10/2. The first intervention hh, 4E184565Pp21_514, was in camp 4 and surveyed 10/10. This change happened when we 
+
+```{r, eval=FALSE}
+survey_data_base %>%
+	select(ends_with("1")) %>%
+	names()
+```
+
+```{r, eval=FALSE}
+survey_data_base %>%
+	select(rice_source, rice_source0, rice_source.0)
+```
+
+```{r}
+survey_data_1 <- 
+	survey_data_base %>%
+	mutate_at(
+		vars(
+			starts_with("rice_source"),
+			starts_with("bread_source"),
+			starts_with("corn_source"),
+			starts_with("potatoes_source"),
+			starts_with("lentils_source"),
+			starts_with("eggs_source"),
+			starts_with("dairy_source"),
+			starts_with("veggies_source"),
+			starts_with("fruit_source"),
+			starts_with("fish_source"),
+			starts_with("poultry_source"),
+			starts_with("goat_sheep_source"),
+			starts_with("oil_source"),
+			starts_with("sugar_source"),
+			starts_with("food_cant_afford_action"),
+			starts_with("fuel_cant_afford_action"),
+			starts_with("reduce_meals"),
+			starts_with("not_eat"),
+			starts_with("gather_scraps_dead")
+		),
+		list(as.numeric)
+	) %>%
+	
+	mutate(
+		reduce_meals1 = coalesce(reduce_meals1, reduce_meals.1),
+		
+		not_eat1 = coalesce(as.numeric(not_eat1), as.numeric(not_eat.1)),
+		
+		gather_scraps_dead1 = coalesce(gather_scraps_dead1, gather_scraps_dead.1),
+		
+		lpg_changes_lifestyle1 = coalesce(lpg_changes_lifestyle1, lpg_changes_lifestyle.1),
+		lpg_changes_lifestyle2 = coalesce(lpg_changes_lifestyle2, lpg_changes_lifestyle.2),
+		lpg_changes_lifestyle3 = coalesce(lpg_changes_lifestyle3, lpg_changes_lifestyle.3),
+		lpg_changes_lifestyle4 = coalesce(lpg_changes_lifestyle4, lpg_changes_lifestyle.4),
+		lpg_changes_lifestyle5 = coalesce(lpg_changes_lifestyle5, lpg_changes_lifestyle.5),
+		lpg_changes_lifestyle6 = coalesce(lpg_changes_lifestyle6, lpg_changes_lifestyle.6),
+		
+		food_cant_afford_action1 = coalesce(food_cant_afford_action1, food_cant_afford_action.1),
+		food_cant_afford_action2 = coalesce(food_cant_afford_action2, food_cant_afford_action.2),
+		food_cant_afford_action3 = coalesce(food_cant_afford_action3, food_cant_afford_action.3),
+		food_cant_afford_action4 = coalesce(food_cant_afford_action4, food_cant_afford_action.4),
+		food_cant_afford_action5 = coalesce(food_cant_afford_action5, food_cant_afford_action.5),
+		food_cant_afford_action6 = coalesce(food_cant_afford_action6, food_cant_afford_action.6),
+		food_cant_afford_action7 = coalesce(food_cant_afford_action7, food_cant_afford_action.7),
+		food_cant_afford_action8 = coalesce(food_cant_afford_action8, food_cant_afford_action.8),
+		food_cant_afford_action9 = coalesce(food_cant_afford_action9, food_cant_afford_action.9),
+		food_cant_afford_action10 = coalesce(food_cant_afford_action10, food_cant_afford_action.10),
+		food_cant_afford_action11 = coalesce(food_cant_afford_action11, food_cant_afford_action.11),
+		food_cant_afford_action12 = coalesce(food_cant_afford_action12, food_cant_afford_action.12),
+		food_cant_afford_action13 = coalesce(food_cant_afford_action13, food_cant_afford_action.13),
+		food_cant_afford_action66 = coalesce(food_cant_afford_action66, food_cant_afford_action.66),
+		food_cant_afford_action88 = coalesce(food_cant_afford_action88, food_cant_afford_action.88),
+		
+		fuel_cant_afford_action1 = coalesce(fuel_cant_afford_action1, fuel_cant_afford_action.1),
+		fuel_cant_afford_action2 = coalesce(fuel_cant_afford_action2, fuel_cant_afford_action.2),
+		fuel_cant_afford_action3 = coalesce(fuel_cant_afford_action3, fuel_cant_afford_action.3),
+		fuel_cant_afford_action4 = coalesce(fuel_cant_afford_action4, fuel_cant_afford_action.4),
+		fuel_cant_afford_action5 = coalesce(fuel_cant_afford_action5, fuel_cant_afford_action.5),
+		fuel_cant_afford_action6 = coalesce(fuel_cant_afford_action6, fuel_cant_afford_action.6),
+		fuel_cant_afford_action7 = coalesce(fuel_cant_afford_action7, fuel_cant_afford_action.7),
+		fuel_cant_afford_action8 = coalesce(fuel_cant_afford_action8, fuel_cant_afford_action.8),
+		fuel_cant_afford_action9 = coalesce(fuel_cant_afford_action9, fuel_cant_afford_action.9),
+		fuel_cant_afford_action10 = coalesce(fuel_cant_afford_action10, fuel_cant_afford_action.10),
+		fuel_cant_afford_action11 = coalesce(fuel_cant_afford_action11, fuel_cant_afford_action.11),
+		fuel_cant_afford_action12 = coalesce(fuel_cant_afford_action12, fuel_cant_afford_action.12),
+		fuel_cant_afford_action13 = coalesce(fuel_cant_afford_action13, fuel_cant_afford_action.13),
+		fuel_cant_afford_action66 = coalesce(fuel_cant_afford_action66, fuel_cant_afford_action.66),
+		fuel_cant_afford_action88 = coalesce(fuel_cant_afford_action88, fuel_cant_afford_action.88),
+		
+		rice_source0 = coalesce(rice_source0, rice_source.0),
+		rice_source1 = coalesce(rice_source1, rice_source.1),
+		rice_source2 = coalesce(rice_source2, rice_source.2),
+		rice_source3 = coalesce(rice_source3, rice_source.3),
+		rice_source4 = coalesce(rice_source4, rice_source.4),
+		rice_source5 = coalesce(rice_source5, rice_source.5),
+		rice_source6 = coalesce(rice_source6, rice_source.6),
+		rice_source7 = coalesce(rice_source7, rice_source.7),
+		rice_source8 = coalesce(rice_source8, rice_source.8),
+		rice_source9 = coalesce(rice_source9, rice_source.9),
+		rice_source66 = coalesce(rice_source66, rice_source.66),
+		
+		bread_source0 = coalesce(bread_source0, bread_source.0),
+		bread_source1 = coalesce(bread_source1, bread_source.1),
+		bread_source2 = coalesce(bread_source2, bread_source.2),
+		bread_source3 = coalesce(bread_source3, bread_source.3),
+		bread_source4 = coalesce(bread_source4, bread_source.4),
+		bread_source5 = coalesce(bread_source5, bread_source.5),
+		bread_source6 = coalesce(bread_source6, bread_source.6),
+		bread_source7 = coalesce(bread_source7, bread_source.7),
+		bread_source8 = coalesce(bread_source8, bread_source.8),
+		bread_source9 = coalesce(bread_source9, bread_source.9),
+		bread_source66 = coalesce(bread_source66, bread_source.66),
+		
+		corn_source0 = coalesce(corn_source0, corn_source.0),
+		corn_source1 = coalesce(corn_source1, corn_source.1),
+		corn_source2 = coalesce(corn_source2, corn_source.2),
+		corn_source3 = coalesce(corn_source3, corn_source.3),
+		corn_source4 = coalesce(corn_source4, corn_source.4),
+		corn_source5 = coalesce(corn_source5, corn_source.5),
+		corn_source6 = coalesce(corn_source6, corn_source.6),
+		corn_source7 = coalesce(corn_source7, corn_source.7),
+		corn_source8 = coalesce(corn_source8, corn_source.8),
+		corn_source9 = coalesce(corn_source9, corn_source.9),
+		corn_source66 = coalesce(corn_source66, corn_source.66),
+		
+		potatoes_source0 = coalesce(potatoes_source0, potatoes_source.0),
+		potatoes_source1 = coalesce(potatoes_source1, potatoes_source.1),
+		potatoes_source2 = coalesce(potatoes_source2, potatoes_source.2),
+		potatoes_source3 = coalesce(potatoes_source3, potatoes_source.3),
+		potatoes_source4 = coalesce(potatoes_source4, potatoes_source.4),
+		potatoes_source5 = coalesce(potatoes_source5, potatoes_source.5),
+		potatoes_source6 = coalesce(potatoes_source6, potatoes_source.6),
+		potatoes_source7 = coalesce(potatoes_source7, potatoes_source.7),
+		potatoes_source8 = coalesce(potatoes_source8, potatoes_source.8),
+		potatoes_source9 = coalesce(potatoes_source9, potatoes_source.9),
+		potatoes_source66 = coalesce(potatoes_source66, potatoes_source.66),
+		
+		lentils_source0 = coalesce(lentils_source0, lentils_source.0),
+		lentils_source1 = coalesce(lentils_source1, lentils_source.1),
+		lentils_source2 = coalesce(lentils_source2, lentils_source.2),
+		lentils_source3 = coalesce(lentils_source3, lentils_source.3),
+		lentils_source4 = coalesce(lentils_source4, lentils_source.4),
+		lentils_source5 = coalesce(lentils_source5, lentils_source.5),
+		lentils_source6 = coalesce(lentils_source6, lentils_source.6),
+		lentils_source7 = coalesce(lentils_source7, lentils_source.7),
+		lentils_source8 = coalesce(lentils_source8, lentils_source.8),
+		lentils_source9 = coalesce(lentils_source9, lentils_source.9),
+		lentils_source66 = coalesce(lentils_source66, lentils_source.66),
+		
+		eggs_source0 = coalesce(eggs_source0, eggs_source.0),
+		eggs_source1 = coalesce(eggs_source1, eggs_source.1),
+		eggs_source2 = coalesce(eggs_source2, eggs_source.2),
+		eggs_source3 = coalesce(eggs_source3, eggs_source.3),
+		eggs_source4 = coalesce(eggs_source4, eggs_source.4),
+		eggs_source5 = coalesce(eggs_source5, eggs_source.5),
+		eggs_source6 = coalesce(eggs_source6, eggs_source.6),
+		eggs_source7 = coalesce(eggs_source7, eggs_source.7),
+		eggs_source8 = coalesce(eggs_source8, eggs_source.8),
+		eggs_source9 = coalesce(eggs_source9, eggs_source.9),
+		eggs_source66 = coalesce(eggs_source66, eggs_source.66),
+		
+		dairy_source0 = coalesce(dairy_source0, dairy_source.0),
+		dairy_source1 = coalesce(dairy_source1, dairy_source.1),
+		dairy_source2 = coalesce(dairy_source2, dairy_source.2),
+		dairy_source3 = coalesce(dairy_source3, dairy_source.3),
+		dairy_source4 = coalesce(dairy_source4, dairy_source.4),
+		dairy_source5 = coalesce(dairy_source5, dairy_source.5),
+		dairy_source6 = coalesce(dairy_source6, dairy_source.6),
+		dairy_source7 = coalesce(dairy_source7, dairy_source.7),
+		dairy_source8 = coalesce(dairy_source8, dairy_source.8),
+		dairy_source9 = coalesce(dairy_source9, dairy_source.9),
+		dairy_source66 = coalesce(dairy_source66, dairy_source.66),
+		
+		veggies_source0 = coalesce(veggies_source0, veggies_source.0),
+		veggies_source1 = coalesce(veggies_source1, veggies_source.1),
+		veggies_source2 = coalesce(veggies_source2, veggies_source.2),
+		veggies_source3 = coalesce(veggies_source3, veggies_source.3),
+		veggies_source4 = coalesce(veggies_source4, veggies_source.4),
+		veggies_source5 = coalesce(veggies_source5, veggies_source.5),
+		veggies_source6 = coalesce(veggies_source6, veggies_source.6),
+		veggies_source7 = coalesce(veggies_source7, veggies_source.7),
+		veggies_source8 = coalesce(veggies_source8, veggies_source.8),
+		veggies_source9 = coalesce(veggies_source9, veggies_source.9),
+		veggies_source66 = coalesce(veggies_source66, veggies_source.66),
+		
+		fruit_source0 = coalesce(fruit_source0, fruit_source.0),
+		fruit_source1 = coalesce(fruit_source1, fruit_source.1),
+		fruit_source2 = coalesce(fruit_source2, fruit_source.2),
+		fruit_source3 = coalesce(fruit_source3, fruit_source.3),
+		fruit_source4 = coalesce(fruit_source4, fruit_source.4),
+		fruit_source5 = coalesce(fruit_source5, fruit_source.5),
+		fruit_source6 = coalesce(fruit_source6, fruit_source.6),
+		fruit_source7 = coalesce(fruit_source7, fruit_source.7),
+		fruit_source8 = coalesce(fruit_source8, fruit_source.8),
+		fruit_source9 = coalesce(fruit_source9, fruit_source.9),
+		fruit_source66 = coalesce(fruit_source66, fruit_source.66),
+		
+		fish_source0 = coalesce(fish_source0, fish_source.0),
+		fish_source1 = coalesce(fish_source1, fish_source.1),
+		fish_source2 = coalesce(fish_source2, fish_source.2),
+		fish_source3 = coalesce(fish_source3, fish_source.3),
+		fish_source4 = coalesce(fish_source4, fish_source.4),
+		fish_source5 = coalesce(fish_source5, fish_source.5),
+		fish_source6 = coalesce(fish_source6, fish_source.6),
+		fish_source7 = coalesce(fish_source7, fish_source.7),
+		fish_source8 = coalesce(fish_source8, fish_source.8),
+		fish_source9 = coalesce(fish_source9, fish_source.9),
+		fish_source66 = coalesce(fish_source66, fish_source.66),
+		
+		poultry_source0 = coalesce(poultry_source0, poultry_source.0),
+		poultry_source1 = coalesce(poultry_source1, poultry_source.1),
+		poultry_source2 = coalesce(poultry_source2, poultry_source.2),
+		poultry_source3 = coalesce(poultry_source3, poultry_source.3),
+		poultry_source4 = coalesce(poultry_source4, poultry_source.4),
+		poultry_source5 = coalesce(poultry_source5, poultry_source.5),
+		poultry_source6 = coalesce(poultry_source6, poultry_source.6),
+		poultry_source7 = coalesce(poultry_source7, poultry_source.7),
+		poultry_source8 = coalesce(poultry_source8, poultry_source.8),
+		poultry_source9 = coalesce(poultry_source9, poultry_source.9),
+		poultry_source66 = coalesce(poultry_source66, poultry_source.66),
+		
+		goat_sheep_source0 = coalesce(goat_sheep_source0, goat_sheep_source.0),
+		goat_sheep_source1 = coalesce(goat_sheep_source1, goat_sheep_source.1),
+		goat_sheep_source2 = coalesce(goat_sheep_source2, goat_sheep_source.2),
+		goat_sheep_source3 = coalesce(goat_sheep_source3, goat_sheep_source.3),
+		goat_sheep_source4 = coalesce(goat_sheep_source4, goat_sheep_source.4),
+		goat_sheep_source5 = coalesce(goat_sheep_source5, goat_sheep_source.5),
+		goat_sheep_source6 = coalesce(goat_sheep_source6, goat_sheep_source.6),
+		goat_sheep_source7 = coalesce(goat_sheep_source7, goat_sheep_source.7),
+		goat_sheep_source8 = coalesce(goat_sheep_source8, goat_sheep_source.8),
+		goat_sheep_source9 = coalesce(goat_sheep_source9, goat_sheep_source.9),
+		goat_sheep_source66 = coalesce(goat_sheep_source66, goat_sheep_source.66),
+		
+		beef_source0 = coalesce(beef_source0, beef_source.0),
+		beef_source1 = coalesce(beef_source1, beef_source.1),
+		beef_source2 = coalesce(beef_source2, beef_source.2),
+		beef_source3 = coalesce(beef_source3, beef_source.3),
+		beef_source4 = coalesce(beef_source4, beef_source.4),
+		beef_source5 = coalesce(beef_source5, beef_source.5),
+		beef_source6 = coalesce(beef_source6, beef_source.6),
+		beef_source7 = coalesce(beef_source7, beef_source.7),
+		beef_source8 = coalesce(beef_source8, beef_source.8),
+		beef_source9 = coalesce(beef_source9, beef_source.9),
+		beef_source66 = coalesce(beef_source66, beef_source.66),
+		
+		oil_source0 = coalesce(oil_source0, oil_source.0),
+		oil_source1 = coalesce(oil_source1, oil_source.1),
+		oil_source2 = coalesce(oil_source2, oil_source.2),
+		oil_source3 = coalesce(oil_source3, oil_source.3),
+		oil_source4 = coalesce(oil_source4, oil_source.4),
+		oil_source5 = coalesce(oil_source5, oil_source.5),
+		oil_source6 = coalesce(oil_source6, oil_source.6),
+		oil_source7 = coalesce(oil_source7, oil_source.7),
+		oil_source8 = coalesce(oil_source8, oil_source.8),
+		oil_source9 = coalesce(oil_source9, oil_source.9),
+		oil_source66 = coalesce(oil_source66, oil_source.66),
+		
+		sugar_source0 = coalesce(sugar_source0, sugar_source.0),
+		sugar_source1 = coalesce(sugar_source1, sugar_source.1),
+		sugar_source2 = coalesce(sugar_source2, sugar_source.2),
+		sugar_source3 = coalesce(sugar_source3, sugar_source.3),
+		sugar_source4 = coalesce(sugar_source4, sugar_source.4),
+		sugar_source5 = coalesce(sugar_source5, sugar_source.5),
+		sugar_source6 = coalesce(sugar_source6, sugar_source.6),
+		sugar_source7 = coalesce(sugar_source7, sugar_source.7),
+		sugar_source8 = coalesce(sugar_source8, sugar_source.8),
+		sugar_source9 = coalesce(sugar_source9, sugar_source.9),
+		sugar_source66 = coalesce(sugar_source66, sugar_source.66)
+	)
+```
+
+```{r beautify_data}
+survey_data_2 <-
+	survey_data_1 %>%
+	filter(consent == "OK") %>%
+	select(
+		-X,
+		-starts_with("generated_note"),
+		-starts_with("reserved_name")
+	) %>%
+	
+	# clean up values
+	mutate(
+		camp_id = 
+			str_to_upper(str_trim(camp_id)), # could use stringr in case there are other mis-matches
+		subblock_id = 
+			str_to_upper(str_trim(subblock_id)) # could use stringr in case there are other mis-matches
+	) %>%
+	
+	# rename vars
+	# rename(newname, oldname) renames (not copy and rename new column)
+	rename( 
+		respondent_resp_rate  = resp_rate_reported_respondant,       
+		respondent_weight_loss = weight_loss_reported_respondant,
+		
+		# coping strategies food and fuel sections both have "reduce_meals" and "not_eat" vars
+		reduce_meals_lack_food = reduce_meals,
+		not_eat_lack_food = not_eat,
+		reduce_meals_lack_fuel = reduce_meals1,
+		not_eat_lack_fuel = not_eat1,
+		
+		# "Are the scraps/leaves/twigs you collect all dead?" has the variable gather_scraps_dead 
+		# "Is all the wood you collect all dead?" accidentally has the variable gather_scraps_dead.1
+		gather_wood_dead = gather_scraps_dead1, # there's also a gather_scraps_dead.1
+		
+		# When you depend on wood for cooking fuel, then how many times in one week do you go to the forest to collect wood?
+		collect_wood_times_week = times_wood_day,
+		reason_forest_defecation = reason_forest_defacation,
+		cook_to_sell_percent = cook_to_sell,
+		cook_sell_days_week = cook_sell_yesterday
+	)
+```
+
+```{r vars}
+asset_vars <- 
+	c(
+		"mattress", "blanket", "mosquito_net", "solar_lamp", "portable_lamp",
+		"umbrella", "table", "chair_bench", "almirah_wardrobe_show_case", 
+		"electric_fan", "refrigerator",
+		"shovel", "sickle", "weaving_tool", "fish_net",
+		"mobile_phone", "smartphone", "radio", 
+		"television", "DVD_VCD_player", "computer_laptop", 
+		"bicycle", "motorcycle", "rickshaw_van", "CNG_tempo_electric_bike",
+		"chicken_duck_pigeon", "goat_sheep", "cow_buffalo"
+	)
+
+spent_monthly_vars <- 
+	c(
+		"spent_food",
+		"buy_wood_cost", # "In the past 30 days, how much money (taka) did you spend on firewood?"
+		"spent_hh_items",
+		"spent_hygiene",
+		"spent_tobacco_pan",
+		"spent_transport",
+		"spent_phone",
+		"spent_clothing_month", 
+		"spent_shelter_month",
+		"spent_celebrations_month",
+		"spent_debt_month",
+		"spent_medical_month",
+		"spent_education_month",
+		"spent_other_month"
+	)
+# 		"spent_total_month",
+
+nonrespiratory_vars <- 
+	c(
+		"target_child_eye_red", "target_child_eye_itch",  
+		"respondent_eye_red", "respondent_eye_itch", "respondent_eye_sore",
+		"respondent_headache", "respondent_backache"
+	)
+
+nonrespiratory_vars_yn <-  
+	map_chr(nonrespiratory_vars, ~ paste0(., "_yn"))
+
+respiratory_vars <- 
+	c(
+		"target_child_cough", "target_child_resp_rate", 
+		"target_child_clinic_resp", "target_child_wheezing", 
+		"target_child_disturbed_sleep", "target_child_distrubed_speech", 
+		"respondent_cough", "respondent_resp_rate", 
+		"respondent_weight_loss", "respondent_wheezing", 
+		"respondent_disturbed_sleep", "respondent_disturbed_speech"
+	)
+
+respiratory_vars_yn <-  
+	map_chr(respiratory_vars, ~ paste0(., "_yn"))
+
+generalhealth_vars <-  
+	c(
+		"target_child_fever", "target_child_weight_loss", "target_child_lethargy"
+	)
+
+generalhealth_vars_yn <-  
+	map_chr(generalhealth_vars, ~ paste0(., "_yn"))
+
+MUAC_vars <- 
+	c(
+		"target_child_arm_measurements_yn", "target_child_mid_arm_circ_av"
+	)
+
+breathing_vars <- 
+	c(
+		"target_child_breathing_yn", "target_child_resp_rate_measured"
+	)
+
+mental_health_good_vars <- c("happy", "enjoyed_life", "self_worth", "hopeful")
+
+mental_health_bad_vars <- 
+	c(
+		"bothered", "sick", 
+		"no_appetite", "diff_concentrating", "restless_sleep",
+		"exert_effort", "less_talkative", 
+		"feeling_disliked", "unfriendly_people",
+		"fearful", "lonely", "crying_spells",
+		"cant_get_going", "feeling_down", "life_failure", "depressed" 
+	)
+
+mental_health_vars <-
+	c(mental_health_good_vars, mental_health_bad_vars, "suicidal_thoughts_30")
+
+
+mental_health_good_twodays_vars <-  
+	map_chr(mental_health_good_vars, ~ paste0(., "_twodays"))
+
+mental_health_bad_twodays_vars <-  
+	map_chr(mental_health_bad_vars, ~ paste0(., "_twodays"))
+
+mental_health_twodays_vars <-
+	c(mental_health_good_twodays_vars, mental_health_bad_twodays_vars, "suicidal_thoughts_30")
+
+# could have used ends_with(...) to make this much shorter!!
+harassment_vars <-     
+	c(
+		"insult_hh", "collect_wood_insult_hh", "buy_wood_insult_hh", "receive_wood_insult_hh", "receive_lpg_insult_hh", "buy_lpg_insult_hh", "receive_crh_insult_hh", "buy_crh_insult_hh",
+		"belittle_hh", "collect_wood_belittle_hh", "buy_wood_belittle_hh", "receive_wood_belittle_hh", "receive_lpg_belittle_hh", "buy_lpg_belittle_hh", "receive_crh_belittle_hh", "buy_crh_belittle_hh",
+		"scare_hh", "collect_wood_scare_hh", "buy_wood_scare_hh", "receive_wood_scare_hh", "receive_lpg_scare_hh", "buy_lpg_scare_hh", "receive_crh_scare_hh", "buy_crh_scare_hh",
+		"push_hh", "collect_wood_push_hh", "buy_wood_push_hh", "receive_wood_push_hh", "receive_lpg_push_hh", "buy_lpg_push_hh", "receive_crh_push_hh", "buy_crh_push_hh",
+		"hit_hh", "collect_wood_hit_hh", "buy_wood_hit_hh", "receive_wood_hit_hh", "receive_lpg_hit_hh", "buy_lpg_hit_hh", "receive_crh_hit_hh", "buy_crh_hit_hh",
+		"kick_hh", "collect_wood_kick_hh", "buy_wood_kick_hh", "receive_wood_kick_hh", "receive_lpg_kick_hh", "buy_lpg_kick_hh", "receive_crh_kick_hh", "buy_crh_kick_hh",
+		"choke_hh", "collect_wood_choke_hh", "buy_wood_choke_hh", "receive_wood_choke_hh", "receive_lpg_choke_hh", "buy_lpg_choke_hh", "receive_crh_choke_hh", "buy_crh_choke_hh",
+		"weapon_hh", "collect_wood_weapon_hh", "buy_wood_weapon_hh", "receive_wood_weapon_hh", "receive_lpg_weapon_hh", "buy_lpg_weapon_hh", "receive_crh_weapon_hh", "buy_crh_weapon_hh",
+		"sex_lang_hh", "collect_wood_sex_lang_hh", "buy_wood_sex_lang_hh", "receive_wood_sex_lang_hh", "receive_lpg_sex_lang_hh", "buy_lpg_sex_lang_hh", "receive_crh_sex_lang_hh", "buy_crh_sex_lang_hh",
+		"sex_contact_hh", "collect_wood_sex_contact_hh", "buy_wood_sex_contact_hh", "receive_wood_sex_contact_hh", "receive_lpg_sex_contact_hh", "buy_lpg_sex_contact_hh", "receive_crh_sex_contact_hh", "buy_crh_sex_contact_hh",
+		"sex_rumor_hh", "collect_wood_sex_rumor_hh", "buy_wood_sex_rumor_hh", "receive_wood_sex_rumor_hh", "receive_lpg_sex_rumor_hh", "buy_lpg_sex_rumor_hh", "receive_crh_sex_rumor_hh", "buy_crh_sex_rumor_hh",
+		"clothing_pull_hh", "collect_wood_clothing_pull_hh", "buy_wood_clothing_pull_hh", "receive_wood_clothing_pull_hh", "receive_lpg_clothing_pull_hh", "buy_lpg_clothing_pull_hh", "receive_crh_clothing_pull_hh", "buy_crh_clothing_pull_hh",
+		"sex_corner_hh", "collect_wood_sex_corner_hh", "buy_wood_sex_corner_hh", "receive_wood_sex_corner_hh", "receive_lpg_sex_corner_hh", "buy_lpg_sex_corner_hh", "receive_crh_sex_corner_hh", "buy_crh_sex_corner_hh"
+	)
+
+harassment_vars_by_group <-
+	c(
+		"collect_wood_insult_m", "collect_wood_insult_w", "collect_wood_insult_b", "collect_wood_insult_g",
+		"receive_wood_insult_m", "receive_wood_insult_w", "receive_wood_insult_b", "receive_wood_insult_g",
+		"buy_wood_insult_m", "buy_wood_insult_w", "buy_wood_insult_b", "buy_wood_insult_g",
+		"receive_lpg_insult_m", "receive_lpg_insult_w", "receive_lpg_insult_b", "receive_lpg_insult_g",
+		"buy_lpg_insult_m", "buy_lpg_insult_w", "buy_lpg_insult_b", "buy_lpg_insult_g",
+		"receive_crh_insult_m", "receive_crh_insult_w", "receive_crh_insult_b", "receive_crh_insult_g",
+		"buy_crh_insult_m", "buy_crh_insult_w", "buy_crh_insult_b", "buy_crh_insult_g",
+		
+		"collect_wood_belittle_m", "collect_wood_belittle_w", "collect_wood_belittle_b", "collect_wood_belittle_g",
+		"receive_wood_belittle_m", "receive_wood_belittle_w", "receive_wood_belittle_b", "receive_wood_belittle_g",
+		"buy_wood_belittle_m", "buy_wood_belittle_w", "buy_wood_belittle_b", "buy_wood_belittle_g",
+		"receive_lpg_belittle_m", "receive_lpg_belittle_w", "receive_lpg_belittle_b", "receive_lpg_belittle_g",
+		"buy_lpg_belittle_m", "buy_lpg_belittle_w", "buy_lpg_belittle_b", "buy_lpg_belittle_g",
+		"receive_crh_belittle_m", "receive_crh_belittle_w", "receive_crh_belittle_b", "receive_crh_belittle_g",
+		"buy_crh_belittle_m", "buy_crh_belittle_w", "buy_crh_belittle_b", "buy_crh_belittle_g",
+		
+		"collect_wood_scare_m", "collect_wood_scare_w", "collect_wood_scare_b", "collect_wood_scare_g",
+		"receive_wood_scare_m", "receive_wood_scare_w", "receive_wood_scare_b", "receive_wood_scare_g",
+		"buy_wood_scare_m", "buy_wood_scare_w", "buy_wood_scare_b", "buy_wood_scare_g",
+		"receive_lpg_scare_m", "receive_lpg_scare_w", "receive_lpg_scare_b", "receive_lpg_scare_g",
+		"buy_lpg_scare_m", "buy_lpg_scare_w", "buy_lpg_scare_b", "buy_lpg_scare_g",
+		"receive_crh_scare_m", "receive_crh_scare_w", "receive_crh_scare_b", "receive_crh_scare_g",
+		"buy_crh_scare_m", "buy_crh_scare_w", "buy_crh_scare_b", "buy_crh_scare_g",
+		
+		"collect_wood_push_m", "collect_wood_push_w", "collect_wood_push_b", "collect_wood_push_g",
+		"receive_wood_push_m", "receive_wood_push_w", "receive_wood_push_b", "receive_wood_push_g",
+		"buy_wood_push_m", "buy_wood_push_w", "buy_wood_push_b", "buy_wood_push_g",
+		"receive_lpg_push_m", "receive_lpg_push_w", "receive_lpg_push_b", "receive_lpg_push_g",
+		"buy_lpg_push_m", "buy_lpg_push_w", "buy_lpg_push_b", "buy_lpg_push_g",
+		"receive_crh_push_m", "receive_crh_push_w", "receive_crh_push_b", "receive_crh_push_g",
+		"buy_crh_push_m", "buy_crh_push_w", "buy_crh_push_b", "buy_crh_push_g",
+		
+		"collect_wood_hit_m", "collect_wood_hit_w", "collect_wood_hit_b", "collect_wood_hit_g",
+		"receive_wood_hit_m", "receive_wood_hit_w", "receive_wood_hit_b", "receive_wood_hit_g",
+		"buy_wood_hit_m", "buy_wood_hit_w", "buy_wood_hit_b", "buy_wood_hit_g",
+		"receive_lpg_hit_m", "receive_lpg_hit_w", "receive_lpg_hit_b", "receive_lpg_hit_g",
+		"buy_lpg_hit_m", "buy_lpg_hit_w", "buy_lpg_hit_b", "buy_lpg_hit_g",
+		"receive_crh_hit_m", "receive_crh_hit_w", "receive_crh_hit_b", "receive_crh_hit_g",
+		"buy_crh_hit_m", "buy_crh_hit_w", "buy_crh_hit_b", "buy_crh_hit_g",
+		
+		"collect_wood_kick_m", "collect_wood_kick_w", "collect_wood_kick_b", "collect_wood_kick_g",
+		"receive_wood_kick_m", "receive_wood_kick_w", "receive_wood_kick_b", "receive_wood_kick_g",
+		"buy_wood_kick_m", "buy_wood_kick_w", "buy_wood_kick_b", "buy_wood_kick_g",
+		"receive_lpg_kick_m", "receive_lpg_kick_w", "receive_lpg_kick_b", "receive_lpg_kick_g",
+		"buy_lpg_kick_m", "buy_lpg_kick_w", "buy_lpg_kick_b", "buy_lpg_kick_g",
+		"receive_crh_kick_m", "receive_crh_kick_w", "receive_crh_kick_b", "receive_crh_kick_g",
+		"buy_crh_kick_m", "buy_crh_kick_w", "buy_crh_kick_b", "buy_crh_kick_g",
+		
+		"collect_wood_choke_m", "collect_wood_choke_w", "collect_wood_choke_b", "collect_wood_choke_g",
+		"receive_wood_choke_m", "receive_wood_choke_w", "receive_wood_choke_b", "receive_wood_choke_g",
+		"buy_wood_choke_m", "buy_wood_choke_w", "buy_wood_choke_b", "buy_wood_choke_g",
+		"receive_lpg_choke_m", "receive_lpg_choke_w", "receive_lpg_choke_b", "receive_lpg_choke_g",
+		"buy_lpg_choke_m", "buy_lpg_choke_w", "buy_lpg_choke_b", "buy_lpg_choke_g",
+		"receive_crh_choke_m", "receive_crh_choke_w", "receive_crh_choke_b", "receive_crh_choke_g",
+		"buy_crh_choke_m", "buy_crh_choke_w", "buy_crh_choke_b", "buy_crh_choke_g",
+		
+		"collect_wood_weapon_m", "collect_wood_weapon_w", "collect_wood_weapon_b", "collect_wood_weapon_g",
+		"receive_wood_weapon_m", "receive_wood_weapon_w", "receive_wood_weapon_b", "receive_wood_weapon_g",
+		"buy_wood_weapon_m", "buy_wood_weapon_w", "buy_wood_weapon_b", "buy_wood_weapon_g",
+		"receive_lpg_weapon_m", "receive_lpg_weapon_w", "receive_lpg_weapon_b", "receive_lpg_weapon_g",
+		"buy_lpg_weapon_m", "buy_lpg_weapon_w", "buy_lpg_weapon_b", "buy_lpg_weapon_g",
+		"receive_crh_weapon_m", "receive_crh_weapon_w", "receive_crh_weapon_b", "receive_crh_weapon_g",
+		"buy_crh_weapon_m", "buy_crh_weapon_w", "buy_crh_weapon_b", "buy_crh_weapon_g",
+		
+		"collect_wood_sex_lang_m", "collect_wood_sex_lang_w", "collect_wood_sex_lang_b", "collect_wood_sex_lang_g",
+		"receive_wood_sex_lang_m", "receive_wood_sex_lang_w", "receive_wood_sex_lang_b", "receive_wood_sex_lang_g",
+		"buy_wood_sex_lang_m", "buy_wood_sex_lang_w", "buy_wood_sex_lang_b", "buy_wood_sex_lang_g",
+		"receive_lpg_sex_lang_m", "receive_lpg_sex_lang_w", "receive_lpg_sex_lang_b", "receive_lpg_sex_lang_g",
+		"buy_lpg_sex_lang_m", "buy_lpg_sex_lang_w", "buy_lpg_sex_lang_b", "buy_lpg_sex_lang_g",
+		"receive_crh_sex_lang_m", "receive_crh_sex_lang_w", "receive_crh_sex_lang_b", "receive_crh_sex_lang_g",
+		"buy_crh_sex_lang_m", "buy_crh_sex_lang_w", "buy_crh_sex_lang_b", "buy_crh_sex_lang_g",
+		
+		"collect_wood_sex_contact_m", "collect_wood_sex_contact_w", "collect_wood_sex_contact_b", "collect_wood_sex_contact_g",
+		"receive_wood_sex_contact_m", "receive_wood_sex_contact_w", "receive_wood_sex_contact_b", "receive_wood_sex_contact_g",
+		"buy_wood_sex_contact_m", "buy_wood_sex_contact_w", "buy_wood_sex_contact_b", "buy_wood_sex_contact_g",
+		"receive_lpg_sex_contact_m", "receive_lpg_sex_contact_w", "receive_lpg_sex_contact_b", "receive_lpg_sex_contact_g",
+		"buy_lpg_sex_contact_m", "buy_lpg_sex_contact_w", "buy_lpg_sex_contact_b", "buy_lpg_sex_contact_g",
+		"receive_crh_sex_contact_m", "receive_crh_sex_contact_w", "receive_crh_sex_contact_b", "receive_crh_sex_contact_g",
+		"buy_crh_sex_contact_m", "buy_crh_sex_contact_w", "buy_crh_sex_contact_b", "buy_crh_sex_contact_g",
+		
+		"collect_wood_sex_rumor_m", "collect_wood_sex_rumor_w", "collect_wood_sex_rumor_b", "collect_wood_sex_rumor_g",
+		"receive_wood_sex_rumor_m", "receive_wood_sex_rumor_w", "receive_wood_sex_rumor_b", "receive_wood_sex_rumor_g",
+		"buy_wood_sex_rumor_m", "buy_wood_sex_rumor_w", "buy_wood_sex_rumor_b", "buy_wood_sex_rumor_g",
+		"receive_lpg_sex_rumor_m", "receive_lpg_sex_rumor_w", "receive_lpg_sex_rumor_b", "receive_lpg_sex_rumor_g",
+		"buy_lpg_sex_rumor_m", "buy_lpg_sex_rumor_w", "buy_lpg_sex_rumor_b", "buy_lpg_sex_rumor_g",
+		"receive_crh_sex_rumor_m", "receive_crh_sex_rumor_w", "receive_crh_sex_rumor_b", "receive_crh_sex_rumor_g",
+		"buy_crh_sex_rumor_m", "buy_crh_sex_rumor_w", "buy_crh_sex_rumor_b", "buy_crh_sex_rumor_g",
+		
+		"collect_wood_clothing_pull_m", "collect_wood_clothing_pull_w", "collect_wood_clothing_pull_b", "collect_wood_clothing_pull_g",
+		"receive_wood_clothing_pull_m", "receive_wood_clothing_pull_w", "receive_wood_clothing_pull_b", "receive_wood_clothing_pull_g",
+		"buy_wood_clothing_pull_m", "buy_wood_clothing_pull_w", "buy_wood_clothing_pull_b", "buy_wood_clothing_pull_g",
+		"receive_lpg_clothing_pull_m", "receive_lpg_clothing_pull_w", "receive_lpg_clothing_pull_b", "receive_lpg_clothing_pull_g",
+		"buy_lpg_clothing_pull_m", "buy_lpg_clothing_pull_w", "buy_lpg_clothing_pull_b", "buy_lpg_clothing_pull_g",
+		"receive_crh_clothing_pull_m", "receive_crh_clothing_pull_w", "receive_crh_clothing_pull_b", "receive_crh_clothing_pull_g",
+		"buy_crh_clothing_pull_m", "buy_crh_clothing_pull_w", "buy_crh_clothing_pull_b", "buy_crh_clothing_pull_g",
+		
+		"collect_wood_sex_corner_m", "collect_wood_sex_corner_w", "collect_wood_sex_corner_b", "collect_wood_sex_corner_g",
+		"receive_wood_sex_corner_m", "receive_wood_sex_corner_w", "receive_wood_sex_corner_b", "receive_wood_sex_corner_g",
+		"buy_wood_sex_corner_m", "buy_wood_sex_corner_w", "buy_wood_sex_corner_b", "buy_wood_sex_corner_g",
+		"receive_lpg_sex_corner_m", "receive_lpg_sex_corner_w", "receive_lpg_sex_corner_b", "receive_lpg_sex_corner_g",
+		"buy_lpg_sex_corner_m", "buy_lpg_sex_corner_w", "buy_lpg_sex_corner_b", "buy_lpg_sex_corner_g",
+		"receive_crh_sex_corner_m", "receive_crh_sex_corner_w", "receive_crh_sex_corner_b", "receive_crh_sex_corner_g",
+		"buy_crh_sex_corner_m", "buy_crh_sex_corner_w", "buy_crh_sex_corner_b", "buy_crh_sex_corner_g"
+	)
+
+harassment_vars_yn <-  
+	map_chr(harassment_vars, ~ paste0(., "_yn"))
+
+harassment_vars_by_group_yn <-  
+	map_chr(harassment_vars_by_group, ~ paste0(., "_yn"))
+```
+
+
+```{r, eval = FALSE}
+# Factor
+mtcars = mtcars %>%
+	apply_labels(
+		mpg = "Miles/(US) gallon"
+	)
+
+fct_reorder() # Reordering a factor by another variable.
+fct_infreq() # Reordering a factor by the frequency of values.
+fct_relevel() # Changing the order of a factor by hand.
+fct_lump() # Collapsing the least/most frequent values of a factor into “other”. n = min num of obs to collapse
+
+mydata$v1 <-
+	mydata %>%
+	factor(
+		v1,
+		levels = c(1,2,3),
+		labels = c("red", "blue", "green")
+	)
+
+mydata$v1 <-
+	mydata %>%
+	ordered(
+		y,
+		levels = c(1,3, 5),
+		labels = c("Low", "Medium", "High")
+	)
+
+
+library(ggplot2, warn.conflicts = FALSE)
+
+use_labels(mtcars, {
+	# '..data' is shortcut for all 'mtcars' data.frame inside expression
+	ggplot(..data) +
+		geom_point(aes(y = mpg, x = wt, color = qsec)) +
+		facet_grid(factor(am) ~ factor(vs))
+})
+```
+
+Responses for health questions are all categorical
+
+vars(
+mental_health_vars,
+borrow_food, reduce_food, 
+reduce_meals_lack_food, not_eat_lack_food,
+boorow_fuel, reduce_fuel, reduce_meals_lack_fuel, not_eat_lack_fuel,
+burn_plastic_frequency
+)
+choices: [weekly_choices]
+0	Never
+1	One or two days
+2	Three to four days
+3	Five to six days
+4	Every day
+
+vars(nonrespiratory_vars)
+choices: [illness_freq]
+0	Never
+1	A few  days (1-5 days) 
+2	Most days (5-12 days) 
+3	Almost every day (13-14 days) 
+
+vars(generalhealth_vars, respiratory_vars)
+choices: [yes_no_dk]	
+0	No
+1	Yes
+77	Refused
+99	Don't know
+
+vars(harassment_vars)
+choices: [frequency_times]
+0	Never
+1	Once
+2	Twice
+3	Three times
+4	More than three times
+
+
+
+
+# factor electricity - yes or no
+
+
+```{r}
+survey_data_3 <-
+	survey_data_2 %>%
+	mutate(
+		study_arm = 
+			factor(
+				study_arm,
+				levels = c(1, 2),
+				labels = c("pre-intervention", "intervention")
+			), 
+		# enumerator = as.factor(enumerator),
+		enumerator =
+			factor(
+				enumerator,
+				levels = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15), # why doesn't c(1:15) work?
+				labels =
+					c(
+						"Tunajjina Alam",
+						"Rayhanul Jannat",
+						"Shamima Akter",
+						"Morsida Akter",
+						"Way May Marma",
+						"Morselina Akter",
+						"Farhana Suma",
+						"Nishat Farjana",
+						"Arefa Khanam",
+						"Daliya Akter",
+						"Md. Jamilur Rahman",
+						"Md. Razu Ahmed",
+						"Mohammad Alamgir",
+						"Nazrin Akter",
+						"dummy"
+					)
+			)
+	) %>%
+	mutate_at(
+		vars(
+			mental_health_vars, #noquote(mental_health_vars),
+			borrow_food, reduce_food, 
+			reduce_meals_lack_food, not_eat_lack_food,
+			borrow_fuel, reduce_fuel, reduce_meals_lack_fuel, not_eat_lack_fuel,
+			burn_plastic_frequency
+		),
+		funs(ordered),
+		levels = c(0, 1, 2, 3, 4),
+		labels = c("Never", "1-2 days/wk", "3-4 days/wk", "5-6 days/wk", "Every day")
+	) %>%
+	mutate_at(
+		vars(
+			mental_health_vars
+		),
+		funs(twodays = factor),
+		levels = c("Never", "1-2 days/wk", "3-4 days/wk", "5-6 days/wk", "Every day"), # why isn't this the previous levels?
+		labels = c("2 or fewer days/wk", "2 or fewer days/wk", "3 or more days/week", "3 or more days/week", "3 or more days/week")
+	) %>%
+	mutate_at(
+		vars(mental_health_twodays_vars),
+		funs(ordered),
+		levels = c("2 or fewer days/wk", "3 or more days/week")
+	) %>%
+	
+	mutate(
+		suicidal_thoughts_30 = 
+			ordered(
+				suicidal_thoughts_30,
+				levels = c(0, 1, 2, 3, 4),
+				labels = c("Never", "1-2 days/wk", "3-4 days/wk", "5-6 days/wk", "Every day")
+			),
+		suicidal_thoughts_30_yn = 
+			factor(
+				suicidal_thoughts_30,
+				levels = c("Never", "1-2 days/wk", "3-4 days/wk", "5-6 days/wk", "Every day"), # why isn't this the previous levels?
+				labels = c("No", "Yes", "Yes", "Yes", "Yes")
+			),
+		suicidal_thoughts_30_yn = 
+			factor(
+				suicidal_thoughts_30_yn,
+				levels = c("No", "Yes")
+			) 
+	) %>%
+	
+	mutate_at(
+		vars(nonrespiratory_vars), # all have "illness_freq" as choice set
+		funs(ordered),
+		levels = c(0, 1, 2, 3),
+		labels = 
+			c(
+				"Never",
+				"A few days (1-2 days)",
+				"Most days (5-12 days)",
+				"Almost every day (13-14 days)"
+			)
+	) %>%
+	# Sep into "Never" and "Once or more" --> Note that this OVERWRITES nonrespiratory_vars
+	mutate_at(
+		vars(nonrespiratory_vars),
+		funs(
+			yn = case_when(
+				. == "Never" ~ "No",
+				TRUE ~ "Yes"
+			)
+		)
+	) %>%
+	mutate_at(
+		vars(nonrespiratory_vars_yn),
+		funs(ordered),
+		levels = c("No", "Yes")
+	) %>%
+	
+	mutate_at(
+		vars(generalhealth_vars, respiratory_vars), # all have "yes_no_dk" as choice set 
+		funs(factor), # actual should be factor, but I want to know if ordered makes them show up in a consistent position in ggplot2
+		levels  = c(0, 77, 99, 1),
+		labels = c("No", "Don't know", "Refused", "Yes")
+	) %>%
+	# Sep into "Yes" and "No" - which includes don't know and refused
+	mutate_at(
+		vars(generalhealth_vars, respiratory_vars),
+		funs(
+			yn = case_when(
+				. == "Yes" ~ "Yes",
+				TRUE ~ "No" # Inclues don't know and refused
+			)
+		)
+	) %>%
+	mutate_at(
+		vars(generalhealth_vars_yn, respiratory_vars_yn),
+		funs(ordered),
+		levels = c("No", "Yes")
+	) %>%
+	
+	mutate_at(vars(harassment_vars), na_if, 77) %>% # 77 = refused
+	mutate_at(vars(harassment_vars), na_if, 99) %>% # 99 = don't know
+	mutate_at(
+		vars(harassment_vars, harassment_vars_by_group), 
+		funs(factor), 
+		levels  = c(0, 1, 2, 3, 4),
+		labels = c("Never", "Once", "Twice", "Three times", "Four or more times")
+	) %>%
+	mutate_at(
+		vars(harassment_vars, harassment_vars_by_group),
+		funs(
+			yn = case_when(
+				. == "Never" ~ "Never",
+				TRUE ~ "Once or more" # Inclues don't know and refused
+			)
+		)
+	) %>%
+	mutate_at(
+		vars(harassment_vars_yn, harassment_vars_by_group_yn),
+		funs(ordered),
+		levels = c("Never", "Once or more")
+	) %>%
+		
+	mutate_at(
+		vars(
+			income_cash_ngo, income_abroad, income_farming, income_own_business,
+			income_wage_labor, income_skill_labor, income_handicrafts_tailoring,
+			income_humanitarian_asst, income_selling_wood
+		),
+		list(as.numeric) # used to be funs()
+	) %>%
+	rowwise() %>%
+	mutate(
+		income =
+			sum(
+				income_cash_ngo, income_abroad, income_farming, income_own_business,
+				income_wage_labor, income_skill_labor, income_handicrafts_tailoring,
+				income_humanitarian_asst, income_selling_wood,
+				na.rm = TRUE
+			),
+		# Convert money spent in past 6 months to monthly estimate
+		spent_clothing_month = clothing / 6,
+		spent_shelter_month = shelter / 6,
+		spent_celebrations_month = celebrations / 6,
+		spent_debt_month = debt / 6,
+		spent_medical_month = medical / 6,
+		spent_education_month = education / 6,
+		spent_other_month = other_expenditures / 6,
+		spent_total_month_with_6mo_monthly =
+			sum(
+				spent_total_month,
+				spent_clothing_month,
+				spent_shelter_month,
+				spent_celebrations_month,
+				spent_debt_month,
+				spent_medical_month,
+				spent_education_month,
+				spent_other_month,
+				na.rm = TRUE
+			),
+		target_child_resp_rate_measured_av =
+			mean(
+				target_child_resp_rate_measured,
+				target_child_resp_rate_measured_2,
+				na.rm = TRUE,
+				trim = 0 # Don't usually need trim = 0 because that's the default, but not working without it.
+			),
+		target_child_mid_arm_circ_measured_av =
+			mean(
+				target_child_mid_arm_circ,
+				target_child_mid_arm_circ_2,
+				target_child_mid_arm_circ_3,
+				na.rm = TRUE,
+				trim = 0
+			)
+	) %>%
+	ungroup() %>%
+	mutate(
+		target_child_resp_rate_measured_strange =
+			case_when(
+				target_child_resp_rate < 10 ~ "low",
+				target_child_resp_rate > 20 ~ "high",
+				TRUE ~ "normal"
+			),
+		target_child_mid_arm_circ_measured_strange =
+			case_when(
+				target_child_mid_arm_circ_measured_av < 80 ~ "low",
+				target_child_mid_arm_circ_measured_av > 1500 ~ "high",
+				TRUE ~ "normal"
+			)
+	) %>%
+	mutate(
+		mattress_yn = if_else(mattress == 0, 0, 1),
+		blanket_yn = if_else(blanket == 0, 0, 1),
+		mosquito_net_yn = if_else(mosquito_net == 0, 0, 1),
+		solar_lamp_yn = if_else(solar_lamp == 0, 0, 1),
+		portable_lamp_yn = if_else(portable_lamp == 0, 0, 1),
+		umbrella_yn = if_else(umbrella == 0, 0, 1),
+		table_yn = if_else(table == 0, 0, 1),
+		chair_bench_yn = if_else(chair_bench == 0, 0, 1),
+		almirah_wardrobe_show_case_yn = if_else(almirah_wardrobe_show_case == 0, 0, 1),
+		electric_fan_yn = if_else(electric_fan == 0, 0, 1),
+		refrigerator_yn = if_else(refrigerator == 0, 0, 1),
+		shovel_yn = if_else(shovel == 0, 0, 1),
+		sickle_yn = if_else(sickle == 0, 0, 1),
+		weaving_tool_yn = if_else(weaving_tool == 0, 0, 1),
+		fish_net_yn = if_else(fish_net == 0, 0, 1),
+		mobile_phone_yn = if_else(mobile_phone == 0, 0, 1),
+		smartphone_yn = if_else(smartphone == 0, 0, 1),
+		radio_yn = if_else(radio == 0, 0, 1),
+		bicycle_yn = if_else(bicycle == 0, 0, 1),
+		chicken_duck_pigeon_yn = if_else(chicken_duck_pigeon == 0, 0, 1),
+		goat_sheep_yn = if_else(goat_sheep == 0, 0, 1),
+		cow_buffalo_yn = if_else(cow_buffalo == 0, 0, 1)
+	)
+```
+
+
+```{r}
+survey_data <- survey_data_3
+```
+
+
+Make this into a function then use map_dfr to apply it to all of the column of interst
+
+survey_data %>%
+ggplot(aes(x = income)) +
+geom_histogram(binwidth = 500) + 
+geom_vline(aes(xintercept = mean(income, na.rm = TRUE), col = 'red'), size = 2, show.legend = TRUE) + 
+geom_vline(aes(xintercept = median(income, na.rm = TRUE), col = 'blue'), size = 2, show.legend = TRUE) +
+scale_colour_manual("Legend", values = c(red = "red", blue = "blue"), labels = c("mean", "median"))
+
+
+
+
+```{r}
+# names(survey_data %>% select(ends_with("_hh")))
+# str(survey_data)
+```
+
+# Descriptive statistics
+[47] "hh_size"                             "hh_size_u2mo"                       
+[49] "hh_size_2mo_u5"                      "hh_size_5_18"                       
+[51] "hh_size_o18"                         "hh_size_o40"
+
+Use the very convenient R package tableone! 
+https://cran.r-project.org/web/packages/tableone/vignettes/introduction.html
+
+```{r Table1}
+
+## Vector of variables to summarize
+table1Vars <- 
+	c(
+		"target_child_sex", 
+		"target_child_months", 
+		"hh_size", "hh_size_2mo_u5", "hh_size_u2mo", 
+		"hh_ppl_smoke",
+		"electricity",
+		"mattress_yn", "blanket_yn", "mosquito_net_yn", 
+		"solar_lamp_yn", "portable_lamp_yn",
+		"umbrella_yn", 
+		"chair_bench_yn", "table_yn",
+		"electric_fan_yn", 
+		"shovel_yn", "sickle_yn", "weaving_tool_yn", 
+		"mobile_phone_yn", "smartphone_yn", "radio_yn", 
+		"chicken_duck_pigeon_yn", 
+		"income", 
+		"income_home_garden",
+		"income_cash_ngo", "income_own_business", "income_wage_labor", 
+		"income_skill_labor", "income_selling_wood", "income_abroad", 
+		"income_humanitarian_asst", "income_handicrafts_tailoring", "income_farming",
+		"spent_total_month",
+		"spent_clothing_month",
+		"spent_shelter_month",
+		"spent_celebrations_month",
+		"spent_debt_month",
+		"spent_medical_month",
+		"spent_education_month",
+		"spent_other_month"
+	)
+
+## Vector of categorical variables that need transformation
+table1FactorVars <- 
+	c(
+		"target_child_sex", "electricity", 	
+		"blanket_yn", "mattress_yn", "mosquito_net_yn", 
+		"solar_lamp_yn", "portable_lamp_yn",
+		"umbrella_yn", 
+		"chair_bench_yn", "table_yn", "almirah_wardrobe_show_case_yn", 
+		"electric_fan_yn", 
+		"shovel_yn", "sickle_yn", "weaving_tool_yn",
+		"mobile_phone_yn", "smartphone_yn", "radio_yn",	
+		"chicken_duck_pigeon_yn",
+		"income_home_garden"
+	)
+
+## Create a TableOne object
+tab1 <- CreateTableOne(data = survey_data, vars = table1Vars, factorVars = table1FactorVars, strata = "study_arm")
+
+tab1
+# survey_data %>%
+#   tabyl(target_child_sex, study_arm) %>%
+#   # adorn_totals(c("row", "col")) %>%
+#   adorn_percentages("row") %>% 
+#   adorn_pct_formatting(rounding = "half up", digits = 0) %>%
+#   adorn_ns() %>%
+#   adorn_title("combined") %>%
+#   knitr::kable()
+
+```
+
+
+
+
+
+
+
+MAUC_vars: continuous numeric
+breathing vars: continuous numeric
+hh_ppl_smoke: continuous numeric
+
+Associate health variables with % of time using biomass AND whether or not ppl in hh smoke
+
+hh_ppl_smoke
+
+```{r child_health}
+# "target_child_arm_measurements_yn" and "target_child_breathing_yn" 
+# don't need to be in the table but the show refusal rates equal across groups
+
+## Vector of variables to summarize
+table2Vars <- 
+	c(
+		nonrespiratory_vars, 
+		respiratory_vars, 
+		generalhealth_vars, 
+		MUAC_vars, 
+		breathing_vars
+	)
+
+## Vector of categorical variables that need transformation
+table2FactorVars <- 
+	c(
+		nonrespiratory_vars, 
+		respiratory_vars, 
+		generalhealth_vars
+	)
+
+## Create a TableOne object
+tab2 <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table2Vars, 
+		factorVars = table2FactorVars, 
+		strata = "study_arm"
+	)
+
+tab2
+
+```
+
+
+```{r child_health_yn}
+# "target_child_arm_measurements_yn" and "target_child_breathing_yn" 
+# don't need to be in the table but the show refusal rates equal across groups
+
+## Vector of variables to summarize
+table2_yn_Vars <- 
+	c(
+		nonrespiratory_vars_yn, 
+		respiratory_vars_yn, 
+		generalhealth_vars_yn, 
+		MUAC_vars, 
+		breathing_vars
+	)
+
+## Vector of categorical variables that need transformation
+table2_yn_FactorVars <- 
+	c(
+		nonrespiratory_vars_yn, 
+		respiratory_vars_yn, 
+		generalhealth_vars_yn
+	)
+
+## Create a TableOne object
+tab2_yn <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table2_yn_Vars, 
+		factorVars = table2_yn_FactorVars, 
+		strata = "study_arm"
+	)
+
+tab2_yn
+
+```
+
+
+## Objective_health: were there fewer respiratory rates that were out of the ordinary? Were there fewer MUAC that were low? 
+
+Need table of categories
+```{r objective_health}
+survey_data %>%
+	group_by(study_arm) %>%
+	summarise_at(
+		vars(
+			hours_inside, #hours_outside, 
+			target_child_hours_inside # target_child_hours_outside, 
+		), 
+		list(mean), 
+		na.rm = TRUE
+	) 
+
+## Vector of variables to summarize
+table3Vars <- c("hours_inside", "target_child_hours_inside")
+
+# ## Vector of categorical variables that need transformation
+# table3FactorVars <- c()
+
+## Create a TableOne object
+# tab3 <- CreateTableOne(data = survey_data, vars = table3Vars, factorVars = table3FactorVars, strata = "study_arm")
+tab3 <- CreateTableOne(data = survey_data, vars = table3Vars, strata = "study_arm")
+
+
+tab3
+```
+
+
+
+
+```{r mental_health}
+## Vector of variables to summarize
+table4_good_Vars <- mental_health_good_vars
+
+# ## Vector of categorical variables that need transformation
+table4_good_FactorVars <- mental_health_good_vars
+
+## Create a TableOne object
+tab4_good <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table4_good_Vars, 
+		factorVars = table4_good_FactorVars, 
+		strata = "study_arm"
+	)
+
+
+
+## Vector of variables to summarize
+table4_bad_Vars <- c(mental_health_bad_vars, "suicidal_thoughts_30")
+
+# ## Vector of categorical variables that need transformation
+table4_bad_FactorVars <- c(mental_health_bad_vars, "suicidal_thoughts_30")
+
+## Create a TableOne object
+tab4_bad <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table4_bad_Vars, 
+		factorVars = table4_bad_FactorVars, 
+		strata = "study_arm"
+	)
+
+
+# Group by <= 2 days or >=3 days to account for accuracy of response
+
+## Vector of variables to summarize
+table4_good_twodays_Vars <- mental_health_good_twodays_vars
+
+# ## Vector of categorical variables that need transformation
+table4_good_twodays_FactorVars <- mental_health_good_twodays_vars
+
+## Create a TableOne object
+tab4_good_twodays <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table4_good_twodays_Vars, 
+		factorVars = table4_good_twodays_FactorVars, 
+		strata = "study_arm"
+	)
+
+
+## Vector of variables to summarize
+table4_bad_twodays_Vars <- c(mental_health_bad_twodays_vars, "suicidal_thoughts_30_yn")
+
+# ## Vector of categorical variables that need transformation
+table4_bad_twodays_FactorVars <- c(mental_health_bad_twodays_vars, "suicidal_thoughts_30_yn")
+
+## Create a TableOne object
+tab4_bad_twodays <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table4_bad_twodays_Vars, 
+		factorVars = table4_bad_twodays_FactorVars, 
+		strata = "study_arm"
+	)
+
+tab4_good
+tab4_good_twodays
+tab4_bad
+tab4_bad_twodays
+```
+
+## Suicidal thoughts
+```{r}
+survey_data %>%
+	tabyl(suicidal_thoughts_yn) 
+
+survey_data %>%
+	# filter(suicidal_thoughts_yn == 1) %>%
+	tabyl(camp_id, suicidal_thoughts_yn) %>%
+	# adorn_totals(c("row", "col")) %>%
+	adorn_percentages("row") %>%
+	adorn_pct_formatting(rounding = "half up", digits = 0) %>%
+	adorn_ns() %>%
+	adorn_title("combined") %>%
+	knitr::kable()
+
+
+hh_negative_thoughts_to_visit <-
+	survey_data %>%
+	filter(suicidal_thoughts_yn == 1) %>%
+	select(hh_id, camp_id, subblock_id, name_respondent) 
+
+write.csv(hh_negative_thoughts_to_visit, "")
+```
+
+
+# Income
+```{r income}
+## Vector of variables to summarize
+# Use Hmisc::Cs to quote each variable
+table5Vars <- 
+	Hmisc::Cs(
+		income_cash_ngo, income_own_business, income_wage_labor, income_skill_labor, income_selling_wood, income_abroad, income_humanitarian_asst, income_handicrafts_tailoring, income_farming
+	)
+
+# ## Vector of categorical variables that need transformation
+# table5FactorVars <- table5Vars
+
+## Create a TableOne object
+# tab5 <- CreateTableOne(data = survey_data, vars = table5Vars, factorVars = table5FactorVars, strata = "study_arm")
+tab5 <- CreateTableOne(data = survey_data, vars = table5Vars, strata = "study_arm")
+
+tab5
+
+# Visualize
+survey_data %>%
+	ggplot(aes(x = income)) +
+	geom_histogram(binwidth = 500) + 
+	geom_vline(aes(xintercept = mean(income, na.rm = TRUE), col = 'red'), size = 2, show.legend = TRUE) + 
+	geom_vline(aes(xintercept = median(income, na.rm = TRUE), col = 'blue'), size = 2, show.legend = TRUE) +
+	scale_colour_manual("Legend", values = c(red = "red", blue = "blue"), labels = c("mean", "median"))
+
+survey_data %>%
+	summarise_at(vars(income, spent_total_month, debt), list(mean = mean, median = median), na.rm = TRUE)
+
+survey_data %>%
+	summarise_at(
+		vars(
+			income_cash_ngo, income_own_business, income_wage_labor, income_skill_labor, income_selling_wood, income_abroad, income_humanitarian_asst, income_handicrafts_tailoring, income_farming
+		),
+		list(mean), 
+		na.rm = TRUE
+	) %>%
+	gather(key = "var")
+
+# Percentage of hh making any money from selling wood
+survey_data %>%
+	count(income_selling_wood != 0)
+# Only 3 hh are making money selling wood
+
+# Of those selling wood, the income from selling wood as a percent of total income
+# Moot since this is only 3 percent of hh
+
+# Electricity
+survey_data %>%
+	select(electricity) %>%
+	table()
+
+# Garden
+survey_data %>%
+	select(income_home_garden) %>%
+	table()
+```
+
+
+# PCA to determine weath quintiles
+
+How do I consider that these assets have differnt value?
+
+Determine the percentage of hh that do not have the basics, no productive tools, no animals
+
+asset_vars <- 
+c(
+"mattress", "blanket", "mosquito_net", "solar_lamp", "portable_lamp",
+"umbrella", "table", "chair_bench", "almirah_wardrobe_show_case", 
+"electric_fan", "refrigerator",
+"shovel", "sickle", "weaving_tool", "fish_net",
+"mobile_phone", "smartphone", "radio", 
+"television", "DVD_VCD_player", "computer_laptop", 
+"bicycle", "motorcycle", "rickshaw_van", "CNG_tempo_electric_bike",
+"chicken_duck_pigeon", "goat_sheep", "cow_buffalo"
+)
+
+Asked about but did not include in asset assessment because so few people had them: c("fish_net","almirah_wardrobe_show_case_yn", "refrigerator", "television", "DVD_VCD_player", "computer_laptop", "bicycle", "motorcycle", "rickshaw_van", "CNG_tempo_electric_bike")
+```{r}
+
+
+```
+
+
+# Expenses
+```{r expenses}
+
+
+survey_data %>%
+	summarise_at(
+		vars(spent_monthly_vars),
+		list(mean = mean),
+		na.rm = TRUE
+	) %>%
+	gather(key = "var", value = "mean")
+
+
+# Put in order from largest to smallest
+
+survey_data %>%
+	group_by(study_arm) %>%
+	summarise_at(
+		vars(spent_monthly_vars),
+		list(mean = mean),
+		na.rm = TRUE
+	) %>%
+	gather(-study_arm, key = "var", value = "mean") %>%
+	mutate(
+		var = as.factor(var),
+		var = fct_reorder(var, mean, .desc = TRUE)
+	) %>%
+	arrange(desc(mean)) %>%
+	ggplot(aes(x = var, y = mean)) +
+	geom_col() + 
+	theme(
+		axis.text.x = element_text(angle = 90)
+	) + 
+	facet_grid( ~ study_arm)
+
+survey_data %>%
+	ggplot(aes(x = spent_total_month_with_6mo_monthly)) +
+	geom_histogram() + 
+	geom_vline(aes(xintercept = mean(spent_total_month_with_6mo_monthly, na.rm = TRUE), col = 'red'), size = 2, show.legend = TRUE) + 
+	geom_vline(aes(xintercept = median(spent_total_month_with_6mo_monthly, na.rm = TRUE), col = 'blue'), size = 2, show.legend = TRUE) +
+	scale_colour_manual("Legend", values = c(red = "red", blue = "blue"), labels = c("mean", "median"))
+# 
+# var_viz_by_histogram <- function(var_quoted) {
+#   var = unquote(var_quoted)
+#   survey_data %>%
+#     ggplot(aes(x = var)) +
+#     geom_histogram() +
+#     geom_vline(aes(xintercept = mean(var, na.rm = TRUE), col = 'red'), size = 2, show.legend = TRUE) +
+#     geom_vline(aes(xintercept = median(var, na.rm = TRUE), col = 'blue'), size = 2, show.legend = TRUE) +
+#     scale_colour_manual("Legend", values = c(red = "red", blue = "blue"), labels = c("mean", "median"))
+# }
+# 
+# var_viz_by_histogram(var = "spent_food")
+# Quoting problem
+# 
+# unquote("spent_food")
+
+# How much was spent on food? 
+survey_data %>%
+	ggplot(aes(x = spent_food)) +
+	geom_histogram() + 
+	geom_vline(aes(xintercept = mean(spent_food, na.rm = TRUE), col = 'red'), size = 2, show.legend = TRUE) + 
+	geom_vline(aes(xintercept = median(spent_food, na.rm = TRUE), col = 'blue'), size = 2, show.legend = TRUE) +
+	scale_colour_manual("Legend", values = c(red = "red", blue = "blue"), labels = c("mean", "median"))
+
+# How much was spent on tobacco? 
+survey_data %>%
+	ggplot(aes(x = spent_tobacco_pan)) +
+	geom_histogram() + 
+	geom_vline(aes(xintercept = mean(spent_tobacco_pan, na.rm = TRUE), col = 'red'), size = 2, show.legend = TRUE) + 
+	geom_vline(aes(xintercept = median(spent_tobacco_pan, na.rm = TRUE), col = 'blue'), size = 2, show.legend = TRUE) +
+	scale_colour_manual("Legend", values = c(red = "red", blue = "blue"), labels = c("mean", "median"))
+```
+After food, the largest expenditure was wood (for pre-intervention hh), then tobacco and pan
+
+
+
+# Housing material - no sense in factoring this into wealth since will be the same for almost all
+```{r}
+
+```
+
+
+
+# Ventilation
+```{r}
+# How many hh have no windows?
+survey_data %>%
+	count(window_number == 0)
+# Almost 80% of  hh have no windows!
+
+# Of hh that have at least one window, what is the average number of windows?
+survey_data %>%
+	filter(window_number > 0) %>%
+	summarise_at(vars(window_number), list(mean = mean), na.rm = TRUE)
+
+# Of hh that have at least one window, how many have cross-ventilation (with either another window or a door)?
+survey_data %>%
+	filter(window_number > 0) %>%
+	select(window_door_wall) %>%
+	table()
+```
+
+
+# Credit
+```{r}
+# Percent that have access to credit
+survey_data %>%
+	count(credit_access == 1)
+
+# Percent of hh that have access to credit thorugh specific mechanisms
+
+# Refactor so that dk = 0
+
+survey_data %>%
+	summarise_at(
+		vars(
+			credit_relatives, credit_charities, credit_village_head, credit_lender, credit_bank, credit_cooperative
+		),
+		list(mean),
+		na.rm = TRUE
+	)
+
+# Use credit to borrow money for food in past 3 months
+survey_data %>%
+	count(credit_borrow_money_food == 1)
+
+# Percent that have used mobile money
+survey_data %>%
+	count(mobile_money == 1)
+```
+
+
+# Food consumption patterns
+In the past 7 days, how many days did you eat each of the following foods?
+```{r}
+## Vector of variables to summarize
+# Use Hmisc::Cs to quote each variable
+table6Vars <- 
+	Hmisc::Cs(
+		rice_adults_week,
+		bread_adults_week,
+		potatoes_adults_week,
+		lentils_adults_week, 
+		dairy_adults_week,
+		veggies_adults_week,
+		fruit_adults_week,
+		fish_adults_week,
+		poultry_adults_week,
+		goat_sheep_adults_week,
+		beef_adults_week,
+		oil_adults_week,
+		sugar_adults_week
+	)
+
+## Vector of categorical variables that need transformation
+# table6FactorVars <- table6Vars
+
+# Create a TableOne object
+tab6 <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table6Vars, 
+		# factorVars = table6FactorVars, 
+		strata = "study_arm"
+	)
+
+tab6
+
+```
+
+
+
+
+# Food source
+
+What % of people reply that they receive this food from aid? from the market?...what do we want to see? That people are getting more from the market? ...this could be because they are saving money since they don't have to purchase fuel
+
+Check what is in the WPF guides.
+
+# Coping necessity and strategies
+```{r}
+survey_data %>%
+	select(food_insufficient_nutrition) %>%
+	table()
+
+survey_data %>%
+	select(food_didnt_want) %>%
+	table()
+
+survey_data %>%
+	select(food_cant_afford_2wk) %>%
+	table()
+
+# What did you do?
+# food_cant_afford_action
+
+# Most difficult 
+# Rank by the percentage of hh that report the most difficult
+
+# food_cant_afford_difficult
+
+# Of those that report having to do this action, the weekly frequency
+
+# Least difficult
+# Rank by the percentage of hh that report the least difficult
+
+# food_cant_afford_easiest
+
+# Of those that report having to do this action, the weekly frequency
+
+# Repeat for fuel
+```
+
+# Fuel sources
+Percentage of hh that have used the following fuel sources in the past 30 days
+
+```{r fuel_use}
+survey_data %>%
+	count(fuel_ever_collect_wood == 1)
+# Why are 393 NA? because we added the question late?
+
+## Vector of variables to summarize
+# Use Hmisc::Cs to quote each variable
+table7Vars <- 
+	Hmisc::Cs(
+			fuel_ever_scraps,
+			fuel_ever_collect_wood,
+			fuel_ever_receive_wood,
+			fuel_ever_buy_wood,
+			fuel_ever_receive_lpg,
+			fuel_ever_buy_lpg,
+			fuel_ever_receive_crh,
+			fuel_ever_buy_crh,
+			fuel_ever_other
+	)
+
+## Vector of categorical variables that need transformation
+table7FactorVars <- table7Vars
+
+# Create a TableOne object
+tab7 <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table7Vars, 
+		factorVars = table7FactorVars, 
+		strata = "study_arm"
+	)
+
+tab7
+
+## Vector of variables to summarize
+# Use Hmisc::Cs to quote each variable
+table8Vars <- 
+	Hmisc::Cs(
+			fuel_30_scraps,
+			fuel_30_collect_wood,
+			fuel_30_receive_wood,
+			fuel_30_buy_wood,
+			fuel_30_receive_lpg,
+			fuel_30_buy_lpg,
+			fuel_30_receive_crh,
+			fuel_30_buy_crh,
+			fuel_30_other
+	)
+
+## Vector of categorical variables that need transformation
+table8FactorVars <- table8Vars
+
+# Create a TableOne object
+tab8 <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table8Vars, 
+		factorVars = table8FactorVars, 
+		strata = "study_arm"
+	)
+
+tab8
+```
+
+# What is the "other fuel"  - need to ask in FGD
+
+```{r fuel_plastic}
+survey_data %>%
+	tabyl(burn_plastic_frequency, study_arm)
+
+# Almost 150 of 393 hh report burning househols every day! We need to better understand how many meals and if they are relying on plastic for all of the fuel they need or if it is used in combination with other fuel sources
+
+```
+
+# Who gathers fuel
+
+Not mutally exclusive
+```{r}
+## Vector of variables to summarize
+# Use Hmisc::Cs to quote each variable
+table9Vars <- 
+	Hmisc::Cs(
+			gather_scraps_w, gather_scraps_m, gather_scraps_g, gather_scraps_b,
+			collect_wood_w, collect_wood_m, collect_wood_g, collect_wood_b,
+			buy_wood_w, buy_wood_m, buy_wood_g, buy_wood_b,
+			receive_wood_w, receive_wood_m, receive_wood_g, receive_wood_b,
+			receive_lpg_w, receive_lpg_m, receive_lpg_g, receive_lpg_b,
+			buy_lpg_w, buy_lpg_m, buy_lpg_g, buy_lpg_b,
+			receive_crh_w, receive_crh_m, receive_crh_g, receive_crh_b,
+			buy_crh_w, buy_crh_m, buy_crh_g, buy_crh_b
+	)
+
+## Vector of categorical variables that need transformation
+table9FactorVars <- table9Vars
+
+# Create a TableOne object
+tab9 <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table9Vars, 
+		factorVars = table9FactorVars, 
+		strata = "study_arm"
+	)
+
+tab9
+
+# # Add N for each fuel type
+# survey_data %>%
+# 	summarise_at(
+# 		vars(
+# 			gather_scraps_w, gather_scraps_m, gather_scraps_g, gather_scraps_b,
+# 			collect_wood_w, collect_wood_m, collect_wood_g, collect_wood_b,
+# 			buy_wood_w, buy_wood_m, buy_wood_g, buy_wood_b,
+# 			receive_wood_w, receive_wood_m, receive_wood_g, receive_wood_b,
+# 			receive_lpg_w, receive_lpg_m, receive_lpg_g, receive_lpg_b,
+# 			buy_lpg_w, buy_lpg_m, buy_lpg_g, buy_lpg_b,
+# 			receive_crh_w, receive_crh_m, receive_crh_g, receive_crh_b,
+# 			buy_crh_w, buy_crh_m, buy_crh_g, buy_crh_b
+# 		),
+# 		list(mean),
+# 		na.rm = TRUE
+# 	) %>%
+# 	gather(key = "gather_who", value = "pc_hh")
+# 
+# # Use kable to make this into four columns with women, men, girls, and boys at the top. 
+
+```
+
+Men are primarily responsible for gathering all types of fuel; we should see that more women are getting LPG as some camps (like 8w) require that women procure the LPG. 
+
+# Firewood collection
+```{r}
+survey_data %>%
+	filter(!is.na(collect_wood_forest_start)) %>%
+	select(
+		collect_wood_forest_start,
+		collect_wood_forest_stop
+	) 
+
+# # Hm, not sure how to add this to the data frame
+# survey_data <-
+#   mutate(
+#     collect_wood_forest_start_dmy = dmy(survey_data$collect_wood_forest_start),
+#     collect_wood_forest_stop_dmy =  dmy(survey_data$collect_wood_forest_stop),
+#     collect_wood_duration = difftime(collect_wood_forest_stop_dmy, collect_wood_forest_start_dmy,
+#                                      units = c("weeks"))
+#   ) %>%
+#   select(collect_wood_forest_start, collect_wood_forest_stop, collect_wood_duration)
+
+# Of the hh that have stopped collecting firewood, what is the average duration of firewood collection?  
+# How many hh are still collecting firewood?
+# survey_data$collect_wood_duration <- 
+difftime(
+	dmy(survey_data$collect_wood_forest_stop),
+	dmy(survey_data$collect_wood_forest_start),
+	units = c("weeks")
+) %>%
+	mean(na.rm = TRUE)
+```
+49.4 weeks
+
+
+
+## Number of times firewood is gathered per week
+collect_wood_times_week
+```{r}
+survey_data %>%
+	filter(collect_wood_times_week >= 6) %>%
+	select(
+		hh_size, 
+		collect_wood_times_week, 
+		collect_wood_walk_hr, 
+		forest_wood_fee, 
+		fuel_30_buy_wood, 
+		fuel_30_receive_crh, 
+		fuel_30_buy_crh
+		) %>%
+	arrange(hh_size, collect_wood_times_week)
+
+survey_data %>%
+	ggplot(aes(x = collect_wood_times_week)) +
+	geom_histogram() + 
+	geom_vline(aes(xintercept = mean(collect_wood_times_week, na.rm = TRUE), col = 'red'), size = 2, show.legend = TRUE) + 
+	geom_vline(aes(xintercept = median(collect_wood_times_week, na.rm = TRUE), col = 'blue'), size = 2, show.legend = TRUE) +
+	scale_colour_manual("Legend", values = c(red = "red", blue = "blue"), labels = c("mean", "median"))
+
+survey_data %>%
+	ggplot(aes(x = hh_size, y = collect_wood_times_week, color = collect_wood_walk_hr)) +
+	geom_point() + 
+	scale_color_viridis_c() + 
+	# Need to fix ticks so they are whole numbers
+	facet_grid(. ~ fuel_30_buy_wood)
+
+# There are 3 hh that collect 8-9 times per week and they do not have huge hh_size and are not very close to the forest though they also don't buy any fuel.
+```
+
+## Cost to enter the forest for firewood
+forest_wood_fee
+```{r}
+survey_data %>%
+	ggplot(aes(x = forest_wood_fee)) +
+	geom_histogram() + 
+	geom_vline(aes(xintercept = mean(forest_wood_fee, na.rm = TRUE), col = 'red'), size = 2, show.legend = TRUE) + 
+	geom_vline(aes(xintercept = median(forest_wood_fee, na.rm = TRUE), col = 'blue'), size = 2, show.legend = TRUE) +
+	scale_colour_manual("Legend", values = c(red = "red", blue = "blue"), labels = c("mean", "median"))
+
+survey_data %>%
+	ggplot(aes(x = collect_wood_walk_hr, y = forest_wood_fee, color = collect_wood_times_week)) +
+	geom_point() + 
+	scale_color_viridis_c()
+
+survey_data %>%
+	filter(forest_wood_fee > 100) %>%
+	select(forest_wood_fee, collect_wood_walk_hr, collect_wood_times_week)
+```
+4 hh report a cost of 200 BDT to enter the forest, which is high, especially considering the next highest is 120 BDT. Mistake?
+
+## Cost of firewood
+buy_wood_cost 
+"In the past 30 days, how much money (taka) did you spend on firewood?"
+```{r}
+survey_data %>%
+	ggplot(aes(x = buy_wood_cost)) +
+	geom_histogram() + 
+	geom_vline(aes(xintercept = mean(buy_wood_cost, na.rm = TRUE), col = 'red'), size = 2, show.legend = TRUE) + 
+	geom_vline(aes(xintercept = median(buy_wood_cost, na.rm = TRUE), col = 'blue'), size = 2, show.legend = TRUE) +
+	scale_colour_manual("Legend", values = c(red = "red", blue = "blue"), labels = c("mean", "median"))
+
+survey_data %>%
+	filter(buy_wood_cost > 3000) %>%
+	select(buy_wood_cost, hh_size, fuel_30_collect_wood, fuel_30_buy_lpg, stove_boil_drink, stove_boil_bathe, stove_reason_stay_warm, stove_reason_cook_together, stove_reason_sell_food)
+
+survey_data %>%
+	ggplot(aes(x = hh_size, y = buy_wood_cost)) +
+	geom_point() + 
+	facet_grid(. ~ fuel_30_collect_wood)
+```
+Since the hh that reported spent most purchasing firewood don't have an obvious reason for this (they don't have huge hh size though are cooking for an un-recorded number of other people). It appears that these hh reporting very high cost of firewood just have bad recall, or there is an error.
+
+## Reason for using wood fuel
+1	We don’t have enough of other types of fuel
+2	We prefer using wood to cook food
+66	Other
+
+Need to take account for hh that both gather wood and buy wood
+Make the question: Among hh that use wood (collect or purchase), why do they use wood?
+```{r}
+survey_data %>%
+	select(gather_wood_reason, buy_wood_reason) %>%
+	filter(gather_wood_reason == 66)
+
+survey_data %>%
+	filter(!is.na(gather_wood_reason) & !is.na(buy_wood_reason)) %>%
+	mutate(
+		gather_buy_wood_reason_discordant = ifelse(gather_wood_reason != buy_wood_reason, "discordant", 0)
+	) %>%
+	filter(gather_buy_wood_reason_discordant == "discordant")
+# There are only two households that are discordant
+
+survey_data %>%
+	select(gather_wood_reason) %>%
+	table()
+# 16 people reported "other reason" for gathering wood -> what?
+
+survey_data %>%
+	select(buy_wood_reason) %>%
+	table()
+
+# 4 people reported "other reason" for buying wood -> what?
+
+survey_data %>%
+	filter(!is.na(gather_wood_reason) | !is.na(buy_wood_reason)) %>%
+	mutate(
+		gather_buy_wood_reason = 
+			case_when(
+				gather_wood_reason == 1 & buy_wood_reason == 1 ~ 1,
+				is.na(gather_wood_reason) & buy_wood_reason == 1 ~ 1,
+				gather_wood_reason == 1 & is.na(buy_wood_reason) ~ 1,
+				gather_wood_reason == 2 & buy_wood_reason == 2 ~ 2,
+				is.na(gather_wood_reason) & buy_wood_reason == 2 ~ 2,
+				gather_wood_reason == 2 & is.na(buy_wood_reason) ~ 2,
+				TRUE ~ 66 # These are any hh that have 
+			)
+	) %>%
+	select(gather_buy_wood_reason) %>% # gather_wood_reason, buy_wood_reason, 
+	table()
+```
+
+Almost all hh that rely on firewood report the primary reason they use firewood is because they do not have enough of other fuel sources; only 34/(475+34+20) report that the primary reason they use firewood is because they prefer the taste. 
+
+
+# Forest use
+
+## vegetation_dead when collected for fuel?
+1	Yes, the scraps/wood I collect are all dead
+2	I collect some scraps/wood that are dead and I gather scraps/leaves/twigs while they are still alive
+3	I cut down live plants for the twigs/wood I need
+```{r}
+survey_data %>%
+	select(gather_scraps_dead) %>%
+	table()
+
+survey_data %>%
+	select(gather_wood_dead) %>%
+	table()
+```
+
+## Wood for reasons other than cooking
+"Have you or your family ever collected firewood for purposes other than your own household's cooking needs (cooking food to sell, etc)?"
+
+```{r}
+survey_data %>%
+	select(gather_wood) %>%
+	table()
+```
+16 report gathering wood for reasons other than their own household's cooking - how does this compare to the number that cook to sell (1?), the number that cook to stay warm (?) + the number that cook for non-household member (guessing these people didn't include themselves)
+
+## Forest for reasons other than wood
+"Have you or your family ever gone to the forest to take anything other than wood (food, household materials, etc)?"
+```{r other_forest_use_tab10}
+survey_data %>%
+	select(forest_collect_not_wood) %>%
+	table()
+
+
+## Vector of variables to summarize
+table10Vars <- 
+	c(
+		"reason_forest_food", "reason_forest_med", "reason_forest_shelter",
+		"reason_forest_privacy", "reason_forest_defecation", "reason_forest_leisure",
+		"reason_forest_other", "reason_forest_other_specified"
+	)
+
+## Vector of categorical variables that need transformation
+table10FactorVars <- table10Vars
+
+# Create a TableOne object
+tab10 <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table10Vars, 
+		factorVars = table10FactorVars, 
+		strata = "study_arm"
+	)
+
+tab10
+
+survey_data %>%
+	ggplot(aes(x = cost_forest_not_wood)) +
+	geom_histogram() + 
+	geom_vline(aes(xintercept = mean(cost_forest_not_wood, na.rm = TRUE), col = 'red'), size = 2, show.legend = TRUE) + 
+	geom_vline(aes(xintercept = median(cost_forest_not_wood, na.rm = TRUE), col = 'blue'), size = 2, show.legend = TRUE) +
+	scale_colour_manual("Legend", values = c(red = "red", blue = "blue"), labels = c("mean", "median"))
+
+survey_data %>%
+	summarise_at(vars(cost_forest_not_wood), list(mean), na.rm = TRUE)
+
+survey_data %>%
+	filter(forest_collect_not_wood == 1) %>%
+	select(cost_forest_not_wood, starts_with("reason_forest")) %>%
+	arrange(desc(cost_forest_not_wood))
+
+```
+
+
+14% of 36 people replied that they go to the forest for "other" reasons but no other reasons are specified - why?...becuase on Q487 cost_forest_not_wood the relevance is wrong...selected({reason_forest},'66') should have been selected({reason_forest_other},'1')...oops
+
+--> ask about this in the fgd?
+
+Three hh report paying <100 BDT to go into the forest for non-wood. This is ever more than was paid to collect firewood. Interestingly, the one hh that paid 300 BDT was the only hh that went to the forest for privacy (and they recorded privacy as the only reason for going)
+
+
+
+
+
+
+
+# Time to collect fuel
+Combine all survey data
+- For pre- and post-intervention results, collect both so that we can compare recall reliability and then average before combining with intervention group. 
+```{r}
+survey_data %>%
+	summarise_at(
+		vars(
+			collect_wood_walk_hr,
+			# receive_wood_walk, # Missing this question
+			receive_wood_wait,
+			receive_lpg_walk,
+			receive_lpg_wait,
+			buy_lpg_walk,
+			buy_lpg_wait,
+			receive_crh_walk,
+			receive_crh_wait
+		),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	gather(key = "activity", value = "time_hr_or_min")
+
+survey_data %>%
+	ggplot(aes(x = collect_wood_walk_hr)) +
+	geom_histogram() + 
+	geom_vline(aes(xintercept = mean(collect_wood_walk_hr, na.rm = TRUE), col = 'red'), size = 2, show.legend = TRUE) + 
+	geom_vline(aes(xintercept = median(collect_wood_walk_hr, na.rm = TRUE), col = 'blue'), size = 2, show.legend = TRUE) +
+	scale_colour_manual("Legend", values = c(red = "red", blue = "blue"), labels = c("mean", "median"))
+```
+
+
+
+
+
+# Stove use
+```{r}
+# Percent of hh that use their stoves for the following reasons
+
+# will need to separate pre-intervention, intervention, and post-intervention groups --> of course, will need to separate for every analysis...
+
+survey_data %>%
+	summarise_at(
+		vars(
+			stove_boil_drink, # Pc of hh that boil drinking water
+			stove_boil_bathe, # Pc of hh that boil bathing water
+			boil_yesterday_times, # Number of times the stove was used for boiling water yesterday
+			stove_reason_stay_warm, # Pc of hh that use the stove to stay warm
+			stove_reason_cook_together, # Pc of hh that use the stove to stay warm
+			stove_reason_sell_food, # Pc of hh that use the stove to cook food to sell
+			# cook_sell_yesterday is associated with the question "In the past 7 days, how many days did you cook food to sell?" so 7 is a reasonable answer
+			# cook_sell_yesterday, # Of hh that cook food to sell, the number of times they cooked food to sell yesterday (maybe don't include this because cooking to sell was so rare)
+			cook_sell_days_week,
+			# cook_to_sell, # Of hh that cook food to sell, the percentage of total food cooked that they sell
+			cook_to_sell_percent,
+			traditional_use_yesterday, # Number of times traditional stove was used yesterday
+			LPG_use_yesterday # Number of times LPG stove was used yesterday
+		),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	gather(key = "stove_type", value = "pc_hh_or_uses_per_day")
+
+# Good, no one was using LPG yesterday
+
+
+# In the past 7 days, how many days did you cook food to sell 
+survey_data %>%
+	ggplot(aes(x = cook_sell_days_week)) +
+	geom_histogram() + 
+	geom_vline(aes(xintercept = mean(cook_sell_days_week, na.rm = TRUE), col = 'red'), size = 2, show.legend = TRUE) + 
+	geom_vline(aes(xintercept = median(cook_sell_days_week, na.rm = TRUE), col = 'blue'), size = 2, show.legend = TRUE) +
+	scale_colour_manual("Legend", values = c(red = "red", blue = "blue"), labels = c("mean", "median"))
+
+```
+
+## Efficiency
+```{r cooking_efficiency_tab11}
+
+## Vector of variables to summarize
+# Use Hmisc::Cs to quote each variable
+table11Vars <- 
+	c("soak_rice", "soak_lentils", "cover_pot")
+
+## Vector of categorical variables that need transformation
+table11FactorVars <- table11Vars
+
+# Create a TableOne object
+tab11 <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table11Vars, 
+		factorVars = table11FactorVars, 
+		strata = "study_arm"
+	)
+
+tab11
+```
+
+
+## Who cooks
+Percentage of hh that mention women, girls, men, and boys cook
+```{r cook_who_tab12}
+## Vector of variables to summarize
+# Use Hmisc::Cs to quote each variable
+table12Vars <- 
+	c("cook_who_w", "cook_who_g", "cook_who_m", "cook_who_b")
+
+## Vector of categorical variables that need transformation
+table12FactorVars <- table12Vars
+
+# Create a TableOne object
+tab12 <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table12Vars, 
+		factorVars = table12FactorVars, 
+		strata = "study_arm"
+	)
+
+tab12
+```
+
+cook_who_b = 0 (%) why for other groups reportedd as ==1 ? because there was 0 boys so it doesn't show up as a factor?
+
+
+
+# LPG use and safety
+Average duration between when enrolled in LPG and when receive LPG and training
+Separate for UNHCR and IOM areas
+
+```{r}
+lpg_wait_duration <- 
+	interval(survey_data$first_receive_lpg, survey_data$first_enrolled_lpg)
+
+lpg_use_without_training <-
+	interval(survey_data$date_safety_training, survey_data$first_receive_lpg)
+```
+
+### Prior familiarity with LPG
+```{r}
+survey_data %>%
+	summarise_at(
+		vars(lpg_prior_use),
+		list(mean),
+		na.rm = TRUE
+	)
+```
+
+### Safety
+fire_cause for fire_why
+1	Carelessness
+2	I was busy with other work
+3	While children were playing with the fire
+4	Due to the low height of the roof and/or the stove was close to the fence
+5	Don't know
+66	Other
+
+fire_consequence
+1	Entire household burned out
+2	Part of the household burned out
+3	Mild burn of the children
+4	Severe burn of the children
+5	Severe burn of the adult 
+6	Mild burn of the adult
+7	People die
+8	Don't know
+66	Other
+
+```{r stove_safety_tab13}
+## Vector of variables to summarize
+table13Vars <- 
+	c(
+		"stove_training", 
+			"lpg_safety_visit", 
+			"lpg_gas_leak", 
+			"lpg_child_burn", 
+			"fire_number"
+		)
+
+## Vector of categorical variables that need transformation
+table13FactorVars <- table13Vars
+
+# Create a TableOne object
+tab13 <- 
+	CreateTableOne(
+		data = survey_data, 
+		vars = table13Vars, 
+		factorVars = table13FactorVars, 
+		strata = "study_arm"
+	)
+
+tab13
+
+survey_data %>%
+	summarise_at(
+		vars(
+			stove_training, 
+			lpg_safety_visit, 
+			lpg_gas_leak, 
+			lpg_child_burn, 
+			fire_number
+		),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	gather(key = "activity", value = "pc_hh")
+
+survey_data %>%
+	select(safety_stove_training) %>%
+	table()
+
+survey_data %>%
+	summarise_at(
+		vars(starts_with("training_")),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	gather(key = "training_type", value = "pc_hh")
+
+survey_data %>%
+	select(lpg_no_training_learn) %>%
+	table()
+
+survey_data %>%
+	select(flooring_below_stove) %>%
+	table()
+
+survey_data %>%
+	select(space_between_wall_stove) %>%
+	table()
+
+survey_data %>%
+	select(lpg_afraid) %>%
+	table()
+
+survey_data %>%
+	filter(!is.na(lpg_afraid)) %>%
+	select(lpg_afraid_why)
+
+survey_data %>%
+	select(fire_why) %>%
+	table()
+
+survey_data %>%
+	select(fire_consequence) %>%
+	table()
+```
+
+## LPG refills and sufficiency
+
+refill_time_lpg_missed
+0	No
+1	Yes,  I couldn't go on the exact refill date and they wouldn't let me go on a different day
+2	Yes, other
+3	Don't know
+```{r}
+survey_data %>%
+	select(refill_time_lpg_missed) %>%
+	table()
+```
+
+times_bf_refill
+"How long before the next LPG refill does your household run out of LPG for cooking food. (Answer in meals or days – select the answer that best matches the response)"
+1	1-3 days before my refill
+2	4-6 days before my refill
+3	7-9 days before my refill
+4	10+ days before my refill
+5	1-5 meals before my refill 
+6	6-10 meals before my refill 
+7	10-15 meals before my refill 
+8	15-20 meals before my refill 
+9	20+ meals before my refill
+10	1-3 meals per week
+11	4-6 meals per week
+12	7-9 meals per week
+13	10+ meals per week
+
+```{r}
+survey_data %>%
+	select(fuel_use_non_lpg_freq_cook) %>%
+	table()
+```
+
+## Use of extra fuel
+lpg_use
+1	Prepare snacks/ food that I sell
+2	Give the extra LPG to others for free
+3	Sell the extra LPG to another household
+4	Sell the extra LPG to a restaurant
+5	Keep on using it myself
+6	We never have more than we need to cook for just my family
+
+```{r}
+survey_data %>%
+	select(lpg_extra_use) %>%
+	table()
+```
+
+# Receive LPG but use other fuel
+##  
+"For cooking food or boiling water, do you ever have to use fuel other than the LPG that you receive?""
+```{r}
+survey_data %>%
+	select(fuel_use_non_lpg_ever) %>%
+	table()
+
+survey_data %>%
+	summarise_at(
+		vars(starts_with("fuel_use_non_lpg")),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	gather(key = "alternative_fuel", value = "pc_hh")
+```
+
+## Place purchase more LPG
+1	I go to an established market
+2	Someone transports the LPG close to me (not a market, selling out of a CNG)
+
+## Fuel prior to LPG distribution
+```{r}
+survey_data %>%
+	select(fuel_type_before_lpg) %>%
+	table() 
+
+```
+
+## Livestyle changes since LPG distribution
+lpg_changes_lifestyle is select_multiple... table percent of hh that answered each?
+```{r}
+survey_data %>%
+	summarise_at(
+		vars(starts_with("lpg_changes_lifestyle")),
+		list(mean), 
+		na.rm = TRUE
+	) %>%
+	gather(key = "lifestyle_change", value = "pc_hh")
+```
+
+
+
+
+# Time use
+"Think about a day before you obtained LPG at the distribution center and compare it to now, when you do get LPG from the distribution center. Compared to before, do you think that YOU currently spend MORE or LESS time on each of the following activities?"
+Same question for children's time
+
+Only asked to intervention and post-intervention hh
+Post-intervention might have better recall because they more recently transition; so assess separately and combine if it seems reasonable to do so.
+
+Assess percentage of hh that say they spend more and less time on each type of activity
+
+activity left column, more-less-same on top row
+
+```{r}
+survey_data %>%
+	select(starts_with("time"))
+```
+
+# Drugery
+1	Cooking
+2	Washing dishes
+3	Washing clothes
+4	Collecting water (including time traveling to the water pump and time acquiring water)
+5	Harvesting wood from the forest
+6	Caring for children (washing, dressing, bathing)
+7	Caring for the sick, disabled, or elderly (washing, dressing, bathing)
+88	NA/Nothing is difficult
+
+```{r}
+survey_data %>%
+	select(enumerator, start_date, drudgery_most_diff, drudgery_second_most_diff, drudgery_easiest) %>%
+	arrange(enumerator, start_date)
+
+survey_data %>%
+	select(drudgery_most_diff, drudgery_second_most_diff) %>%
+	table()
+
+survey_data %>%
+	select(drudgery_most_diff) %>%
+	table()
+
+survey_data %>%
+	select(drudgery_second_most_diff) %>%
+	table()
+
+survey_data %>%
+	select(drudgery_easiest) %>%
+	table()
+```
+
+Many hh have drudgery_most_diff == drudgery_second_most_diff == drudgery_easiest. Training enumerators that they should not be the same thing was an oversight. 
+There are also many NAs, because the question wasn't required- but why did they not just answer? I don't see any skip logic on it. 
+Will probably have to throw this question out. = (
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Harassment
+
+## Test examples
+```{r harassment, include=FALSE}
+# The percentage of households that experienced specific types of harassment at any time since they entered the camp
+
+
+survey_data %>%
+	summarise_at(c("insult_hh", "belittle_hh", "scare_hh", "push_hh", "hit_hh", "kick_hh", "choke_hh", "weapon_hh", "sex_lang_hh", "sex_contact_hh", "sex_rumor_hh", "clothing_pull_hh", "sex_corner_hh"), mean, na.rm = TRUE)
+
+# The percentage of households that experienced choking when engaged in the following fuel collection activities since they entered the camp. 
+survey_data %>%
+	summarise_at(c("collect_wood_choke_hh", "buy_wood_choke_hh", "receive_wood_choke_hh", "receive_lpg_choke_hh", "buy_lpg_choke_hh", "receive_crh_choke_hh", "buy_crh_choke_hh"), mean, na.rm = TRUE)
+
+
+# Of those who experienced choking the mean number of times they experienced choking 
+survey_data %>%
+	summarise_at(c("collect_wood_choke_m", "collect_wood_choke_w", "collect_wood_choke_b", "collect_wood_choke_g"), mean, na.rm = TRUE)
+```
+
+For whether or not the type of harassment happened during the particular fuel collection activity, convert "Don't know" = 99 to NA.
+
+## Harassment prevalence
+The percentage of households that experienced specific types of harassment at any time since they entered the camp
+
+The response to each harassment question was selected from yes_no_dk:
+0	No
+1	Yes
+77	Refused
+99 Don't know
+
+```{r harassment_prev, echo=FALSE}
+harassment_prev <-
+	survey_data %>%
+	mutate_at(vars(harassment_vars), na_if, 77) %>% # 77 = refused
+	mutate_at(vars(harassment_vars), na_if, 99) %>% # 99 = don't know
+	summarise_at(harassment_vars, mean, na.rm = TRUE) %>%
+	matrix(ncol = 8, byrow = TRUE) %>%
+	magrittr::set_colnames(c("any time", "collect wood", "buy wood", "receive wood", "receive LPG", "buy LPG", "receive CRH", "buy CRH")) %>%
+	as_tibble() %>%
+	mutate(harassment_type = c("insult", "belittle", "scare", "push", "hit", "kick", "choke", "weapon", "use sexual language", "sexual contact", "spread sexual rumors", "pull clothing in a sexual way", "corner in a sexual way")) %>% 
+	mutate_at(c("any time", "collect wood", "buy wood", "receive wood", "receive LPG", "buy LPG", "receive CRH", "buy CRH"), funs(as.numeric)) %>%
+	select(harassment_type, everything())
+
+harassment_prev %>%
+	kable(digits = 2) %>%
+	kable_styling(
+		bootstrap_options = c("striped", "hover", "condensed"), 
+		fixed_thead = TRUE
+	)
+```
+
+## Harassment frequency, by gender
+Of those those HOUSEHOLDS in which anyone experienced the specific harassment, the mean number of times any man, woman, boy or girl experienced the specific harassment 
+
+# Need to add the N - total number the report this harassment. Maybe mean is 2 but actualy number of hh in which boys report is 5 vs mean for women is 1 but reporting households is 100. 
+
+13 Harassment types:
+c("insult_hh", "belittle_hh", "scare_hh", "push_hh", "hit_hh", "kick_hh", "choke_hh", "weapon_hh", "sex_lang_hh", "sex_contact_hh", "sex_rumor_hh", "clothing_pull_hh", "sex_corner_hh")
+
+The frequency was selected from frequency_times:
+0	Never
+1	Once
+2	Twice
+3	Three times
+4	More than three times
+
+
+
+```{r}
+# # How many hh reported more than 3 or more times for any group?
+# survey_data %>%
+#   select(harassment_vars_by_group) %>%
+#   table()
+
+sum(survey_data[, harassment_vars_by_group] == 4, na.rm = TRUE)
+```
+
+There are 19 cells in which they report experiencing the event more than 3 times
+# Why did we do frequency_times instead of just asking for an integer?!
+
+# For now, assume that 4 = more than 3 times is equal to 4 times. 
+
+
+```{r}
+harassment_freq_by_group <- 
+	survey_data %>%
+	summarise_at(harassment_vars_by_group, mean, na.rm = TRUE) %>%
+	matrix(ncol = 7 * 4, byrow = TRUE) %>%
+	magrittr::set_colnames(
+		c(
+			"collect wood_m", "collect wood_w", "collect wood_b", "collect wood_g",
+			"receive wood_m", "receive wood_w", "receive wood_b", "receive wood_g",
+			"buy wood_m", "buy wood_w", "buy wood_b", "buy wood_g",
+			"receive LPG_m", "receive LPG_w", "receive LPG_b", "receive LPG_g",
+			"buy LPG_m", "buy LPG_w", "buy LPG_b", "buy LPG_g",
+			"receive CRH_m", "receive CRH_w", "receive CRH_b", "receive CRH_g",
+			"buy CRH_m", "buy CRH_w", "buy CRH_b", "buy CRH_g"
+		)
+	) %>%
+	as.data.frame() %>%
+	mutate_all(funs(as.numeric)) %>%
+	mutate(harassment_type = c("insult", "belittle", "scare", "push", "hit", "kick", "choke", "weapon", "use sexual language", "sexual contact", "spread sexual rumors", "pull clothing in a sexual way", "corner in a sexual way")) %>%
+	select(harassment_type, everything())
+
+harassment_freq_by_group %>%
+	kable(digits = 2) %>%
+	kable_styling(
+		bootstrap_options = c("striped", "hover", "condensed"), 
+		fixed_thead = TRUE
+	)
+```
