@@ -1071,7 +1071,7 @@ Associate health variables with % of time using biomass AND whether or not ppl i
 
 hh_ppl_smoke
 
-```{r child_health}
+```{r health_tab2}
 # "target_child_arm_measurements_yn" and "target_child_breathing_yn" 
 # don't need to be in the table but the show refusal rates equal across groups
 
@@ -1107,7 +1107,7 @@ tab2
 ```
 
 
-```{r child_health_yn}
+```{r health_yn_tab2_yn}
 # "target_child_arm_measurements_yn" and "target_child_breathing_yn" 
 # don't need to be in the table but the show refusal rates equal across groups
 
@@ -1175,7 +1175,7 @@ tab3
 
 
 
-```{r mental_health}
+```{r mental_health_tab4}
 ## Vector of variables to summarize
 table4_good_Vars <- mental_health_good_vars
 
@@ -1243,8 +1243,9 @@ tab4_bad_twodays <-
 	)
 
 tab4_good
-tab4_good_twodays
 tab4_bad
+
+tab4_good_twodays
 tab4_bad_twodays
 ```
 
@@ -1492,7 +1493,7 @@ survey_data %>%
 
 # Food consumption patterns
 In the past 7 days, how many days did you eat each of the following foods?
-```{r}
+```{r food_consumption_tab6}
 ## Vector of variables to summarize
 # Use Hmisc::Cs to quote each variable
 table6Vars <- 
@@ -1528,7 +1529,7 @@ tab6
 
 ```
 
-
+beef is high among some pre-intervention hh because in the previous week WFP held a WFP Day and distributed beef to everyone in the camp. Did they also distribute potatoes on this day?
 
 
 # Food source
@@ -1651,7 +1652,7 @@ survey_data %>%
 # Who gathers fuel
 
 Not mutally exclusive
-```{r}
+```{r who_collects_fuel_tab9}
 ## Vector of variables to summarize
 # Use Hmisc::Cs to quote each variable
 table9Vars <- 
@@ -1954,8 +1955,9 @@ Three hh report paying <100 BDT to go into the forest for non-wood. This is ever
 # Time to collect fuel
 Combine all survey data
 - For pre- and post-intervention results, collect both so that we can compare recall reliability and then average before combining with intervention group. 
-```{r}
+```{r fuel_collection_time}
 survey_data %>%
+	group_by(study_arm) %>%
 	summarise_at(
 		vars(
 			collect_wood_walk_hr,
@@ -1971,7 +1973,7 @@ survey_data %>%
 		list(mean),
 		na.rm = TRUE
 	) %>%
-	gather(key = "activity", value = "time_hr_or_min")
+	gather(-study_arm, key = "activity", value = "time_hr_or_min")
 
 survey_data %>%
 	ggplot(aes(x = collect_wood_walk_hr)) +
