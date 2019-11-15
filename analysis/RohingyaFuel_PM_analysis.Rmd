@@ -28,20 +28,146 @@ knitr::opts_chunk$set(echo = TRUE)
 `%notin%` <- Negate(`%in%`)
 ```
 
+```{r file_paths}
+#Input Files
+list_of_file_path_pats_pre_intervention <- "C:/Users/lenovo/Google Drive (lakwong@stanford.edu)/Rohingya/Rohingya research - Fuel/Sensors/ALL DATA/Pre_intervention/PATS+"
 
-```{r}
-# source(here::here("file_paths.Rmd"))
+list_of_file_path_pats_intervention <- "C:/Users/lenovo/Google Drive (lakwong@stanford.edu)/Rohingya/Rohingya research - Fuel/Sensors/ALL DATA/Intervention/PATS+"
 
-file_pm_data_base <- here::here("data", "raw", "PATS+Data_20191110.rds")
+list_of_file_path_hapex_pre_intervention <- "C:/Users/lenovo/Google Drive (lakwong@stanford.edu)/Rohingya/Rohingya research - Fuel/Sensors/ALL DATA/Pre-intervention/HAPEX"
+
+list_of_file_path_hapex_intervention <- "C:/Users/lenovo/Google Drive (lakwong@stanford.edu)/Rohingya/Rohingya research - Fuel/Sensors/ALL DATA/Intervention/HAPEX"
+
+### Output Files RDS 
+all_pm_data_path_rds <- "C:/Users/lenovo/Google Drive (lakwong@stanford.edu)/Rohingya/Rohingya research - Fuel/Sensors/ALL DATA/PATS+_Data_20191115.rds"
+
+all_hapex_data_path_rds <- "C:/Users/lenovo/Google Drive (lakwong@stanford.edu)/Rohingya/Rohingya research - Fuel/Sensors/ALL DATA/Hapex_Data_20191115.rds"
+
+# Manually move the compiled file into the raw folder of the project
+
+file_pm_data_base <- here::here("data", "raw", "PATS+_Data_20191115.rds")
+file_HAPEX_data_base <- here::here("data", "raw", "HAPEX_Data_20191115.rds")
 ```
 
+## File of Pats+ Data
+```{r}
+list_of_files_pats_pre_intervention <-   
+	list.files(
+		path = list_of_file_path_pats_pre_intervention,
+		recursive = TRUE, 
+		pattern = "*.csv", 
+		full.names = TRUE 
+	)
+
+list_of_files_pats_intervention <-   
+	list.files(
+		path = list_of_file_path_pats_intervention,
+		recursive = TRUE, 
+		pattern = "*.csv", 
+		full.names = TRUE 
+	)
+
+list_of_files_pats <- c(list_of_files_pats_pre_intervention, list_of_files_pats_intervention)
+
+all_pm_data <- 
+	list_of_files_pats %>%
+	set_names(sub(".*/", "", list_of_files_pats)) %>% # added file_name as first column value
+	map_dfr(
+		~ read_csv(
+			.x,
+			col_types = 
+				cols(
+					"c", "d", "d", "d", "d", "d", "d", 
+					"d", "d", "d", "d", "d", "d", "d", "d", "d"
+				),
+			skip = 31, 
+			col_names = FALSE, 
+		),
+		.id = "file_name" # labeled first column with as "file_name"
+	) %>% 
+	select(-X) %>% # I don't know why there is an empty column X at the end
+	mutate(
+		file_name = str_replace(file_name, "\\..*","")
+	) %>% 
+	`colnames<-`( # must be exactly `colnames<-`
+		c(
+			"file_name", "dateTime",	
+			"V_power",	"degC_sys",	"degC_air",	"RH_air",	
+			"degC_CO",	"CO_PPM",	"status",	"ref_sigDel",	
+			"low20avg",	"high320avg",	"motion",	"CO_mV",	
+			"ignore",	"iButton_Temp",	"PM_Estimate"
+		)
+	) 
+#  mutate(dateTime_lubridated = lubridate::ymd_hms(dateTime, tz = "Asia/Dhaka", locale = Sys.getlocale("LC_TIME"), truncated = 3)) %>%
+
+all_pm_data %>%
+	saveRDS(all_pm_data_path_rds)
+```
+
+
+# Hapex Data 
+```{r}
+list_of_files_hapex_pre_intervention <-   
+	list.files(
+		path = list_of_file_path_hapex_pre_intervention,
+		recursive = TRUE, 
+		pattern = "*.csv", 
+		full.names = TRUE 
+	)
+
+list_of_files_hapex_intervention <-   
+	list.files(
+		path = list_of_file_path_hapex_intervention,
+		recursive = TRUE, 
+		pattern = "*.csv", 
+		full.names = TRUE 
+	)
+
+list_of_files_hapex <- c(list_of_files_hapex_pre_intervention, list_of_files_hapex_intervention)
+
+
+all_hapex_data <- 
+	list_of_files_hapex %>%
+	set_names(sub(".*/", "", list_of_files_hapex)) %>% # added file_name as first column value
+	map_dfr(
+		~ read_csv(
+			.x,
+			col_types = 
+				cols("c", "d", "d"),
+			skip = 29, 
+			col_names = FALSE, 
+		),
+		.id = "file_name" # labeled first column with as "file_name"
+	) %>% 
+	mutate(
+		file_name = str_replace(file_name, "\\..*","")
+	) %>% 
+	`colnames<-`(
+		c(
+			"file_name", "timestamp",	"mother_compliance",	"mother_pm"
+		)
+	) 
+
+all_hapex_data %>%
+	saveRDS(all_hapex_data_path_rds)
+
+#   mutate(dateTime_lubridated = lubridate::ymd_hms(dateTime, tz = "Asia/Dhaka", locale = Sys.getlocale("LC_TIME"), truncated = 3)) %>%
+```
+
+
+# WRONG
 The date on PM07751B_20190915_0_8wDH21291216 and PM07751B_20190921_0_8wD290417
 is 2000-01-01 and onwards -> fix this later and drop for now
 
-
+# Clean data
+Still not clean, must look at google sheet for other adjustments that need to be made. 
 ```{r load_data, include=FALSE} 
 pm_data <- 
 	readRDS(file = file_pm_data_base) %>%
+	filter(V_power > 3.6) %>% # If the battery voltage is not more than 3.6, the PM manual notes that the reading may not be accurate
+	separate(file_name, into = c("PM_monitor", "date", "study_arm", "hh_id_note"), sep = "_", extra = "merge", remove = FALSE) %>% # for some reason if I sep into five columns right away, those with no "note" are missing a study arm
+	separate(hh_id_note, into = c("hh_id", "note"), sep = "_", extra = "merge", remove = FALSE) %>% 
+	
 	mutate(
 		dateTime = 
 			if_else(
@@ -51,23 +177,36 @@ pm_data <-
 			),
 		dateTime_min = round_date(dateTime, unit = "minute"),
 		dateTime_hour = round_date(dateTime, unit = "hour"),
-		arm =
-			if_else(
-				dateTime < "2019-10-03",
-				"pre-intervention",
-				"intervention"
-			),
-		arm = 
+		note = str_to_lower(note),
+		study_arm =
+			if_else(note %in% c("school", "mosque"), "outdoor", study_arm),
+		study_arm =
 			ordered(
-				arm,
-				levels = c("pre-intervention", "intervention")
-			)
-	) # %>%
-# select(file_name, dateTime, dateTime_hour, dateTime_min, PM_Estimate)
+				as.character(study_arm),
+				levels = c("0", "1", "outdoor"),
+				labels = c("pre-intervention", "intervention", "outdoor")
+			),
+		note = 
+			if_else(is.na(note), "normal", note)
+	) %>%
+	# This is separating by the - in the date rather than the " " between the date and time, like it is supposed to. 
+	separate(dateTime_min, into = c("dateTime_min_extraDate", "nearest_min", sep = " "), remove = FALSE) %>%
+	separate(dateTime_hour, into = c("dateTime_hour_extraDate", "nearest_hour", sep = " "), remove = FALSE) %>%
+	select(-hh_id_note, -dateTime_hour_extraDate, -dateTime_min_extraDate) %>%
+	select(hh_id, study_arm, note, dateTime, dateTime_min, nearest_min, dateTime_hour, nearest_hour, everything())
 
 pm_data_min <-
 	pm_data %>%
-	group_by(file_name, dateTime_min) %>%
+	group_by(study_arm, note, hh_id, dateTime_min) %>%
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	)
+
+pm_data_nearest_min <-
+	pm_data %>%
+	group_by(study_arm, note, hh_id, nearest_min) %>%
 	summarise_at(
 		vars(PM_Estimate),
 		list(mean),
@@ -76,7 +215,20 @@ pm_data_min <-
 
 pm_data_hour <-
 	pm_data %>%
-	group_by(file_name, arm, dateTime_hour) %>%
+	group_by(study_arm, note, hh_id, dateTime_hour) %>%
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	mutate(
+		over_100 = if_else(PM_Estimate > 100, 1, 0),
+		over_500 = if_else(PM_Estimate > 500, 1, 0)
+	)
+
+pm_data_nearest_hour <-
+	pm_data %>%
+	group_by(study_arm, note, hh_id, nearest_hour) %>%
 	summarise_at(
 		vars(PM_Estimate),
 		list(mean),
@@ -93,28 +245,70 @@ pm_data_hour_summary <-
 		vars(over_100, over_500),
 		funs(sum)
 	) %>%
-	gather(-c(file_name, arm), key = "indicator", value = "hours")
+	gather(-c(hh_id, study_arm, note), key = "indicator", value = "hours")
 
+# head(pm_data)
 # View(pm_data)
+# pm_data %>% pull(study_arm) %>% unique()
+# pm_data %>%
+# 	filter(str_detect(file_name, "10G105460")) %>% tail()
+
 ```
 
 ```{r}
-pm_data_hour %>%
-	filter(file_name %notin% c("PM07751B_20190915_0_8wDH21291216", "PM07751B_20190921_0_8wD290417")) %>% 
-	# filter(file_name == "PM07682B_20191031_1_4E109511") %>%
-	ggplot(aes(dateTime_hour, PM_Estimate, color = file_name)) +
+pm_data_min %>%
+	filter(hh_id %notin% c("8wDH21291216", "8wD290417")) %>% # Take out of now because have 2000 as the year
+	filter(note != "insufficient data") %>%
+	ggplot(aes(dateTime_min, PM_Estimate, color = hh_id)) +
 	geom_line(na.rm = TRUE) +
+	geom_hline(yintercept = 100, color = "blue") + 
+	geom_hline(yintercept = 500, color = "red") +
 	theme(
 		legend.position = "none"
-	)
+	) + 
+	facet_grid( ~ study_arm)
 
+pm_data_nearest_min %>%
+	filter(hh_id %notin% c("8wDH21291216", "8wD290417")) %>% # Take out of now because have 2000 as the year
+	filter(note != "insufficient data") %>%
+	ggplot(aes(nearest_minute, PM_Estimate, color = hh_id)) +
+	geom_line(na.rm = TRUE) +
+	geom_hline(yintercept = 100, color = "blue") + 
+	geom_hline(yintercept = 500, color = "red") +
+	theme(
+		legend.position = "none"
+	) + 
+	facet_grid( ~ study_arm)
+
+pm_data_nearest_hour %>%
+	filter(hh_id %notin% c("8wDH21291216", "8wD290417")) %>%
+	filter(note != "insufficient data") %>%
+	ggplot(aes(dateTime_hour, PM_Estimate, color = hh_id)) +
+	geom_line(na.rm = TRUE) +
+	geom_hline(yintercept = 100, color = "blue") + 
+	geom_hline(yintercept = 500, color = "red") +
+	theme(
+		legend.position = "none"
+	) + 
+	facet_grid( ~ study_arm)
+
+pm_data_hour %>%
+	filter(hh_id %notin% c("8wDH21291216", "8wD290417")) %>%
+	filter(note != "insufficient data") %>%
+	ggplot(aes(nearest_hour, PM_Estimate, color = hh_id)) +
+	geom_line(na.rm = TRUE) +
+	geom_hline(yintercept = 100, color = "blue") + 
+	geom_hline(yintercept = 500, color = "red") +
+	theme(
+		legend.position = "none"
+	) + 
+	facet_grid( ~ study_arm)
 
 pm_data_hour_summary %>%
-	ggplot(aes(y = hours, color = arm)) +
+	filter(note != "qc") %>%
+	filter(note != "insufficient data") %>%
+	ggplot(aes(y = hours, color = study_arm)) +
 	geom_boxplot() +
 	scale_color_discrete() + # viridus uses purple and yellow!
-	# theme(
-	# 	axis.ticks.x
-	# ) +
-	facet_grid(indicator ~ arm, scales = "free_y")
+	facet_grid(indicator ~ study_arm + note, scales = "free_y")
 ```
