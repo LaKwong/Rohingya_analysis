@@ -668,6 +668,9 @@ survey_data_3 <-
 				levels = c(1, 2),
 				labels = c("pre-intervention", "intervention")
 			), 
+		
+		hh_id = as.character(hh_id),
+		
 		# enumerator = as.factor(enumerator),
 		enumerator =
 			factor(
@@ -839,7 +842,7 @@ survey_data_3 <-
 			ifelse(
 				buy_wood_cost > 1.0, 
 				as.integer(1),
-			 as.integer(0)
+				as.integer(0)
 			),
 		fuel_ever_buy_wood = 
 			if_else(
@@ -970,6 +973,11 @@ survey_data_3 <-
 		chicken_duck_pigeon_yn = if_else(chicken_duck_pigeon == 0, 0, 1),
 		goat_sheep_yn = if_else(goat_sheep == 0, 0, 1),
 		cow_buffalo_yn = if_else(cow_buffalo == 0, 0, 1)
+	) %>%
+	
+	# Don't know why I need this again as it is also above
+	mutate(
+		hh_id = as.character(hh_id)
 	)
 ```
 
@@ -978,6 +986,22 @@ survey_data_3 <-
 survey_data <- survey_data_3
 ```
 
+
+
+
+```{r}
+survey_data %>%
+	tabyl(fuel_ever_collect_wood)
+
+survey_data %>%
+	tabyl(study_arm, fuel_30_buy_wood)
+
+survey_data %>%
+	tabyl(fuel_30_collect_wood, fuel_30_buy_wood, study_arm)
+
+survey_data %>%
+	tabyl(fuel_30_gather_scraps, fuel_30_buy_wood, study_arm)
+```
 
 Make this into a function then use map_dfr to apply it to all of the column of interst
 
@@ -1480,7 +1504,7 @@ survey_data %>%
 survey_data %>%
 	filter(fuel_ever_buy_wood == 1, study_arm == "intervention") %>%
 	select(hh_id, study_arm, fuel_ever_buy_wood, fuel_30_buy_wood, buy_wood_cost, fuel_30_collect_wood) # %>%
-	# tabyl(buy_wood_cost, fuel_ever_buy_wood, study_arm)
+# tabyl(buy_wood_cost, fuel_ever_buy_wood, study_arm)
 
 survey_data %>%
 	select(study_arm, fuel_ever_buy_wood, fuel_30_buy_wood) 
@@ -2622,27 +2646,18 @@ harassment_physical_sexual_b <-
 # tidyr::replace_na(): Missing values turns into a value (NA –> -99)
 # naniar::replace_with_na(): Value becomes a missing value (-99 –> NA)
 
-harassment_physical_sexual_w %>%
-	sample_n(size = 5)
-#hh: 8wA117722A19_2130, 8wA115397_1528, 8wDI21101459, 8wBA20117719_, 9G600019G1_5663
-
-harassment_physical_sexual_m %>%
-	sample_n(size = 5)
-# 8wB102745i14_2610, 10G110695G26_3480, 8wA117770A30_, 8wB115467A16_2421, 10D109334D11_2814
-
-harassment_physical_sexual_g %>%
-	sample_n(size = 2) # There are only two girls
+harassment_physical_sexual_g_list <-
+	harassment_physical_sexual_g %>%
+	sample_n(size = 2)  %>%
+	select(hh_id)
+# There are only two girls
 # 10G115604G26_3478, 10G115614G26_3517
-
-harassment_physical_sexual_b %>%
-	sample_n(size = 5)
-# 3E185415DD22_1424, 8wBI15102369_1104, 10G115604G26_3478, 9G123670G29_6347, 10D109334D11_2814
-
 ```
 
 ## Identify more adolescent girls that faced harassment by including "push" - this only adds one girl (10D109224D11_2750) so then also add also allow for verbal abuse of "scare" -> this results in  10 girls
 ```{r}
-survey_data %>%
+harassment_physical_sexual_g_extra_list <-
+	survey_data %>%
 	filter(consent == "OK") %>%
 	select(hh_id, ends_with("_w"), ends_with("_m"), ends_with("_g"), ends_with("_b")) %>%
 	select(
@@ -2658,8 +2673,8 @@ survey_data %>%
 	naniar::replace_with_na_at(.vars = harassment_physical_sexual_vars, condition = ~.x == "Never") %>% # Replace "Never" (which was entered if a hh reported X happened but it didn't happen to the particular group w, m, g, b) with NA
 	# when I use replace_with_na_all it influences the hh_id column and screws it up.
 	select(-c(contains("insult"), contains("belittle"))) %>%
-	filter(hh_id %notin% c("10D109224D11_2750", "10G115604G26_3478", "10G115614G26_3517")) %>%
-	
+	# filter(hh_id %notin% c("10D109224D11_2750", "10G115604G26_3478", "10G115614G26_3517")) %>%
+	filter(hh_id %notin% (harassment_physical_sexual_g_list %>% pull(hh_id))) %>%
 	filter_at(vars(-hh_id), any_vars(!is.na(.))) %>%
 	janitor::remove_empty(which = "cols") %>%
 	
@@ -2667,9 +2682,70 @@ survey_data %>%
 	filter_at(vars(-hh_id), any_vars(!is.na(.))) %>%
 	janitor::remove_empty(which = "cols") %>%
 	
-	sample_n(size = 2)
-
-
+	sample_n(size = 8)  %>%
+	select(hh_id)
 ```
 
 There were only three adolescent girls who's mother reported that they were hit or worse. These were hh  10G115604G26_3478, 10G115614G26_3517. This girl was reported to be pushed 10D109224D11_2750. The two of seven ramdonly selected girls reported being scared are 8wB122150_1733, 3G186539Dd8_1975
+
+```{r}
+
+harassment_physical_sexual_b_list <-
+	harassment_physical_sexual_b %>%
+		filter(hh_id %notin% (harassment_physical_sexual_g_list %>% pull(hh_id))) %>%
+	filter(hh_id %notin% (harassment_physical_sexual_g_extra_list %>% pull(hh_id))) %>%
+	sample_n(size = 10) %>%
+	select(hh_id)
+# 3E185415DD22_1424, 8wBI15102369_1104, 10G115604G26_3478, 9G123670G29_6347, 10D109334D11_2814
+
+
+harassment_physical_sexual_w_list <-
+	harassment_physical_sexual_w %>%
+	filter(hh_id %notin% (harassment_physical_sexual_g_list %>% pull(hh_id))) %>%
+	filter(hh_id %notin% (harassment_physical_sexual_g_extra_list %>% pull(hh_id))) %>%
+	filter(hh_id %notin% (harassment_physical_sexual_b_list %>% pull(hh_id))) %>%
+	sample_n(size = 10) %>%
+	select(hh_id)
+#hh: 8wA117722A19_2130, 8wA115397_1528, 8wDI21101459, 8wBA20117719_, 9G600019G1_5663
+
+harassment_physical_sexual_m_list <-
+	harassment_physical_sexual_m %>%
+	filter(hh_id %notin% (harassment_physical_sexual_g_list %>% pull(hh_id))) %>%
+	filter(hh_id %notin% (harassment_physical_sexual_g_extra_list %>% pull(hh_id))) %>%
+	filter(hh_id %notin% (harassment_physical_sexual_b_list %>% pull(hh_id))) %>%
+	filter(hh_id %notin% (harassment_physical_sexual_w_list %>% pull(hh_id))) %>%
+	sample_n(size = 10) %>%
+	select(hh_id)
+# 8wB102745i14_2610, 10G110695G26_3480, 8wA117770A30_, 8wB115467A16_2421, 10D109334D11_2814
+```
+
+
+```{r}
+harassment_physical_sexual_list <-
+	bind_rows(
+		harassment_physical_sexual_w_list,
+		harassment_physical_sexual_m_list,
+		harassment_physical_sexual_g_list,
+		harassment_physical_sexual_g_extra_list,
+		harassment_physical_sexual_b_list
+	) %>%
+	pull(hh_id)
+
+harassment_physical_sexual_list_hh_detail <-
+	survey_data %>%
+	filter(hh_id %in% harassment_physical_sexual_list) %>%
+	mutate(
+		hh_id = 
+		factor(hh_id, levels = harassment_physical_sexual_list)
+	) %>%
+	select(SubmissionDate, hh_id, camp_id, block_id, subblock_id, name_respondent, name_hh_head, name_mahji, fcn_id, hh_id, target_child_name) %>%
+	arrange(hh_id) %>%
+	mutate(
+		target_respondent = c(rep("woman", 10), rep("man", 10), rep("girl", 10), rep("boy", 10))
+	) %>%
+	select(SubmissionDate,target_respondent, hh_id, everything())
+
+write.csv(harassment_physical_sexual_list_hh_detail, "C:/Users/lenovo/Google Drive (lakwong@stanford.edu)/Rohingya/Rohingya research - Fuel/HH selection/harassment_physical_sexual_list_hh_detail.csv")
+
+```
+
