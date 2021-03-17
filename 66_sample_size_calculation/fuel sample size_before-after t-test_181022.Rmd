@@ -1,0 +1,71 @@
+---
+title: "Rohingya fuel sample size"
+author: "Laura Kwong"
+date: "September 28, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(pwr)
+```
+
+## Sample size for fuel respiratory disease measurements
+Given logistical constraints, two-sided alpha of 0.05, inter-class correlation of 0.20, and 55% baseline prevalence
+
+
+If we do a natural experiment, then we will NOT have clusters, so don't use library(CRT)
+```{r}
+pwr.t.test(d = (0.55 - 0.42), sig.level = 0.05, power = .80, type = "paired")
+```
+
+--> 15% reduction: 350 households pre and post -> 367 hh with 5% dropout
+--> 13% reduction: 467 households pre and post -> 490 hh with 5% dropout
+--> 12% reduction: 547 households pre and post -> 574 hh with 5% dropout
+--> 10% reduction: 787 households pre and post -> 826 hh with 5% dropout
+
+Assume 10% of hh will get it every month 
+Measure 1 cohort in winter in 5 camps, measure 1 cohort in summer in 5 camps, then follow-up 12 months later from initial baseline
+
+Oversample to account for follow-up loses
+```{r}
+787*1.05
+```
+
+## Sample size for fuel indoor air quality measurements
+Given logistical constraints, two-sided alpha of 0.05, inter-class correlation of 0.20, and 55% baseline prevalence
+
+From Pokhel_2015 study of hh indoor air quality in Nepal: 
+"The mean household PM2.5 concentrations across all seasons of the year were 
+656 (standard deviation (SD):924) mg/m3 from biomass; 
+169 (SD: 207) mg/m3 from kerosene; 
+101 (SD: 130) mg/m3 from LPG; and 
+80 (SD: 103) mg/m3 from electric stoves."
+
+sd of pooled biomass and LPG is ~640 (sqrt(820000 / 2)) 
+
+
+
+pwr.t.test(d = 0.5, power = 0.80, sig.level = 0.05)
+d=(m1???m2)/??; ?? is the common standard deviation;  population standard deviation. If we have absolutely no idea, one rule of thumb is to take the difference between the maximum and minimum values and divide by 4.
+
+```{r}
+# ideal
+pwr.t.test(d = (656 - 101)/640, sig.level = 0.05, power = .80, type = "paired")
+
+# realistic (assume homes are leaky so some smoke is escaping in hh that use biomass and some outdoor air pollution is entering into homes using LPG - even though the entire neighorhood is using LPG)
+pwr.t.test(d = (450 - 150)/640, sig.level = 0.05, power = .80, type = "paired")
+
+```
+
+--> to detect a sig diff in hh using biomass vs LPG: need 38 households pre and post
+
+
+Oversample to account for follow-up loses
+```{r}
+38*1.05
+```
+

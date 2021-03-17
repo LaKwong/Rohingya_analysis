@@ -1,0 +1,1282 @@
+---
+title: "Rohingya_Analysis"
+author: "Laura Kwong"
+date: "11/06/2019"
+output:
+  word_document: default
+  html_document: default
+---
+R verion 3.6.1 downloaded 6 Nov 2019
+
+
+To do
+1.  house_material
+
+
+Errors:
+# There was MORE beef in the pre-intervention communities? Look for outliers/mistakes
+# fuel_ever_receive_lpg = 1 is not true for all the intervention hh and it should be!!
+# fuel_30_receive_lpg = 1 (%) is not all true for all the intervention hh!!
+# What is the "other fuel"  - need to ask in FGD
+
+# We can use this question and the price of firewood in August / Sep (when the survey was conducted), to estimate the number of bundles of firewood purchased, then get the average weight of 100 bundles to calculate demand
+buy_wood_cost 
+"In the past 30 days, how much money (taka) did you spend on firewood?"
+
+
+Considerations:
+
+# buy_wood_cost There are 4 hh above 3000 - check their hh size and if they a for others or cooking to sell or boiling frequently
+
+"Who in your family gathers scraps/leaves/twigs?" - is this question interpreted as who has EVER gathered? Or only, who currently gathers? If so, do we think this is a problem?
+
+Add question: fuel_30_other is 10% of homes - what is this other?
+
+Almost 150 of 393 hh report burning plastic every day!  We need to better understand how many meals and if they are relying on plastic for all of the fuel they need or if it is used in combination with other fuel sources --> ask about how often they burned plastic
+
+1. fuel_ever_plastic 
+0. How often per week do you burn plastic? --> Need a recall period?
+2. When you burned plastic, was the only fuel you used plastic or did you combine plastic with other fuels?
+3. Why did you burn plastic
+Select_multiple
+a. We can't access other fuels
+b. If we burn plastic, we don't have to spend money buying other fuels 
+c. Burning plastic is a good way to get rid of trash
+d. Other
+Specify other
+
+Add questions about burning plastic to the focus group discussions - doesn't quite fit with any of the FGDs, but add to distribution and training. 
+
+Many hh have drudgery_most_diff == drudgery_second_most_diff == drudgery_easiest! Need to train that this shouldn't happen. 
+The drudgery questions were accidentally not required, but still why did many skip them?  
+Will probably have to throw this question out. = (
+
+The dates are in three different formats. 
+
+
+
+Need to factor everything -- look at DataChallenge notes
+
+Instead of refactoring or labeling everything, why not just have the label equal the choices tab "name"? Or does the name have to be a number. 
+
+I averaged as many MUAC measurements as were taken - is that right?
+
+Need to know what breathing rate and MUAC should be for each age group to know if ther are fewer out of the ordinary. 
+
+How does icddrb do PCR for wealth? Should have some way to see if the hh are different in terms of SES. 
+
+
+
+This script is to analyze the Rohingya LPG Assessment household survey data
+
+
+
+- percent of hh involved in ngo or wage labor
+
+pre-intervention sep expenditure charts for people 
+- percentage of people buying wood 
+- percentage of those collecting X fuel and being harassed
+- 
+- send Mickael my requests for cost info
+- add Peter, Rajib, Ritu, Geophrey to IRB
+
+
+```{r setup, include=FALSE}
+library(tableone)
+library(janitor) #tabyl() adorn_...()
+library(dplyr)
+library(readxl)
+library(lubridate)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+knitr::opts_chunk$set(echo = TRUE)
+
+`%notin%` <- Negate(`%in%`)
+```
+
+
+```{r}
+file_survey_data_base <- here::here("data-raw", "rohingya_fuel_20200106_v1_host.csv")
+# file_barplot_firewood_collection_hours <- here::here("figs", "barplot_firewood_collection_hours.png")
+# file_barplot_firewood_collection_frequency <- here::here("figs", "barplot_firewood_collection_frequency.png")
+# file_barplot_sexual_harassment <- here::here("figs", "barplot_sexual_harassment.png")
+
+file_out_tidy_data <- here::here("data", "RohingyaFuelMaster_tidy_host.rds")
+file_out_hh_data <- here::here("data", "RohingyaFuelMaster_hh_data_host.xlsx")
+```
+
+```{r load_data, include=FALSE} 
+survey_data_base <- read.csv(file_survey_data_base)
+```
+
+```{r vars}
+asset_vars <- 
+	c(
+		"mattress", "blanket", "mosquito_net", "solar_lamp", "portable_lamp",
+		"umbrella", "table", "chair_bench", "almirah_wardrobe_show_case", 
+		"electric_fan", "refrigerator",
+		"shovel", "sickle", "weaving_tool", "fish_net",
+		"mobile_phone", "smartphone", "radio", 
+		"television", "DVD_VCD_player", "computer_laptop", 
+		"bicycle", "motorcycle", "rickshaw_van", "CNG_tempo_electric_bike",
+		"chicken_duck_pigeon", "goat_sheep", "cow_buffalo"
+	)
+
+spent_monthly_vars <- 
+	c(
+		"spent_food",
+		"buy_wood_cost", # "In the past 30 days, how much money (taka) did you spend on firewood?"
+		"spent_hh_items",
+		"spent_hygiene",
+		"spent_tobacco_pan",
+		"spent_transport",
+		"spent_phone",
+		"spent_clothing_month", 
+		"spent_shelter_month",
+		"spent_celebrations_month",
+		"spent_debt_month",
+		"spent_medical_month",
+		"spent_education_month",
+		"spent_other_month"
+	)
+# 		"spent_total_month",
+
+nonrespiratory_vars <- 
+	c(
+		"target_child_eye_red", "target_child_eye_itch",  
+		"respondent_eye_red", "respondent_eye_itch", "respondent_eye_sore",
+		"respondent_headache", "respondent_backache"
+	)
+
+nonrespiratory_vars_yn <-  
+	map_chr(nonrespiratory_vars, ~ paste0(., "_yn"))
+
+respiratory_vars <- 
+	c(
+		"target_child_cough", "target_child_resp_rate", 
+		"target_child_clinic_resp", "target_child_wheezing", 
+		"target_child_disturbed_sleep", "target_child_distrubed_speech", 
+		"respondent_cough", "respondent_resp_rate", 
+		"respondent_weight_loss", "respondent_wheezing", 
+		"respondent_disturbed_sleep", "respondent_disturbed_speech"
+	)
+
+respiratory_vars_yn <-  
+	map_chr(respiratory_vars, ~ paste0(., "_yn"))
+
+generalhealth_vars <-  
+	c(
+		"target_child_fever", "target_child_weight_loss", "target_child_lethargy"
+	)
+
+generalhealth_vars_yn <-  
+	map_chr(generalhealth_vars, ~ paste0(., "_yn"))
+
+MUAC_vars <- 
+	c(
+		"target_child_arm_measurements_yn", "target_child_mid_arm_circ_av"
+	)
+
+breathing_vars <- 
+	c(
+		"target_child_breathing_yn", "target_child_resp_rate_measured"
+	)
+
+mental_health_good_vars <- c("happy", "enjoyed_life", "self_worth", "hopeful")
+
+mental_health_bad_vars <- 
+	c(
+		"bothered", "sick", 
+		"no_appetite", "diff_concentrating", "restless_sleep",
+		"exert_effort", "less_talkative", 
+		"feeling_disliked", "unfriendly_people",
+		"fearful", "lonely", "crying_spells",
+		"cant_get_going", "feeling_down", "life_failure", "depressed" 
+	)
+
+mental_health_vars <-
+	c(mental_health_good_vars, mental_health_bad_vars, "suicidal_thoughts_30")
+
+
+mental_health_good_twodays_vars <-  
+	map_chr(mental_health_good_vars, ~ paste0(., "_twodays"))
+
+mental_health_bad_twodays_vars <-  
+	map_chr(mental_health_bad_vars, ~ paste0(., "_twodays"))
+
+mental_health_twodays_vars <-
+	c(mental_health_good_twodays_vars, mental_health_bad_twodays_vars, "suicidal_thoughts_30")
+
+
+# food soure
+# This question was select_multiple. For each category there is a column with a y/n response for that food/source category
+food_source <- 
+	c(
+		"rice_source", "bread_source", "corn_source", 
+		"potatoes_source", "lentils_source", "eggs_source", 
+		"dairy_source", "veggies_source", "fruit_source", 
+		"fish_source", "poultry_source", "goat_sheep_source",
+		"beef_source", "oil_source", "sugar_source" 
+	)
+
+food_source_sources = 
+	c(
+		"Don't eat",
+		"Food aid",
+		"Purchased",
+		"Purchased", #"Purchased with wages",
+		"Gift",
+		"Borrowed",
+		"Own production",
+		"Exchanged labor",
+		"Exchanged items",
+		"Gathered",
+		"Other"
+	)
+
+food_source_all <- c()
+for (food in food_source){
+	for (i in c(1:9, 66)){
+		food_source_all <- c(food_source_all, paste(food, i, sep = ""))
+	}
+}
+
+
+# food_cant_afford
+food_cant_afford <-
+	c(
+		"food_cant_afford_action",
+		"food_cant_afford_difficult",
+		"food_cant_afford_easiest"
+	)
+
+# fuel_cant_afford
+fuel_cant_afford <-
+	c(
+		"food_cant_afford_action"
+	)
+
+food_cant_afford_reasons <- 
+	c(
+		"Borrowed food",
+		"Reduce food per meal",
+		"Reduce meals per day",
+		"Skip meals",
+		"Restrict adult food",
+		"Sold goods",
+		"Purchased on credit",
+		"Borrowed money",
+		"Reduced expenditures",
+		"Spent savings",
+		"Worked for money for food",
+		"Sold or consumed livestock",
+		"Exchanged food",
+		"Other",
+		"Did not need to manage"
+	)
+
+fuel_cant_afford_reason <- 
+	c(
+		"Borrowed fuel", # Response was "borrow food", which is also possible, but I'm going to interpret as "borrow fuel"
+		"Reduce food per meal",
+		"Reduce meals per day",
+		"Skip meals",
+		"Restrict adult food",
+		"Sold goods",
+		"Purchased on credit",
+		"Borrowed money",
+		"Reduced expenditures",
+		"Spent savings",
+		"Worked for money for fuel",
+		"Sold livestock to purchase fuel",
+		"Sold food to purchase fuel",
+		"Eat food that doesn't need to be cooked",
+		"Eat food that wasn't fully cooked",
+		"Other",
+		"Did not need to manage"
+	)
+
+# This question was select_multiple. For each category there is a column with a y/n response for that response category
+food_cant_afford_all <- c()
+for (type in food_cant_afford){
+	for (i in c(1:13, 66, 88)){ # 
+		food_cant_afford_all <- c(food_cant_afford_all, paste(type, i, sep = ""))
+	}
+}
+
+# This question was select_multiple. For each category there is a column with a y/n response for that response category
+fuel_cant_afford_all <- c()
+for (type in fuel_cant_afford){
+	for (i in c(1:15, 66, 88)){ #
+		fuel_cant_afford_all <- c(fuel_cant_afford_all, paste(type, i, sep = ""))
+	}
+}
+
+# mutate_at(
+# 		vars(food_cant_afford_action),
+# 		funs(factor),
+# 			levels = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 66, 88),
+# 		labels = c(
+# 			"Borrowed food",
+# 			"Reduce food per meal",
+# 			"Reduce meals per day",
+# 			"Skip meals",
+# 			"Restrict adult food",
+# 			"Sold goods",
+# 			"Purchased on credit",
+# 			"Borrowed money",
+# 			"Reduced expenditures",
+# 			"Spent savings",
+# 			"Worked for money for food",
+# 			"Sold or consumed livestock",
+# 			"Exchanged food",
+# 			"Other",
+# 			"Did not need to manage"
+# 		)
+# 	)
+# 	
+# 	mutate_at(
+# 		vars(fuel_cant_afford_action),
+# 		funs(factor),
+# 		levels = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 66, 88),
+# 		labels = c(
+# 			"Borrowed fuel", # Response was "borrow food", which is also possible, but I'm going to interpret as "borrow fuel"
+# 			"Reduce food per meal",
+# 			"Reduce meals per day",
+# 			"Skip meals",
+# 			"Restrict adult food",
+# 			"Sold goods",
+# 			"Purchased on credit",
+# 			"Borrowed money",
+# 			"Reduced expenditures",
+# 			"Spent savings",
+# 			"Worked for money for fuel",
+# 			"Sold livestock to purchase fuel",
+# 			"Sold food to purchase fuel",
+# 			"Eat food that doesn't need to be cooked",
+# 			"Eat food that wasn't fully cooked",
+# 			"Other",
+# 			"Did not need to manage"
+# 		)
+# 	) 
+
+
+fuel_use_non_lpg_type <-
+	c(
+		"fuel_use_non_lpg_type_buy_lpg",
+		"fuel_use_non_lpg_type_buy_wood",
+		"fuel_use_non_lpg_type_collect_wood",
+		"fuel_use_non_lpg_type_other"
+	)
+
+credit <-
+	c(
+		"credit_access",
+		"credit_relatives",
+		"credit_charities", 
+		"credit_village_head", 
+		"credit_lender", 
+		"credit_bank",
+		"credit_cooperative"
+	)
+
+# Ugh! We could have done a much better job of naming the variables so they would be easy to separate
+
+
+# for fuel_collection_who, the denominator is hh that EVER collected type X fuel
+fuel_collection_who <- c()
+for (fuel in c("gather_scraps", "collect_wood", "receive_wood", "buy_wood", "receive_lpg", "buy_lpg", "receive_crh", "buy_crh")){
+	for (person in c("w", "g", "m", "b")){
+		fuel_collection_who <- c(fuel_collection_who, paste(fuel, person, sep = "_"))
+	}
+}
+
+# for any_harassment_hh, the denominator is ALL households
+any_harassment_hh <- # did anyone in the hh experience this type of harassment FOR ANY REASON? Y/N
+	c(
+		"insult_hh", "belittle_hh", "scare_hh", "push_hh", 
+		"hit_hh", "kick_hh", "choke_hh", "weapon_hh", 
+		"sex_lang_hh", "sex_contact_hh", "sex_rumor_hh", 
+		"clothing_pull_hh", "sex_corner_hh"
+	)
+
+# for fuel_harassment_hh, the denominator is households that said they EvER collected type X fuel 
+fuel_harassment_hh <- # did anyone in the hh experience this type of harassment related to fuel collection? Y/N
+	survey_data_base %>% 
+	select(
+		ends_with("insult_hh"), ends_with("belittle_hh"), ends_with("scare_hh"), ends_with("push_hh"), 
+		ends_with("hit_hh"), ends_with("kick_hh"), ends_with("choke_hh"), ends_with("weapon_hh"), 
+		ends_with("sex_lang_hh"), ends_with("sex_contact_hh"), ends_with("sex_rumor_hh"), 
+		ends_with("clothing_pull_hh"), ends_with("sex_corner_hh")
+	) %>%
+	select(
+		-any_harassment_hh
+	) %>%
+	names()
+
+# What was the frequency of harassment by the specific people? (Categorical number of times per week)
+# Determine prev with harassment_vars_yn
+# Need to make the gender-specific denominator the fuel_collection_who - fuel-and gender-specifc 
+harassment_vars <- 
+	survey_data_base %>%
+	select( 
+		starts_with("gather_scraps"), 
+		starts_with("collect_wood"), 
+		starts_with("receive_wood"), 
+		starts_with("buy_wood"), 
+		starts_with("receive_lpg"), 
+		starts_with("buy_lpg"), 
+		starts_with("receive_crh"), 
+		starts_with("buy_crh")
+	) %>%
+	select(
+		-c(
+			fuel_collection_who, # remove the vars that only indicate of that type of person collects the type of fuel
+			# any_harassment_hh, # These weren't selected by the section criteria
+			fuel_harassment_hh, # remove the vars that are the hh level of harassment 
+			gather_scraps_dead, gather_scraps_dead.1, # gather_scraps_dead1, 
+			collect_wood_walk_hr, collect_wood_forest_start, collect_wood_forest_stop,
+			receive_wood_wait,
+			buy_wood_cost, buy_wood_reason, buy_wood_when_start,
+			receive_lpg_walk, receive_lpg_wait,
+			buy_lpg_cost, buy_lpg_walk, buy_lpg_wait,
+			receive_crh_walk, receive_crh_wait
+			
+			#	# vars that don't exist yet	
+			# time_child_gathering_nonwood_items = time_child_gathering_non.wood_items, 
+			# respondent_resp_rate  = resp_rate_reported_respondant,       
+			# respondent_weight_loss = weight_loss_reported_respondant,
+			# reduce_meals_lack_food = reduce_meals,
+			# not_eat_lack_food = not_eat,
+			# reduce_meals_lack_fuel = reduce_meals1,
+			# not_eat_lack_fuel = not_eat1,
+			# fuel_ever_gather_scraps = fuel_ever_scraps,
+			# fuel_30_gather_scraps = fuel_30_scraps,
+			# gather_wood_dead = gather_scraps_dead1,
+			# collect_wood_times_week = times_wood_day,
+			# reason_forest_defecation = reason_forest_defacation,
+			# cook_to_sell_percent = cook_to_sell,
+			# cook_sell_days_week = cook_sell_yesterday
+		)
+	) %>%
+	names()
+
+# Prevalence of harassment of certain genders; denominator is hh with that gender that EVER collected type X fuel
+harassment_vars_yn <-  
+	map_chr(harassment_vars, ~ paste0(., "_yn"))
+
+# harassment_vars_by_group_yn <-  
+# 	map_chr(harassment_vars_by_group, ~ paste0(., "_yn"))
+```
+
+```{r, eval = FALSE}
+# # Factor
+# mtcars = mtcars %>%
+# 	apply_labels(
+# 		mpg = "Miles/(US) gallon"
+# 	)
+# 
+# fct_reorder() # Reordering a factor by another variable.
+# fct_infreq() # Reordering a factor by the frequency of values.
+# fct_relevel() # Changing the order of a factor by hand.
+# fct_lump() # Collapsing the least/most frequent values of a factor into “other”. n = min num of obs to collapse
+# 
+# mydata$v1 <-
+# 	mydata %>%
+# 	factor(
+# 		v1,
+# 		levels = c(1,2,3),
+# 		labels = c("red", "blue", "green")
+# 	)
+# 
+# mydata$v1 <-
+# 	mydata %>%
+# 	ordered(
+# 		y,
+# 		levels = c(1,3, 5),
+# 		labels = c("Low", "Medium", "High")
+# 	)
+# 
+# 
+# library(ggplot2, warn.conflicts = FALSE)
+# 
+# use_labels(mtcars, {
+# 	# '..data' is shortcut for all 'mtcars' data.frame inside expression
+# 	ggplot(..data) +
+# 		geom_point(aes(y = mpg, x = wt, color = qsec)) +
+# 		facet_grid(factor(am) ~ factor(vs))
+# })
+```
+
+
+# Coalsce values that were accidentally separated into two variables
+
+There are many vars that have <var>1 and <var>.1 becuase of a change in the survey xlm that happened after hh 9I100788I3_5992, the last pre-intervention hh, which was in camp 9 and surveyed 10/2. The first intervention hh, 4E184565Pp21_514, was in camp 4 and surveyed 10/10. This change happened when we 
+
+```{r, eval=FALSE}
+# survey_data_base %>%
+# 	select(ends_with("1")) %>%
+# 	names()
+```
+
+```{r, eval=FALSE}
+# survey_data_base %>%
+# 	select(rice_source, rice_source0, rice_source.0)
+```
+
+```{r}
+survey_data_1 <- 
+	survey_data_base %>%
+	filter(consent == "OK") %>%
+	
+	# Each host community hh was assigned a random ID of the form T0[0-9]{4}. 
+	# Some enumerators recorded this as the house_id while others recorded it as the serial_id. The houseID is sometimes gibberish. I looked at the date, enumerator, and other near-correct serial_ids to determine the serial_ids that were messed up. 
+	
+	mutate_at(
+		vars(house_id, serial_id),
+		funs(str_to_upper(str_replace_all(str_replace_all(., "o", "0"), "O", "0")))
+	) %>%
+	mutate(
+		serial_id_original = serial_id,
+		
+		serial_id  = ifelse(grepl("^T.{5}", house_id), house_id, serial_id),
+		serial_id =
+			case_when(
+				serial_id == "T3167" ~ "T03167",
+				serial_id == "10061" ~ "T03176",
+				serial_id == "3304" ~ "T03304", 
+				serial_id == "3452" ~ "T03452", 
+				serial_id == "T3550" ~ "T03550", 
+				serial_id == "T3664" ~ "T03664",
+				serial_id == "T3630" ~ "T03630",
+				serial_id == "T93684" ~ "T03684",
+				serial_id == "T0-4066" ~ "T04066",
+				serial_id == "T0-4078" ~ "T04078",
+				serial_id == "848" ~ "T04183",
+				serial_id == "T0-4485" ~ "T04485",
+				TRUE ~ serial_id
+			),
+		hh_id = serial_id
+	) %>%
+	# select(serial_id_original, house_id, serial_id)
+	
+	# The ward_id and village_id were sometimes nonsense (maybe they were entered in Bangla?) and the hh_id was a compilation of the upzaila, union, ward, village, and house ids so the hh_id doesn't make sense 
+	
+	
+	mutate_at(
+		vars(upazila_id, union_id, ward_id, village_id, ),
+		funs(str_to_title(str_replace_all(., fixed(" "), "")))
+	) %>%
+
+	mutate_at(
+		vars(
+			starts_with("rice_source"),
+			starts_with("bread_source"),
+			starts_with("corn_source"),
+			starts_with("potatoes_source"),
+			starts_with("lentils_source"),
+			starts_with("eggs_source"),
+			starts_with("dairy_source"),
+			starts_with("veggies_source"),
+			starts_with("fruit_source"),
+			starts_with("fish_source"),
+			starts_with("poultry_source"),
+			starts_with("goat_sheep_source"),
+			starts_with("oil_source"),
+			starts_with("sugar_source"),
+			starts_with("food_cant_afford_action"),
+			starts_with("fuel_cant_afford_action"),
+			starts_with("reduce_meals"),
+			starts_with("not_eat"),
+			starts_with("gather_scraps_dead")
+		),
+		list(as.numeric)
+	)
+```
+
+
+```{r beautify_data}
+survey_data_2 <-
+	survey_data_1 %>%
+	filter(consent == "OK") %>%
+	select(
+		# -X,
+		-starts_with("generated_note"),
+		-starts_with("reserved_name")
+	) %>%
+	
+	# clean up values
+	mutate(
+		# camp_id = 
+		# 	str_to_upper(str_trim(camp_id)), # could use stringr in case there are other mis-matches
+		# subblock_id = 
+		# 	str_to_upper(str_trim(subblock_id)), # could use stringr in case there are other mis-matches
+		# name_mahji = 
+		# 	str_to_title(str_trim(name_mahji)),
+		name_respondent = 
+			str_to_title(str_trim(name_respondent)),
+		name_hh_head = 
+			str_to_title(str_trim(name_hh_head)),
+		target_child_name = 
+			str_to_title(str_trim(target_child_name)),
+	) %>%
+	
+	# rename vars
+	# rename(newname, oldname) renames (not copy and rename new column)
+	rename( 
+		
+		time_child_gathering_nonwood_items = time_child_gathering_non.wood_items, 
+		
+		respondent_resp_rate  = resp_rate_reported_respondant,       
+		respondent_weight_loss = weight_loss_reported_respondant,
+		
+		# coping strategies food and fuel sections both have "reduce_meals" and "not_eat" vars
+		reduce_meals_lack_food = reduce_meals,
+		not_eat_lack_food = not_eat,
+		reduce_meals_lack_fuel = reduce_meals.1, # reduce_meals1
+		not_eat_lack_fuel = not_eat.1, # not_eat1
+		
+		fuel_ever_gather_scraps = fuel_ever_scraps,
+		fuel_30_gather_scraps = fuel_30_scraps,
+		
+		# "Are the scraps/leaves/twigs you collect all dead?" has the variable gather_scraps_dead 
+		# "Is all the wood you collect all dead?" accidentally has the variable gather_scraps_dead.1
+		gather_wood_dead = gather_scraps_dead.1, 
+		
+		# When you depend on wood for cooking fuel, then how many times in one week do you go to the forest to collect wood?
+		collect_wood_times_week = times_wood_day,
+		reason_forest_defecation = reason_forest_defacation,
+		cook_to_sell_percent = cook_to_sell,
+		cook_sell_days_week = cook_sell_yesterday
+	) %>%
+	select(-time_child_gathering_nonwood_items)
+```
+
+```{r, eval = FALSE}
+# # Factor
+# mtcars = mtcars %>%
+# 	apply_labels(
+# 		mpg = "Miles/(US) gallon"
+# 	)
+# 
+# fct_reorder() # Reordering a factor by another variable.
+# fct_infreq() # Reordering a factor by the frequency of values.
+# fct_relevel() # Changing the order of a factor by hand.
+# fct_lump() # Collapsing the least/most frequent values of a factor into “other”. n = min num of obs to collapse
+# 
+# mydata$v1 <-
+# 	mydata %>%
+# 	factor(
+# 		v1,
+# 		levels = c(1,2,3),
+# 		labels = c("red", "blue", "green")
+# 	)
+# 
+# mydata$v1 <-
+# 	mydata %>%
+# 	ordered(
+# 		y,
+# 		levels = c(1,3, 5),
+# 		labels = c("Low", "Medium", "High")
+# 	)
+# 
+# 
+# library(ggplot2, warn.conflicts = FALSE)
+# 
+# use_labels(mtcars, {
+# 	# '..data' is shortcut for all 'mtcars' data.frame inside expression
+# 	ggplot(..data) +
+# 		geom_point(aes(y = mpg, x = wt, color = qsec)) +
+# 		facet_grid(factor(am) ~ factor(vs))
+# })
+```
+
+```{r}
+survey_data_3 <-
+	survey_data_2 %>%
+	mutate(
+		# some hh are missing the study_arm
+		study_arm = "host pre-intervention",
+		
+		# study_arm = 
+		# 	factor(
+		# 		study_arm,
+		# 		levels = c(1, 2),
+		# 		labels = c("host pre-intervention", "host post-intervention")
+		# 	), 
+		
+		hh_id = as.character(hh_id),
+		
+		# enumerator = as.factor(enumerator),
+		enumerator =
+			factor(
+				enumerator,
+				levels = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15), # why doesn't c(1:15) work?
+				labels =
+					c(
+						"Tunajjina Alam",
+						"Rayhanul Jannat",
+						"Shamima Akter",
+						"Morsida Akter",
+						"Way May Marma",
+						"Morselina Akter",
+						"Farhana Suma",
+						"Nishat Farjana",
+						"Arefa Khanam",
+						"Daliya Akter",
+						"Md. Jamilur Rahman",
+						"Md. Razu Ahmed",
+						"Mohammad Alamgir",
+						"Nazrin Akter",
+						"dummy"
+					)
+			)
+	) %>%
+	
+	mutate_at(
+		vars(
+			generalhealth_vars, 
+			respiratory_vars,
+			# UNHCR_card, 
+			food_cant_afford_2wk, 
+			fuel_cant_afford_2wk,
+			window_door_wall, 
+			credit_borrow_money_food,
+			fuel_use_non_lpg_type,
+			stove_reason_sell_food,  
+			fuel_collection_who,
+			any_harassment_hh,
+			harassment_continue,
+			harassment_vars #, harassment_vars_by_group
+		), 
+		na_if, 77
+	) %>% # 77 = refused -  can't analyze if set to NA like this
+	mutate_at(
+		vars(
+			generalhealth_vars, 
+			respiratory_vars,
+			# UNHCR_card, 
+			food_cant_afford_2wk, 
+			fuel_cant_afford_2wk,
+			window_door_wall, 
+			credit_borrow_money_food,
+			fuel_use_non_lpg_type,
+			stove_reason_sell_food, 
+			fuel_collection_who,
+			any_harassment_hh,
+			harassment_continue,
+			harassment_vars #, harassment_vars_by_group
+		), 
+		na_if, 99
+	) %>% # 99 = don't know - can't analyze if set to NA like this
+	
+	mutate_at(
+		vars(
+			borrow_food, reduce_food, 
+			reduce_meals_lack_food, not_eat_lack_food, restrict_food,
+			borrow_fuel, reduce_fuel, 
+			reduce_meals_lack_fuel, not_eat_lack_fuel,
+			burn_plastic_frequency
+		),
+		funs(
+			ifelse(food_cant_afford_2wk == 0, 0, .)
+		)
+	) %>%
+	
+	mutate_at(
+		vars(
+			mental_health_vars, suicidal_thoughts_30,
+			
+			borrow_food, reduce_food, 
+			reduce_meals_lack_food, not_eat_lack_food, restrict_food,
+			borrow_fuel, reduce_fuel, 
+			reduce_meals_lack_fuel, not_eat_lack_fuel,
+			burn_plastic_frequency
+		),
+		funs(ordered),
+		levels = c(0, 1, 2, 3, 4),
+		labels = c(
+			"Never", "1-2 days/wk", 
+			"3-4 days/wk", "5-6 days/wk", 
+			"Every day"
+		)
+	) %>%
+	
+	
+	mutate_at(
+		vars(nonrespiratory_vars), # all have "illness_freq" as choice set
+		funs(ordered),
+		levels = c(0, 1, 2, 3),
+		labels = 
+			c(
+				"Never",
+				"A few days (1-2 days)",
+				"Most days (5-12 days)",
+				"Almost every day (13-14 days)"
+			)
+	) %>%
+	# # Sep into "Never" and "Once or more" --> Note that this OVERWRITES nonrespiratory_vars, mental_health_vars, and suicidal_thoughts_30
+	# mutate_at(
+	# 	vars(nonrespiratory_vars, mental_health_vars, suicidal_thoughts_30),
+	# 	funs(
+	# 		yn = case_when(
+	# 			. == "Never" ~ 0,
+	# 			TRUE ~ 1
+	# 		)
+	# 	)
+	# ) %>%
+	
+# mutate_at(
+# 	vars(nonrespiratory_vars_yn),
+# 	funs(ordered),
+# 	levels = c(0, 1), 
+# 	labels = c("No", "Yes")
+# ) %>%
+
+mutate_at(
+	vars(
+		mental_health_vars, suicidal_thoughts_30
+	),
+	funs(twodays = ordered),
+	levels = c(
+		"Never", "1-2 days/wk", 
+		"3-4 days/wk", "5-6 days/wk", 
+		"Every day"
+	), # why isn't this the previous levels?
+	labels = c(
+		"2 or fewer days/week", "2 or fewer days/week", 
+		"3 or more days/week", "3 or more days/week", 
+		"3 or more days/week"
+	)
+) %>%
+	# mutate_at(
+	# 	vars(mental_health_twodays_vars),
+	# 	funs(ordered),
+	# 	levels = c(0, 1),
+	# 	labels = c("2 or fewer days/week", "3 or more days/week")
+	# ) %>%
+	
+	# mutate_at(
+	# 	vars(generalhealth_vars, respiratory_vars), # all have "yes_no_dk" as choice set 
+	# 	funs(factor), # actual should be factor, but I want to know if ordered makes them show up in a consistent position in ggplot2
+	# 	levels  = c(0, 1), # 77, 99
+# 	labels = c("No", "Yes") # "Don't know", "Refused", 
+# ) %>%
+
+mutate_at(
+	vars(
+		stove_reason_cook_together, 
+		stove_boil_drink, stove_boil_bathe, 
+		stove_reason_stay_warm,
+		soak_rice, soak_lentils, cover_pot, 
+		fuel_use_non_lpg_ever, lpg_prior_use, 
+		stove_used, stove_training,
+		lpg_safety_visit, lpg_gas_leak, 
+		gather_wood_dead, forest_collect_not_wood,
+		
+		fuel_harassment_hh
+	),
+	funs(ordered),
+	levels = c(0, 1)#,
+	# labels = c("No", "Yes")
+) %>%
+	
+	
+	# mutate_at(
+	# 	vars(
+	# 		UNHCR_card, 
+	# 		food_cant_afford_2wk, fuel_cant_afford_2wk,
+	# 		window_door_wall, stove_reason_sell_food,  
+	# 		harassment_continue
+	# 	),
+	# 	funs(ordered),
+	# 	levels = c(0, 1) # ,
+# 	# labels = c("No", "Yes")
+# ) %>%
+
+mutate_at(
+	vars(starts_with("time")),
+	funs(ordered),
+	levels = c(1, 0, -1),
+	labels = c("more", "same", "less")
+) %>%
+	
+	# mutate_at(
+	# 	vars(food_source),
+	# 	funs(factor),
+	# 	levels = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 66),
+	# 	labels = c(
+	# 		"Don't eat", 
+	# 		"Food aid",
+	# 		"Purchased",
+	# 		"Purchased", #"Purchased with wages",
+	# 		"Gift",
+# 		"Borrowed",
+# 		"Own production",
+# 		"Exchanged labor",
+# 		"Exchanged items", 
+# 		"Gathered",
+# 		"Other"
+# 	)
+# ) %>%
+# 
+# mutate_at(
+# 	vars(food_cant_afford_action),
+# 	funs(factor),
+# 	levels = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 66, 88),
+# 	labels = c(
+# 		"Borrowed food",
+# 		"Reduce food per meal",
+# 		"Reduce meals per day",
+# 		"Skip meals",
+# 		"Restrict adult food",
+# 		"Sold goods",
+# 		"Purchased on credit",
+# 		"Borrowed money",
+# 		"Reduced expenditures",
+# 		"Spent savings",
+# 		"Worked for money for food",
+# 		"Sold or consumed livestock",
+# 		"Exchanged food",
+# 		"Other",
+# 		"Did not need to manage"
+# 	)
+# ) %>%
+# 
+# mutate_at(
+# 	vars(fuel_cant_afford_action),
+# 	funs(factor),
+# 	levels = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 66, 88),
+# 	labels = c(
+# 		"Borrowed fuel", # Response was "borrow food", which is also possible, but I'm going to interpret as "borrow fuel"
+# 		"Reduce food per meal",
+# 		"Reduce meals per day",
+# 		"Skip meals",
+# 		"Restrict adult food",
+# 		"Sold goods",
+# 		"Purchased on credit",
+# 		"Borrowed money",
+# 		"Reduced expenditures",
+# 		"Spent savings",
+# 		"Worked for money for fuel",
+# 		"Sold livestock to purchase fuel",
+# 		"Sold food to purchase fuel",
+# 		"Eat food that doesn't need to be cooked",
+# 		"Eat food that wasn't fully cooked",
+# 		"Other",
+# 		"Did not need to manage"
+# 	)
+# ) %>%
+# 
+# mutate_at(
+# 	vars(credit, fuel_use_non_lpg_type),
+# 	funs(ordered),
+# 	levels = c(0, 1), # , 99
+# 	labels = c("No", "Yes") # , "DK"
+# ) %>%
+
+mutate_at(
+	vars(
+		harassment_vars, #harassment_vars_by_group, 
+		credit_borrow_money_food
+	), 
+	funs(factor), 
+	levels  = c(0, 1, 2, 3, 4),
+	labels = c(
+		"Never", "Once", 
+		"Twice", "Three times", 
+		"Four or more times"
+	)
+) %>%
+	mutate_at(
+		vars(harassment_vars), # , harassment_vars_by_group
+		funs(
+			yn = case_when(
+				. == "Never" ~ 0,
+				is.na(.) ~ NA_real_, # Inclues don't know and refused becuase I already set 77 and 99 to NA
+				TRUE ~ 1 # includes "Once", "Twice", "Three times", "Four or more times"
+			)
+		)
+	) %>%
+	# mutate_at(
+	# 	vars(harassment_vars_yn, harassment_vars_by_group_yn),
+	# 	funs(ordered),
+	# 	levels = c(0, 1),
+	# 	labels = c("Never", "Once or more")
+	# ) %>%
+	
+	mutate(
+		fuel_ever_gather_scraps = 
+			if_else(
+				fuel_ever_gather_scraps == 0 | is.na(fuel_ever_gather_scraps), 
+				fuel_30_gather_scraps, 
+				fuel_ever_gather_scraps
+			),
+		fuel_ever_collect_wood = 
+			if_else(
+				fuel_ever_collect_wood == 0 | is.na(fuel_ever_collect_wood), 
+				fuel_30_collect_wood, 
+				fuel_ever_collect_wood
+			),
+		
+		buy_wood_cost = 
+			ifelse(
+				is.na(buy_wood_cost),
+				as.double(0),
+				buy_wood_cost
+			),
+		# buy_wood_cost is an integer while fuel_30_buy_wood is a logical (though actually represented by an integer)
+		# ifelsse will accept differences in type, if_else will not
+		fuel_30_buy_wood = 
+			ifelse(
+				buy_wood_cost > 1.0, 
+				as.integer(1),
+				as.integer(0)
+			),
+		fuel_ever_buy_wood = 
+			if_else(
+				fuel_ever_buy_wood == 0 | is.na(fuel_ever_buy_wood), 
+				fuel_30_buy_wood, 
+				fuel_ever_buy_wood
+			),
+		fuel_ever_receive_wood = 
+			if_else(
+				fuel_ever_receive_wood == 0 | is.na(fuel_ever_receive_wood), 
+				fuel_30_receive_wood, 
+				fuel_ever_receive_wood
+			),
+		fuel_ever_receive_lpg = 
+			if_else(
+				fuel_ever_receive_lpg == 0 | is.na(fuel_ever_receive_lpg), 
+				fuel_30_receive_lpg, 
+				fuel_ever_receive_lpg
+			),
+		fuel_ever_buy_lpg = 
+			if_else(
+				fuel_ever_buy_lpg == 0 | is.na(fuel_ever_buy_lpg), 
+				fuel_30_buy_lpg, 
+				fuel_ever_buy_lpg
+			),
+		fuel_ever_receive_crh = 
+			if_else(
+				fuel_ever_receive_crh == 0 | is.na(fuel_ever_receive_crh), 
+				fuel_30_receive_crh, 
+				fuel_ever_receive_crh
+			),
+		fuel_ever_buy_crh = 
+			if_else(
+				fuel_ever_buy_crh == 0 | is.na(fuel_ever_buy_crh), 
+				fuel_30_buy_crh, 
+				fuel_ever_buy_crh
+			)
+	) %>%
+	
+	mutate(first_receive_lpg = dmy(as.character(first_receive_lpg))) %>%
+	mutate(first_enrolled_lpg = dmy(as.character(first_enrolled_lpg))) %>%
+	mutate(date_safety_training = dmy(as.character(date_safety_training))) %>%
+	
+	mutate_at(
+		vars(
+			income_cash_ngo, income_abroad, income_farming, income_own_business,
+			income_wage_labor, income_skill_labor, income_handicrafts_tailoring,
+			income_humanitarian_asst, income_selling_wood
+		),
+		funs(as.numeric) # used to be funs()
+	) %>%
+	rowwise() %>%
+	mutate(
+		income =
+			sum(
+				income_cash_ngo, income_abroad, income_farming, income_own_business,
+				income_wage_labor, income_skill_labor, income_handicrafts_tailoring,
+				income_humanitarian_asst, income_selling_wood,
+				na.rm = TRUE
+			),
+		# Convert money spent in past 6 months to monthly estimate
+		spent_clothing_month = clothing / 6,
+		spent_shelter_month = shelter / 6,
+		spent_celebrations_month = celebrations / 6,
+		spent_debt_month = debt / 6,
+		spent_medical_month = medical / 6,
+		spent_education_month = education / 6,
+		spent_other_month = other_expenditures / 6,
+		spent_total_month_with_6mo_monthly =
+			sum(
+				spent_total_month,
+				spent_clothing_month,
+				spent_shelter_month,
+				spent_celebrations_month,
+				spent_debt_month,
+				spent_medical_month,
+				spent_education_month,
+				spent_other_month,
+				na.rm = TRUE
+			),
+		target_child_resp_rate_measured_av =
+			mean(
+				target_child_resp_rate_measured,
+				target_child_resp_rate_measured_2,
+				na.rm = TRUE,
+				trim = 0 # Don't usually need trim = 0 because that's the default, but not working without it.
+			),
+		target_child_mid_arm_circ_measured_av =
+			mean(
+				target_child_mid_arm_circ,
+				target_child_mid_arm_circ_2,
+				target_child_mid_arm_circ_3,
+				na.rm = TRUE,
+				trim = 0
+			)
+	) %>%
+	ungroup() %>%
+	mutate(
+		target_child_resp_rate_measured_strange =
+			case_when(
+				target_child_resp_rate < 10 ~ "low",
+				target_child_resp_rate > 20 ~ "high",
+				TRUE ~ "normal"
+			),
+		target_child_mid_arm_circ_measured_strange =
+			case_when(
+				target_child_mid_arm_circ_measured_av < 80 ~ "low",
+				target_child_mid_arm_circ_measured_av > 1500 ~ "high",
+				TRUE ~ "normal"
+			)
+	) %>%
+	mutate(
+		mattress_yn = if_else(mattress == 0, 0, 1),
+		blanket_yn = if_else(blanket == 0, 0, 1),
+		mosquito_net_yn = if_else(mosquito_net == 0, 0, 1),
+		solar_lamp_yn = if_else(solar_lamp == 0, 0, 1),
+		portable_lamp_yn = if_else(portable_lamp == 0, 0, 1),
+		umbrella_yn = if_else(umbrella == 0, 0, 1),
+		table_yn = if_else(table == 0, 0, 1),
+		chair_bench_yn = if_else(chair_bench == 0, 0, 1),
+		almirah_wardrobe_show_case_yn = if_else(almirah_wardrobe_show_case == 0, 0, 1),
+		electric_fan_yn = if_else(electric_fan == 0, 0, 1),
+		refrigerator_yn = if_else(refrigerator == 0, 0, 1),
+		shovel_yn = if_else(shovel == 0, 0, 1),
+		sickle_yn = if_else(sickle == 0, 0, 1),
+		weaving_tool_yn = if_else(weaving_tool == 0, 0, 1),
+		fish_net_yn = if_else(fish_net == 0, 0, 1),
+		mobile_phone_yn = if_else(mobile_phone == 0, 0, 1),
+		smartphone_yn = if_else(smartphone == 0, 0, 1),
+		radio_yn = if_else(radio == 0, 0, 1),
+		bicycle_yn = if_else(bicycle == 0, 0, 1),
+		chicken_duck_pigeon_yn = if_else(chicken_duck_pigeon == 0, 0, 1),
+		goat_sheep_yn = if_else(goat_sheep == 0, 0, 1),
+		cow_buffalo_yn = if_else(cow_buffalo == 0, 0, 1)
+	) %>%
+	
+	
+	mutate(
+		food_diversity_starch = 
+			ifelse(
+				rice_adults_week > 0 | bread_adults_week > 0 | potatoes_adults_week > 0 | corn_adults_week > 0 | lentils_adults_week > 0, 
+				1, 
+				0
+			),
+		
+		food_diversity_legumes = 
+			ifelse(
+				lentils_adults_week > 0, 
+				1, 
+				0
+			),
+		
+		food_diversity_dairy = 
+			ifelse(
+				dairy_adults_week > 0, 
+				1, 
+				0
+			),
+		
+		food_diversity_veggies = 
+			ifelse(
+				veggies_adults_week > 0, 
+				1, 
+				0
+			),
+		
+		food_diversity_fruit = 
+			ifelse(
+				fruit_adults_week > 0, 
+				1, 
+				0
+			),
+		
+		food_diversity_meat = 
+			ifelse(
+				eggs_adults_week > 0 | fish_adults_week > 0 | poultry_adults_week > 0 | goat_sheep_adults_week > 0 | beef_adults_week > 0, 
+				1, 
+				0
+			),
+		
+		food_diversity_fat = 
+			ifelse(
+				oil_adults_week > 0, 
+				1, 
+				0
+			),
+		
+		food_diversity_sugar = 
+			ifelse(
+				sugar_adults_week > 0, 
+				1, 
+				0
+			)
+	) %>%
+	rowwise() %>%
+	mutate(
+		food_diversity_num_groups = 
+			sum(
+				food_diversity_starch,
+				food_diversity_legumes,
+				food_diversity_dairy,
+				food_diversity_veggies,
+				food_diversity_fruit,
+				food_diversity_meat,
+				food_diversity_fat,
+				food_diversity_sugar
+			),
+		food_diversity_eight_groups =
+			ifelse(food_diversity_num_groups == 7, 1, 0)
+	) %>%
+	
+	ungroup() %>%
+	
+	# Don't know why I need this again as it is also above
+	mutate(
+		hh_id = as.character(hh_id)
+	)
+```
+
+```{r}
+survey_data <- survey_data_3
+
+survey_data$study_arm %>% summary
+```
+
+```{r hh_data}
+hh_data <-
+	survey_data %>%
+	select(study_arm, upazila_id, union_id, ward_id, hh_id, contact_number, name_hh_head, name_respondent, target_child_name) %>%
+	arrange(study_arm, upazila_id, union_id, ward_id, hh_id) %>%
+	arrange(hh_id)
+
+View(hh_data)
+
+```
+
+
+
+
+```{r}
+write_rds(survey_data, file_out_tidy_data)
+openxlsx::write.xlsx(hh_data, file_out_hh_data)
+```
+
+
+

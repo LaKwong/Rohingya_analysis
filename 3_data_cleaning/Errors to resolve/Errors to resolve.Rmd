@@ -1,0 +1,112 @@
+---
+title: 
+author: 
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE}
+# Libraries
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(hms)
+
+
+knitr::opts_chunk$set(echo = TRUE)
+
+`%notin%` <- Negate(`%in%`)
+```
+
+
+First run "Rohingya_data_merge_baseline_endline
+```{r}
+# source(here::here("code/1_data_cleaning/1_merge_data/Rohingya_data_merge_baseline_endline.Rmd"))
+```
+
+
+# Errors to be resolved
+```{r}
+# There is more than one fcn_id and study_arm combo entry for each of the following
+fcn_id_study_arm_errors <- 
+	data_long %>%
+	# survey_data_full %>%
+	group_by(fcn_id, study_arm) %>%
+	count() %>%
+	filter(n > 1) %>%
+	unite(fcn_id_study_arm, c("fcn_id", "study_arm"), sep = ".") %>%
+	pull(fcn_id_study_arm) 
+
+survey_multiple_entry_errors <-
+	data_long %>%
+	unite(fcn_id_study_arm, c("fcn_id", "study_arm"), sep = ".") %>%
+	filter(
+		fcn_id_study_arm %in% fcn_id_study_arm_errors
+	) %>%
+	separate(fcn_id_study_arm, into = c("fcn_id", "study_arm"), extra = "merge") %>%
+	select(fcn_id, study_arm, SubmissionDate, camp_id, block_id, subblock_id, enumerator, name_hh_head, name_respondent, target_child_name) %>%
+	arrange(study_arm, fcn_id, SubmissionDate)
+
+# had a follow-up survey but missin a baseline "pre-intervention" survey
+missing_pre_intervention_survey_fcn_id <- 
+	anti_join(
+		data_long %>% filter(study_arm == 3) %>% transmute(fcn_id = as.character(fcn_id)), # "post-intervention"
+		data_long %>% filter(study_arm == 1) %>% transmute(fcn_id = as.character(fcn_id)) # "pre-intervention"
+	) %>% 
+	arrange(fcn_id) %>% pull(fcn_id)
+# There were 21 hh that had post-intervention surveys but not pre-intervention surveys. Strange
+#  [1] "101016" "101096" "101144" "101841" "106850" "109577" "109663" "115717" "118211" "122063" "122066" "122503" "123825" "123970" "133506" "193748" "290439" "291236"
+# [19] "291547" "600901" "601066"
+
+data_long %>% 
+	filter(study_arm == 3) %>% # "post-intervention"
+	filter(fcn_id %in% missing_pre_intervention_survey_fcn_id) %>%
+	select(fcn_id, study_arm, camp_id, block_id, subblock_id, name_hh_head, name_respondent, target_child_name) %>%
+	arrange(name_respondent)
+
+
+# # Try to find the missing fcn_id for the 1 hh that at baseline of fcn_id == NA and the 1 hh that had fcn_id == "x"
+# data_long %>%
+# 	filter(fcn_id %in% missing_pre_intervention_survey_fcn_id) %>%
+#   filter(name_respondent == "Juhura khatun") 
+# There is a post-intervention hh with the same camp_id (different block_id, different subblock_id), same name_respondent, and same target_child_name as the hh with the fcn_id = "x" in the baseline survey --> Assign this hh fcn_id == 100976
+
+# data_long %>%
+# 	filter(fcn_id %in% missing_pre_intervention_survey_fcn_id) %>%
+#   filter(camp_id %in% c("8w", "8W"), block_id == "D") %>% 
+# select(consent, fcn_id, camp_id, block_id, subblock_id, name_respondent, target_child_name, target_child_dob_1) %>%
+# arrange(target_child_name)
+# couldn't match the pre-intervention hh fcn_id == NA using the name_respondent or target_child_name, and no close matches
+
+
+
+
+
+# had a follow-up survey but missing a baseline "intervention" survey
+missing_intervention_survey_fcn_id <-
+	anti_join(
+		data_long %>% filter(study_arm == 6) %>% transmute(fcn_id = as.character(fcn_id)), # "intervention follow-up"
+		data_long %>% filter(study_arm == 2) %>% transmute(fcn_id = as.character(fcn_id)) # "intervention"
+	) %>% 
+	arrange(fcn_id) %>% pull(fcn_id)
+# There were 42 hh that had intervention follow-up surveys but no intervention surveys. Strange
+#  [1] "102768" "106082" "106136" "109334" "110767" "112172" "114444" "114546" "115267" "119604" "120733" "122485" "124022" "157669" "164741" "168661" "172965" "177471"
+# [19] "177668" "177772" "180887" "182495" "183398" "184810" "185054" "185979" "186294" "193911" "194490" "197472" "199748" "200677" "245292" "287797" "296727" "297028"
+# [37] "383686" "450097" "451786" "650705" "650711" "650712"
+
+data_long %>% 
+	filter(study_arm == 6) %>% # "intervention follow-up"
+	filter(fcn_id %in% missing_intervention_survey_fcn_id) %>%
+	select(fcn_id, study_arm, camp_id, block_id, subblock_id, name_hh_head, name_respondent, target_child_name)
+
+# Save errors to ask team about
+openxlsx::write.xlsx(survey_multiple_entry_errors, file_out_survey_multiple_entry_errors)
+
+```
+

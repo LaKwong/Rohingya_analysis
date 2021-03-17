@@ -1,0 +1,256 @@
+---
+title: "Fuel sample size"
+author: "Laura Kwong"
+date: "November 14, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(epiR)
+```
+
+
+exposed	= the expected incidence risk (cumulative incidence) for exposed subjects (see below).
+
+unexposed	= the expected incidence risk (cumulative incidence) for unexposed subjects (see below).
+
+n	= scalar, defining the total number of subjects in the study (i.e. the number in the exposed and unexposed groups).
+
+power	= scalar, the required study power.
+
+r	= scalar, the number in the treatment group divided by the number in the control group. This argument is ignored when method = "proportions".
+
+design = scalar, the estimated design effect.
+
+Calculate the design effect, given rho = (design - 1) / (nbar - 1) so design = rho * (nbar - 1) + 1
+where rho is the inter-cluster correlation and nbar equals the average number of individuals per cluster:
+
+sided.test = use a one- or two-sided test? Use a two-sided test if you wish to evaluate whether or not the treatment group is better or worse than the control group. Use a one-sided test to evaluate whether or not the treatment group is better than the control group.
+
+conf.level = scalar, defining the level of confidence in the computed result.
+
+output: lambda = the outcome proportion in the exposed group divided by the outcome proportion in the unexposed group (a risk ratio).
+
+## Rohingya fuel sample size calculation based on prevalence of pneumonia
+
+ICC is 0.1 (Mortimer, 2017 - clean cookstoves in Malawi)
+
+```{r}
+ICC <- 0.1
+
+n.per.cluster <- 1 # cluster = one structure, which has 3 hh 
+
+design <- ICC * (n.per.cluster - 1) + 1
+
+epi.cohortsize(
+  exposed = 0.47, # exposed means exposed to the intervention
+  unexposed = 0.55,  # 55% of control hh have respiratory complaints
+  n = NA, 
+  power = 0.90, 
+  r = 1, 
+  design = design, 
+  sided.test = 2, 
+  conf.level = 0.95
+)
+```
+With an average of 1 child/cluster, you need 1048 total children to detect a 10% difference at 90% power. 
+
+With an average of 1 child/cluster, you need 462 total children to detect a 15% difference at 90% power. 
+
+With an average of 1 child/cluster, you need 1638 total children to detect a 8% difference at 90% power. 
+
+
+With an average of 2 children/cluster, you need 862 total children -> 862 hh surveys in 862/2 = 431 sturctures
+
+
+
+
+Note from before when I was using sub-blocks as clusters 
+I don't know how many total sub-blocks there are, but there are 20-24 sub-blocks per block and each camp has 20+ blocks so there are at least 400 sub-blocks. 
+
+
+Calculation for IUCN, which probably has more money:
+With a power of 90% With an average of 1 children/cluster, you need 1048 total children to detect a change of 10%. 
+
+
+
+
+
+
+
+
+
+# Sample size based on firewood use
+
+treat	= the expected value for the treatment group (see below).
+
+control	= the expected value for the control group (see below).
+
+n	= scalar, defining the total number of subjects in the study (i.e. the number in the treatment and control group).
+
+sigma	= the expected standard deviation of the variable of interest for both treatment and control groups.
+
+power	= scalar, the required study power.
+
+r	= scalar, the number in the treatment group divided by the number in the control group. This argument is ignored when method = "proportions".
+
+design = scalar, the estimated design effect.
+
+Calculate the design effect, given rho = (design - 1) / (nbar - 1) so design = rho * (nbar - 1) + 1
+where rho is the inter-cluster correlation and nbar equals the average number of individuals per cluster:
+
+sided.test = use a one- or two-sided test? Use a two-sided test if you wish to evaluate whether or not the treatment group is better or worse than the control group. Use a one-sided test to evaluate whether or not the treatment group is better than the control group.
+
+conf.level = scalar, defining the level of confidence in the computed result.
+
+output: delta	= the minimum detectable difference given the specified level of confidence and power.
+
+
+# Rohingya sample size based on reduction in PM
+```{r}
+
+ICC <- 0.1
+
+n.per.cluster <- 1 # cluster = one structure, which has 4 hh 
+
+design <- ICC * (n.per.cluster - 1) + 1
+
+epi.meansize(
+  treat = 200, # LPG hh 101 mg/m3 (sd = 130)
+  control = 400, # control hh 400 mg/m3 
+  n = NA, 
+  sigma = 640, # pooled sd 640 mg/m3 
+  power = 0.90, 
+  r = 1, 
+  design = design,
+  sided.test = 2, 
+  conf.level = 0.95
+  )
+
+212*1.10
+```
+
+PM needs to be measured for 2 days/hh. Given the need to collect and recharge (for which we allow 1 extra day), the fastest that all hh could be measured is 
+```{r}
+((233*3/2)/2) / 20 
+
+```
+
+335 days. Considering 20 working days per month and two PM monitors, this is 9 months
+
+
+
+
+Stove use monitoring system
+
+```{r}
+ICC <- 0.1
+
+n.per.cluster <- 1 # cluster = one structure, which has 3 hh 
+
+design <- ICC * (n.per.cluster - 1) + 1
+
+epi.meansize(
+  treat = 150, # Pillarsetti_2004: Post-introduction of a clean--burning biomass cooking stove, 9 hh that exclusively used the stove in the first month used it for an average of 111 minutes/day (SD not given). This decreased to 78 min (SD not given) of the clean cookstove + 52 min of the traditional stove (SD not given) (130 min total) after a few months  
+  control = 200, # Pillarsetti_2004: Pre-intervention traditional stove use averaged 209 min/day (SD = 105; 177 homes measured for an average of 34 days each)
+  n = NA, 
+  sigma = 100,
+  power = 0.90, 
+  r = 1, 
+  design = design, 
+  sided.test = 2, 
+  conf.level = 0.95
+)
+
+170/(50/3.2)
+```
+With 85 households per arm, we can detect a mean difference in cooking time of 50 min, assuming a standard deviation of 100 minutes, power of 90% and confidence level of 95%. 
+
+Each hh needs to be measured for at least 2 weeks, preferably one month, so we need 170 months of monitoring. With 50 monitors (3.2 per LPG/control pair), it would take 170/(50/3.2) = 11 months. 
+ 
+ 
+ # Rohingya sample size based on fuel reduction by HOUSEHOLD (Assume initial is 0.8/person/day * 5 ppl; want 20% reduction to 0.64/person/day)
+```{r}
+
+ICC <- 0.1
+
+n.per.cluster <- 2 # cluster = one structure, which has 4 hh 
+
+design <- ICC * (n.per.cluster - 1) + 1
+
+epi.meansize(
+  treat = 0.745 * 5, # treatment 0.745 kg firewood/person/day for a 5-person family
+  control = 0.80 * 5, # control 0.80 kg firewood/person/day for a 5-person family
+  n = NA, 
+  sigma = 1, 
+  power = 0.80, 
+  r = 1, 
+  design = design,
+  sided.test = 2, 
+  conf.level = 0.95
+  )
+
+# Difference per family/day = 0.275 kg/family/day
+
+# (0.80*5-0.745*5)*7 = 0.385
+# 0.385*5 = 1.925 kg / family / kg
+
+epi.meansize(
+  treat = NA, 
+  control = NA, 
+  n = 431 * 1.5, # Not sure why I have to multiple by 1.5 to get close to the correct n.total
+  sigma = 1, 
+  power = 0.80, 
+  r = 1, 
+  design = design,
+  sided.test = 2, 
+  conf.level = 0.95
+  )
+```
+
+
+With 1176 clusters (hh structures), min diff is 0.16 kg of fuel per household/day
+
+ 
+ # Radon measurements
+ We have two radon monitors and they need to be at each home for 1 week. The ventilation project will be finished with the monitors by Feb 2020, so they can be sampling homes for up to 16 months. Subtract 4 weeks for holidays, charging, maintenance, etc. 
+ 
+```{r}
+ 16*4*2
+```
+We could measure 128 housing structures. 
+
+
+
+
+
+
+
+
+
+
+
+COVID mask study
+
+```{r}
+ICC <- 0.2
+
+n.per.cluster <- 100 # cluster = one structure, which has 3 hh 
+
+design <- ICC * (n.per.cluster - 1) + 1
+
+epi.ssxsectn(
+  pexp1 = NA, # exposed means exposed to the intervention
+  pexp0 = 0.25,  # 55% of control hh have respiratory complaints
+  n = 20000, 
+  power = 0.80, 
+  r = 1, 
+  design = design, 
+  sided.test = 2, 
+  conf.level = 0.95
+)
+```

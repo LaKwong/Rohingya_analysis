@@ -1,0 +1,559 @@
+---
+title: "Rohingya Endline Data Cleaning" 
+author: "Laura Kwong"
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+`%notin%` =  Negate(`%in%`)
+```
+
+```{r message=FALSE, warning=FALSE}
+# Libraries
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(hms)
+
+# Parameters
+
+# List input files and read them
+
+# v86, v89, v90, v91, v92, v93, v94
+
+data_today <- read_csv(here::here("data-raw/rohingya_fuel_v94_endline_Rohingya.csv")) # 7 Oct 2020 and onwards
+
+# list of all enrolled hh
+
+# Rohingya_hh_data_post_intervention <- read_xlsx(Rohingya_hh_data_path, sheet = "post-intervention")
+# Rohingya_hh_data_intervention_follow_up <- read_xlsx(Rohingya_hh_data_path, sheet = "intervention follow-up")
+# Rohingya_hh_data <- bind_rows(Rohingya_hh_data_post_intervention, Rohingya_hh_data_intervention_follow_up) %>% mutate(fcn_id = as.numeric(fcn_id))
+Rohingya_hh_data <- read_xlsx(here::here("data/RohingyaFuelMaster_hh_data.xlsx")) # list of all hh
+Rohingya_hh_data_host <- read_xlsx(here::here("data/RohingyaFuelMaster_hh_data_host.xlsx")) # list of all host hh
+
+
+# Output files
+# Rohingya_hh_survey_master_v86 <- here::here("data/RohingyaFuelMaster_hh_survey_master_v86_data.rds")
+# Rohingya_hh_survey_master_v89 <- here::here("data/RohingyaFuelMaster_hh_survey_master_v89_data.rds")
+# Rohingya_hh_survey_master_v90 <- here::here("data/RohingyaFuelMaster_hh_survey_master_v90_data.rds")
+# Rohingya_hh_survey_master_v91 <- here::here("data/RohingyaFuelMaster_hh_survey_master_v91_data.rds")
+
+Rohingya_hh_survey_master <- read_csv(here::here("data/RohingyaFuelMaster_hh_survey_master_data.rds"))
+Rohingya_hh_survey_master_deidentified <- read_csv(here::here("data/RohingyaFuelMaster_hh_survey_master_deidentified_data.rds"))
+
+Rohingya_individual_survey_master <- read_csv(here::here("data/RohingyaFuelMaster_individual_survey_master_data.rds"))
+
+data_review <- read_xlsx(here::here("Data_review_revisions/Rohingya fuel data review and revisions_endline.xlsx"))  %>% arrange(desc(start_date), enumerator_name, fcn_id)
+```
+
+
+# Combine data into a master file
+
+
+
+
+Data review steps
+
+0. Bithe downloads all data from ODK and puts file in raw data folder with name rohingya_fuel_rawdata_today.csv
+
+1. Load master file
+
+2. Run changes that were determine on previous days of review
+
+3. Run error-checking/outlier code
+
+4. Create dataframe with all errors. Select errors for only today. Append these onto the top of the existing review and feedback xls  (rowbind then sort by date desc()). 
+
+5. After Bithe sends responses, add changes to code that is run in step 2. 
+
+
+
+
+## View data
+
+```{r}
+# View(data_today %>% select(enumerator, fcn_id, everything()))
+# View(Rohingya_hh_data)
+```
+
+## Clean prior days
+
+```{r survey_data}
+
+survey_data <-
+	data_today %>%
+	select(
+		-starts_with("generated_note"),
+		-starts_with("reserved_name")
+	) %>%
+	# mutate(master_row = X) %>%
+	mutate(
+		enumerator = as.factor(enumerator),
+		enumerator_name =
+			recode_factor(
+				enumerator,
+				"1" = "Tunajjina Alam",
+				"2"	= "Rayhanul Jannat",
+				"3"	= "Shamima Akter",
+				"4" =	"Morsida Akter",
+				"5" =	"Way May Marma",
+				"6" = "Morselina Akter",
+				"7"	= "Farhana Suma",
+				"8" =	"Nishat Farjana",
+				"9" =	"Arefa Khanam",
+				"10" =	"Daliya Akter",
+				"11" =	"Md. Jamilur Rahman",
+				"12" =	"Md. Razu Ahmed",
+				"13" = "Mohammad Alamgir",
+				"14" =	"Nazrin Akter",
+				"15" = "dummy",
+				"16" = "Fatema Akter",
+				"17" = "Tanij Akter"
+			)
+	) %>%
+	
+	# mutate(start_date = dmy(as.character(start_date))) %>%
+	# mutate(
+	#   SubmissionDate = parse_date_time(as.character(SubmissionDate), orders = "mdy HMS", tz = "Asia/Dhaka"),
+	#   starttime = parse_date_time(as.character(starttime), orders = "mdy HMS", tz = "Asia/Dhaka"),
+	#   endtime = parse_date_time(as.character(endtime), orders = "mdy HMS", tz = "Asia/Dhaka"),
+	#   start_date = mdy(as.character(start_date)) # Not working for most values, not sure why
+	# ) %>%
+	select(-enumerator) %>%  
+	mutate_at(
+		vars(
+			fcn_id,
+			income_cash_ngo, income_abroad, income_farming, income_own_business, 
+			income_wage_labor, income_skill_labor, income_handicrafts_tailoring, 
+			income_humanitarian_asst, income_selling_wood,     
+			life_failure, fearful, restless_sleep, less_talkative, lonely, 
+			unfriendly_people, crying_spells, sick, feeling_disliked, 
+			cant_get_going, suicidal_thoughts_30
+		), 
+		funs(as.numeric)
+	) %>% 
+	ungroup() %>%
+	select(SubmissionDate, starttime, endtime, deviceid, start_date, enumerator_name, everything())
+```
+
+```{r}
+# saveRDS(survey_data, Rohingya_hh_survey_master_v86_path)
+# saveRDS(survey_data, Rohingya_hh_survey_master_v89_path)
+# saveRDS(survey_data, Rohingya_hh_survey_master_v90_path)
+# saveRDS(survey_data, Rohingya_hh_survey_master_v91_path)
+
+
+
+saveRDS(survey_data, Rohingya_hh_survey_master_path)
+
+
+survey_data_deidentified <-
+	survey_data %>%
+	select(-contains("name"), -c(camp_id, block_id, subblock_id, upazila_id, union_id, ward_id, village_id, hh_id, hh_id_host, UNHCR_id))
+
+
+# survey_data %>%
+# 	select(contains("_id")) %>%
+# 	names()
+
+saveRDS(survey_data_deidentified, Rohingya_hh_survey_master_deidentified_path)
+```
+
+```{r individual_survey_data}
+# survey_data$`SET-OF-survey-hh_demographics-hh_members` # uuid:d0973c86-21b3-4d48-b770-a0efe0ba4309/hh_members
+# survey_data$`SET-OF-survey-health-symptoms` # uuid:d0973c86-21b3-4d48-b770-a0efe0ba4309/symptoms
+# survey_data$`SET-OF-survey-location` # uuid:d0973c86-21b3-4d48-b770-a0efe0ba4309/location
+
+# data_today_hh # PARENT_KEY + "hh_members"
+# data_today_symptoms # PARENT_KEY + "symptoms"
+# data_today_location # PARENT_KEY + "location"
+
+individual_data <-
+	data_today %>%
+	mutate(
+		enumerator = as.factor(enumerator),
+		enumerator_name =
+			recode_factor(
+				enumerator,
+				"1" = "Tunajjina Alam",
+				"2"	= "Rayhanul Jannat",
+				"3"	= "Shamima Akter",
+				"4" =	"Morsida Akter",
+				"5" =	"Way May Marma",
+				"6" = "Morselina Akter",
+				"7"	= "Farhana Suma",
+				"8" =	"Nishat Farjana",
+				"9" =	"Arefa Khanam",
+				"10" =	"Daliya Akter",
+				"11" =	"Md. Jamilur Rahman",
+				"12" =	"Md. Razu Ahmed",
+				"13" = "Mohammad Alamgir",
+				"14" =	"Nazrin Akter",
+				"15" = "dummy",
+				"16" = "Fatema Akter",
+				"17" = "Tanij Akter"
+			)
+	) %>%
+	mutate(
+		`SET-OF-survey-hh_demographics-hh_members_short` = str_extract(`SET-OF-survey-hh_demographics-hh_members`, "^[^/]+"),
+		`SET-OF-survey-health-symptoms_short` = str_extract(`SET-OF-survey-health-symptoms`, "^[^/]+"),
+		`SET-OF-survey-location_short` = str_extract(`SET-OF-survey-location`, "^[^/]+")
+	) %>%
+	select(start_date, enumerator_name, fcn_id, `SET-OF-survey-hh_demographics-hh_members_short`, `SET-OF-survey-health-symptoms_short`, `SET-OF-survey-location_short`) %>% 
+	left_join(
+		data_today_hh %>%	rename("KEY_hh_member" = "KEY"), by = c(`SET-OF-survey-hh_demographics-hh_members_short` = "PARENT_KEY")
+	) %>%
+	left_join(
+		data_today_symptoms %>% rename("KEY_symptoms" = "KEY"), by = c(`SET-OF-survey-health-symptoms_short` = "PARENT_KEY", "name" = "name_roster")
+	) %>% 
+	left_join(
+		data_today_location %>% rename("KEY_location" = "KEY"), by = c(`SET-OF-survey-location_short` = "PARENT_KEY", "name" = "location_name_roster")
+	) %>%
+	select(start_date, enumerator_name, fcn_id, name, hhh_relation, dob, age_yrs, sex, pregnant, disability, edu_yrs, edu_camp_yrs, edu_informal_yrs, symptoms_7, hours_outside, location_outside_house_1, everything())
+```
+
+```{r}
+View(individual_data)
+
+individual_data %>%
+	filter(`symptoms_7/11` == 1)
+
+
+saveRDS(individual_data, Rohingya_individual_survey_master_path)
+
+# Only 5 records show up, all from 7 Oct....why?
+```
+
+
+
+
+############ PROBLEMS #######################
+
+fuel_ever_receive_lpg == 0 but should have been ==  1 for 
+101239
+101762
+274944
+122567
+101574
+101723
+
+--> these hh need to be redone
+
+
+
+
+## Error checking
+
+Discussions amongst the team came up with many possible inconsistancies that the following code flags and reports. 
+The resulting records should show up in the survey_data_questions excel sheet. 
+
+```{r flag_errors, echo=FALSE}
+survey_errors <- 
+	survey_data %>%
+	separate(
+		starttime,
+		into  = c("date_start", "time_start"),
+		sep = ' '
+	) %>%
+	separate(
+		endtime,
+		into  = c("date_end", "time_end"),
+		sep = ' '
+	) %>%
+	mutate(
+		# hh_id = fcn_id,
+		# hh_id.error = ifelse(length(hh_id) < 8, NA_character_, "hh_id wrong"), # <8 or <15
+		# start_date = ymd(start_date), # This isn't working
+		
+		# use https://cran.r-project.org/web/packages/lubridate/vignettes/lubridate.html
+		# tz just labels the tz, doesn't actually change the time zone,
+		# to change the time zone you need to use "with_tz"
+		# https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+		# apparently this method didn't work for Chris so he used as_hms()
+		# time_start = mdy_hm(starttime),
+		# time_end = mdy_hm(endtime),
+		# time_start = as.hms(time_start, tz = "Asia/Dhaka"),
+		# time_end = as.hms(time_end, tz = "Asia/Dhaka"),
+		
+		
+		# should be able to auto-determine survey length
+		#  time_start_hms = as.hms(time_start),
+		# time_end_hms = as.hms(time_end),
+		# min_to_complete = round(difftime(time_end_hms, time_start_hms, units = "min"), 0),
+		# survey_short = ifelse(min_to_complete < 30, "Why so short?", 0), 
+		# survey_long = ifelse(min_to_complete > 70, "Why so long?", 0),
+		
+		
+		hh_id.error = ifelse(is.na(hh_id) | length(hh_id) < 10, "What is the hh_id?", NA_character_),
+		camp_id.error = ifelse(is.na(camp_id), "What is the camp_id?", NA_character_),
+		block_id.error = ifelse(is.na(block_id), "What is the block_id?", NA_character_),
+		subblock_id.error = ifelse(is.na(subblock_id), "What is the subblock_id?", NA_character_),
+		fcn_id.error = ifelse(is.na(fcn_id), "What is the fcn_id?", NA_character_),
+		# Rand_nu.error = ifelse(is.na(Rand_nu), "What is the camp_id?", NA_character_),
+		
+		hh_size.error_high = ifelse(hh_size >9, "hh_size really >9?", NA_character_),
+		
+		# total_income_30.error_low = ifelse(total_income < 1000, "Income very low?", NA_character_),
+		total_income_30.error_low = NA_character_,
+		# total_income_30.error_high = ifelse(total_income > 10000, "Income high?", NA_character_),
+		# total_income_30.error_high = NA_character_,
+		income_cash_ngo.error_high = ifelse(income_cash_ngo > 8000, "NGO income >8000?", NA_character_),
+		income_own_business.error_high = ifelse(income_own_business > 8000, "Business income >8000?", NA_character_),
+		income_wage_labor.error_high = ifelse(income_wage_labor > 5000, "Wage labor income >5000?", NA_character_),
+		income_humanitarian_asst.error_high = ifelse(income_humanitarian_asst > 3000, "Sold aid for >3000?", NA_character_),
+		clothing.error = ifelse(clothing > 6000, "Spent >6000 on clothing?", NA_character_),
+		shelter.error = ifelse(shelter > 5000, "Spent >5000 on shelter?", NA_character_),
+		debt.error = ifelse(debt >5000, "Debt really >5000?", NA_character_),
+		
+		# spent_total_month.error_high = ifelse(spent_total_month > 8000, "expenses above 8000?", NA_character_),
+		total_expenditures_30.error_high = NA_character_,
+		# spent_total_month.error_expenses = ifelse(spent_total_month > (total_income + 3000) , "spent more than made?", NA_character_),
+		# total_expenditures_30.error_expenses = NA_character_,
+		
+		# floor_material.error = ifelse(floor_material == 6, "Was the floor really cement?", NA_character_), # Team always response that "floor_mater ==  6" (cement) is correctly entered so will stop checking for this error as of 17 Oct. 
+		roof_material.error = ifelse(roof_material == 4, "Roof is mud?", NA_character_),
+		floor_material.other = ifelse(floor_material == 66, "What was the other material used for the floor?", NA_character_),
+		roof_material.other = ifelse(roof_material == 66, "What was the other material used for the roof?", NA_character_),
+		wall_material.other = ifelse(wall_material == 66, "What was the other material used for the walls?", NA_character_),
+		
+		rice_adults_week.error = ifelse(rice_adults_week != 7, "Did not eat rice 7 days/week?", NA_character_), 
+		bread_adults_week.high_error = ifelse(bread_adults_week > 2, "Bread consumed >2 time?", NA_character_),
+		potatoes_adults_week.high_error = ifelse(potatoes_adults_week >5, "Ate potatoes >5 days/week?", NA_character_),
+		fish_adults_week.high_error = ifelse(fish_adults_week == 7, "Ate fish every day?", NA_character_),
+		# food_wrong_meat = ifelse((goat_sheep_adults_week | beef_adults_week | poultry_adults_week) > 3, "Ate lots of meat?", 0),
+		food_source.other = ifelse(food_source == 66, "What was the other food source?", NA_character_),
+		
+		food_cant_afford_action.other = ifelse(food_cant_afford_action == 66, "What other thing did they do when they couldn't afford food?", NA_character_),
+		fuel_cant_afford_action.other = ifelse(fuel_cant_afford_action == 66, "What other thing did they do when they couldn't afford fuel?", NA_character_),
+		
+		traditional_use_yesterday.error = ifelse(traditional_use_yesterday > 4, "Used traditional stove >4 times/day?", NA_character_),
+		boil_yesterday_times.error = ifelse(boil_yesterday_times > traditional_use_yesterday + LPG_use_yesterday, "Boiled more than used stove?", NA_character_),
+		forest_wood_fee.error = ifelse(forest_wood_fee > 50, "Forest fee >50?", NA_character_),
+		
+		flooring_below_stove.error = ifelse(flooring_below_stove == 66, "What was the flooring below the stove?", NA_character_),
+		lpg_repair_costs.high_error = ifelse(lpg_repair_costs > 1000, "LPG repair cost >1000?", NA_character_),
+		lpg_afraid.other = ifelse(lpg_afraid == 66, "Why were they afraid of LPG?", NA_character_),
+		lpg_stove_repair.other = ifelse(lpg_stove_repair == 66, "What was the other part of the LPG stove that needed repair?", NA_character_),
+		lpg_cylinder_repair.other = ifelse(lpg_cylinder_repair == 66, "What was the other part of the LPG stove that needed repair?", NA_character_),
+		
+		
+		receive_lpg_walk.error_high = ifelse(receive_lpg_walk > 2, "Time to walk to LPG distribution center >2 hr?", NA_character_),
+		receive_lpg_wait.error_high = ifelse(receive_lpg_wait > 6, "Waiting at LPG center >6 hr?", NA_character_),
+		
+		fuel_ever_receive_lpg.error = ifelse(fuel_ever_receive_lpg == 0, "The hh didn't receive LPG ever?", NA_character_),
+		fuel_30_receive_lpg.error = ifelse(fuel_30_receive_lpg == 0, "The hh didn't receive LPG in past 30 days?", NA_character_),
+		
+		medical.high = ifelse(medical > 5000, "Were the medical expenditures >5000?", NA_character_),
+		# medical.error = ifelse(medical == debt, "What was the medical expenditure?", NA_character_), # only for v91 and v92 which accidentally had the question for medical expenditures as "debt"
+		
+		time_cooking.error = ifelse(time_cooking != 3 & fuel_30_receive_lpg == 1, "Respondent did not report spending less time cooking even though using LPG?", NA_character_),
+		time_harvesting_wood.error = ifelse(time_harvesting_wood != 3 & fuel_30_receive_lpg == 1, "Respondent did not report spending less time harvesting wood even though using LPG?", NA_character_),    
+		
+		drudgery_most_diff.error = ifelse(drudgery_most_diff == drudgery_easiest & drudgery_easiest != 88, "Same activity most and least difficult?", NA_character_),
+		drudgery_easiest.error = ifelse(drudgery_second_most_diff == drudgery_easiest & drudgery_easiest != 88, "Same activity second most and least difficult?", NA_character_),
+		drudgery_second_most_diff.error = ifelse(drudgery_most_diff == drudgery_second_most_diff & drudgery_most_diff != 88, "Same activity most and second most difficult?", NA_character_),
+		
+		livlihood_training.other = ifelse(livlihood_training == 66, "What was the other livelihood training?", NA_character_),
+		
+		
+		happy.error = 
+			ifelse(
+				#unexpected set of feelings q are all 0 -> prior to 190930 this question was too restrictive (expected ALL would be 0 to see a problem)
+				(happy == 0 |
+				 	enjoyed_life == 0) &
+					(life_failure == 0 |
+					 	crying_spells == 0), 
+				"Is it correct that respondent not happy but not cry?", 
+				NA_character_
+			), 
+		crying_spells.error = 
+			ifelse(
+				#unexpected set of feelings q all 7-> prior to 190930 this question was too restrictive (expected ALL would be 7 to see a problem)
+				(happy == 7 |
+				 	enjoyed_life == 7) &
+					(life_failure == 7 |
+					 	crying_spells == 7),
+				"Is it correct that respondent happy but said cry every day ?", 
+				NA_character_
+			),
+		life_failure.error = 
+			ifelse(
+				#Feelings all 7
+				(happy == 7 | enjoyed_life == 7) & 
+					(life_failure == 7 | fearful == 7 |
+					 	crying_spells == 7 | suicidal_thoughts_30 == 7),
+				"Is it correc that respondent report mixed thoughts of happy and failure?", 
+				NA_character_
+			),
+		
+		suicidal_thoughts_30.followup = ifelse(suicidal_thoughts_30 == 1, "Were mental health resources provided?", NA_character_)
+		
+	) %>%
+	select(
+		fcn_id, 
+		hh_id.error, camp_id.error, block_id.error, subblock_id.error, fcn_id.error, 
+		hh_size.error_high, 
+		# hh_id, hh_id.error, 
+		total_income_30.error_low, 
+		income_cash_ngo.error_high, income_own_business.error_high, income_wage_labor.error_high, income_humanitarian_asst.error_high,
+		clothing.error, shelter.error, debt.error, 
+		total_expenditures_30.error_high,
+		# floor_material.error, 
+		roof_material.error, 
+		floor_material.other, roof_material.other, wall_material.other, 
+		rice_adults_week.error, bread_adults_week.high_error, potatoes_adults_week.high_error, fish_adults_week.high_error,
+		food_cant_afford_action.other, fuel_cant_afford_action.other, 
+		traditional_use_yesterday.error, boil_yesterday_times.error, forest_wood_fee.error,
+		flooring_below_stove.error, lpg_repair_costs.high_error,
+		lpg_stove_repair.other, lpg_cylinder_repair.other, 
+		receive_lpg_walk.error_high, receive_lpg_wait.error_high, 
+		fuel_ever_receive_lpg.error, fuel_30_receive_lpg.error, 
+		medical.high, # medical.error,
+		time_cooking.error, time_harvesting_wood.error,
+		drudgery_most_diff.error, drudgery_easiest.error, drudgery_second_most_diff.error, 
+		livlihood_training.other,
+		happy.error, crying_spells.error, life_failure.error,
+		suicidal_thoughts_30.followup
+	) %>% 
+	
+	gather(-fcn_id, key = "error_var", value = "issue") %>% # 
+	# filter(!is.na(issue)) %>%
+	left_join(survey_data %>% select(fcn_id, enumerator_name, start_date, target_respondent_current, target_child_current), by = "fcn_id") %>%
+	mutate(fcn_id_repeat = fcn_id) %>%
+	select(start_date, enumerator_name, fcn_id, target_respondent_current, target_child_current, issue, fcn_id_repeat, error_var) %>% 
+	
+	#hh_id
+	separate(col = error_var, into = c("var", "extra"), sep = "\\.", extra = "merge") %>%
+	select(-extra) %>%
+	arrange(desc(start_date), enumerator_name, desc(fcn_id)) %>% # desc(master_row)
+	mutate(row = row_number()) 
+
+
+initial_value_fun <- function(row, fcn_id, var){
+	survey_data %>%
+		mutate(
+			total_income = NA_character_,
+			spent_total_month = NA_character_
+		) %>%
+		filter(fcn_id == survey_errors$fcn_id[row]) %>%
+		select(survey_errors$var[row]) %>%
+		pull()
+}
+
+initial_vals <-
+	pmap(list(survey_errors[["row"]], survey_errors[["fcn_id"]], survey_errors[["var"]]), initial_value_fun) %>% # use [[ to get a list whereas $ returns a column 
+	unlist() %>%
+	enframe() %>% # from tibble package, makes a tibble the the nested list
+	unnest(cols = c()) %>%
+	transmute(initial_value = as.character(value))
+
+# existing_dates <- data_review %>% select(start_date) %>% distinct()
+
+survey_errors_initial <-
+	bind_cols(survey_errors %>% select(-row), initial_vals) %>%
+	filter(!is.na(issue)) %>%
+	# filter(start_date %in% c("Oct 1, 2020")) %>%
+	# filter(start_date %notin% existing_dates) %>%
+	add_column(correct_value = "", remarks = "", correction_coded = "NA", date_correction_made = "NA", notes = "")
+
+# c("Sep 30, 2020", "Sep 29, 2020", "Sep 28, 2020", "Sep 27, 2020", "Sep 26, 2020") %notin% c("Sep 27, 2020", "Sep 26, 2020")
+# c(survey_errors %>% select(start_date) %>% unique()) %in% c(data_review %>% select(start_date) %>% distinct())
+# class(c(data_review %>% select(start_date) %>% distinct()))
+# class(survey_errors %>% select(start_date) )
+
+# data_review <- read_xlsx(data_review_path) %>% arrange(desc(start_date), enumerator_name, fcn_id)
+
+
+data_review <-
+	bind_rows(data_review, survey_errors_initial) %>% # %>% filter(start_date == "Sep 28, 2020")
+	arrange(desc(remarks)) %>%
+	distinct(fcn_id, var, .keep_all = TRUE) %>% # preserves first row
+	arrange(desc(mdy(start_date)), enumerator_name, fcn_id)
+
+View(data_review)
+
+```
+
+
+```{r}
+openxlsx::write.xlsx(data_review, data_review_path)
+```
+
+
+```{r}
+
+# data_review_path_2 <- here::here("Data_review_revisions/Rohingya fuel data review and revisions_endline_older.xlsx")
+# data_review_2 <- read_xlsx(data_review_path_2)
+# 
+# data_review <- 
+# 	data_review %>%
+# 	select(-c(correct_value, remarks, correction_coded, date_correction_made)) %>%
+# 	left_join(data_review_2 %>% select(fcn_id, var, correct_value, remarks, correction_coded, date_correction_made), by = c("fcn_id", "var"))
+
+```
+
+
+
+
+##########################################################################################
+
+
+
+
+################################ The below is not done yet ################################
+
+
+# Enumerator level issues
+
+Check the following
+1. average, min, and max survey_duration_min
+2. number of surveys completed
+3. all enumerators have responses but one enumerator has none - how do I do this? Must group_by(enumerator) then mutate_at(all relevant vars) and take the average (na.rm = FALSE). 
+
+
+
+
+```{r}
+View(survey_data)
+survey_data %>% names()
+
+survey_data %>% select(starttime, endtime, survey_duration_min, SubmissionDate, start_date)
+
+```
+
+
+```{r enumerator_performance, echo=FALSE, error=FALSE, eval=FALSE}
+enumerator_performance <- 
+	survey_errors %>% 
+	# filter(consent != "", enumerator != 14) %>% # 14 = "Nazrin Akter"
+	group_by(enumerator) %>% 
+	select(
+		enumerator, survey_duration_min, income
+	) %>% 
+	summarise_at(
+		vars(
+			min_to_complete, income
+		), 
+		funs(
+			mean = mean(., na.rm = TRUE), sd = sd(., na.rm = TRUE),
+			mean_na = mean(., na.rm = FALSE), sd_na = sd(., na.rm = FALSE)
+		)
+	) %>% 
+	ungroup()
+
+enumerator_performance
+
+surveys_per_enumerator <-  
+	survey_today %>% 
+	group_by(enumerator) %>% 
+	# filter(consent == "OK") %>% 
+	tally() %>% 
+	ungroup()
+
+surveys_per_enumerator
+```
+
