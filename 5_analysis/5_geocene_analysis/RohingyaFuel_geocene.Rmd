@@ -11,22 +11,27 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+```{r}
+rm(list = ls())
+source(here::here("0_config.R"))
+```
+
 ```{r message=FALSE, warning=FALSE}
-# Libraries
-library(tidyverse)
-library(lubridate)
+# # Libraries
+# library(tidyverse)
+# library(lubridate)
 
 # Parameters
 
-file_events <- here::here("data-raw/Geocene/events.csv")
-file_mission_logs <- here::here("data-raw/Geocene/mission_logs.csv")
-file_missions <- here::here("data-raw/Geocene/missions.csv")
-file_sensors <- here::here("data-raw/Geocene/sensors.csv")
-file_tags <- here::here("data-raw/Geocene/tags.csv")
+file_events <- here::here("2_data_raw/Geocene/events.csv")
+file_mission_logs <- here::here("2_data_raw/Geocene/mission_logs.csv")
+file_missions <- here::here("2_data_raw/Geocene/missions.csv")
+file_sensors <- here::here("2_data_raw/Geocene/sensors.csv")
+file_tags <- here::here("2_data_raw/Geocene/tags.csv")
 
-list_of_file_path_geocene <- here::here("data-raw/Geocene/metrics") 
+list_of_file_path_geocene <- here::here("2_data_raw/Geocene/metrics") 
 
-file_survey_data_base <- here::here("data", "RohingyaFuelMaster_tidy_long.rds")
+file_survey_data_base <- here::here("4_data/RohingyaFuelMaster_tidy_long.rds")
 
 #===============================================================================
 
@@ -36,7 +41,9 @@ df_missions <- read.csv(file_missions)
 df_sensors <- read.csv(file_sensors)
 df_tags <- read.csv(file_tags)
 
-survey_data <- read_rds(file_survey_data_base) %>% select(timepoint, study_arm_overall, fcn_id, camp_id, block_id, subblock_id, first_enrolled_lpg, first_receive_lpg)
+survey_data <- 
+	read_rds(file_survey_data_base) %>% 
+	select(timepoint, study_arm_overall, fcn_id, camp_id, block_id, subblock_id, first_enrolled_lpg, first_receive_lpg)
 ```
 
 ## load files
@@ -59,81 +66,78 @@ processors
 
 cooking_time_50_70C_3_40min
 stove_on_50_70C_3_3min
- - for this select only stove_on
+- for this select only stove_on
 
 ```{r}
+df_mission_id_practice <-
+	df_tags %>%
+	filter(tag %in% c("practice", "not_normal", "empty")) %>%
+	pull(mission_id) %>%
+	unique()
+
 df_mission_id_to_analyze_base <-
 	df_tags %>%
-	# filter(tag %notin% c("practice", "not_normal", "empty")) %>%
+	filter(mission_id %notin% df_mission_id_practice) %>%
 	mutate(
-				study_arm_overall =
+		study_arm_overall =
 			case_when(
 				tag == "intervention_period:pre_intervention" ~ "intervention",
 				tag %in% c("intervention_period:intervention", "intevention_period:intervention") ~ "comparison" # Note that intervention is misspelled in the tag
 			),
 		fuel_type = 
 			case_when(
-		tag == "fuel_type:biomass" ~ "biomass",
-		tag == "fuel_type:lpg" ~ "lpg"
-		)
-		)
-	
+				tag == "fuel_type:biomass" ~ "biomass",
+				tag == "fuel_type:lpg" ~ "lpg"
+			)
+	)
+
 mission_id_study_arm_overall <-
 	df_mission_id_to_analyze_base %>%
 	filter(!is.na(study_arm_overall)) %>%
-		select(-c(tag, fuel_type))
+	select(-c(tag, fuel_type))
 
 mission_id_fuel_type <-
 	df_mission_id_to_analyze_base %>%
 	filter(!is.na(fuel_type)) %>%
-		select(-c(tag, study_arm_overall))
+	select(-c(tag, study_arm_overall))
 
 df_mission_id_to_analyze <-
 	mission_id_study_arm_overall %>%
 	left_join(mission_id_fuel_type, by = c("mission_id"))
 
-	
+
 # get the mission_name (which includes the hhid) associated with each mission id
 # CF_20191013_0_10GG38108799_11:00
 
 df_missions_hh_id <-
-	df_missions %>%
-	separate("mission_name", into = c("nothing_1", "date", "study_arm_overall_numeric", "hh_id", "start_time"), sep = "_", remove = FALSE) %>%
-	
-	# there have incorrect hh_ids so remove for now
-	filter(
-		mission_id %notin% 
-			c(
-				"5d8d140d-0000-0000-0000-806FB0636675",
-				"5d8f5e42-0000-0000-0000-806FB0636675",				
-				"5d901f23-0000-0000-0000-806FB063449C",				
-				"5d902936-0000-0000-0000-806FB0636675",
-				"5f7d5f6c-0000-0000-0000-806FB06347B3",
-				"5f7d5fd1-0000-0000-0000-806FB06369A3",
-				"5d77cb8a-0000-0000-0000-806FB06367DD",
-				"5d79e91e-0000-0000-0000-806FB063698F",				
-				"5d79f0de-0000-0000-0000-806FB06367DD",
-				"5d7e7e84-0000-0000-0000-806FB06369B4",
-				"5dad34dc-0000-0000-0000-806FB0636187",
-				"5dbd2046-0000-0000-0000-806FB063449C",
-				"5dbd12a8-0000-0000-0000-806FB06347D5",
-				"5dc8f6bc-0000-0000-0000-806FB0636794",
-				"5d7de18d-0000-0000-0000-806FB063667A",
-				"5d7a928a-0000-0000-0000-806FB063698F",
-				"5d7a7527-0000-0000-0000-806FB06369B2",			
-				"5d77e4bf-0000-0000-0000-806FB06367DD",
-				"5d769836-0000-0000-0000-806FB06367DD",
-				"5dd4e462-0000-0000-0000-806FB0636397",			
-				"5dd4e46f-0000-0000-0000-806FB0636397",
-				"5dd77254-0000-0000-0000-806FB0635AF6",
-				"5dd8ece8-0000-0000-0000-806FB06367C8",
-				"5dd8e8e3-0000-0000-0000-806FB0636995",
-				"5dda053f-0000-0000-0000-806FB063426D"
-			)
+	df_mission_id_to_analyze %>%
+	left_join(
+		df_missions %>%
+			separate("mission_name", into = c("nothing_1", "date", "study_arm_overall_numeric", "hh_id", "start_time"), sep = "_", remove = FALSE)
 	) %>%
-		mutate(fcn_id = str_extract(hh_id, ".{6}$") ) %>%
-	select(mission_id, hh_id, fcn_id)
 	
+	# # the following were practice missions
+	# filter(
+	# 	mission_id %in% 
+	# 		c(
+	# 			"5d8d140d-0000-0000-0000-806FB0636675",
+	# 			"5d8f5e42-0000-0000-0000-806FB0636675",				
+	# 			"5d901f23-0000-0000-0000-806FB063449C",				
+	# 			"5d902936-0000-0000-0000-806FB0636675",
+	# 			"5d79e91e-0000-0000-0000-806FB063698F",				
+	# 			"5d79f0de-0000-0000-0000-806FB06367DD",
+# 			"5d7e7e84-0000-0000-0000-806FB06369B4",
+# 			"5d7a928a-0000-0000-0000-806FB063698F",
+# 			"5d7a7527-0000-0000-0000-806FB06369B2",			
+# 			"5d77e4bf-0000-0000-0000-806FB06367DD",
+# 			"5d769836-0000-0000-0000-806FB06367DD",
+# 			"5dd4e462-0000-0000-0000-806FB0636397",			
+# 			"5dd4e46f-0000-0000-0000-806FB0636397"
+# 		)
+# ) %>%
+mutate(fcn_id = str_extract(hh_id, ".{6}$") ) %>%
+	select(mission_id, hh_id, fcn_id)
+
 
 
 df_events_stove_on <-
@@ -144,61 +148,24 @@ df_events_stove_on <-
 	filter(processor_name == "stove_on_50_70C_3_3min") %>%
 	# convert start_time to date so I can analyze events by date # 2019-09-24T13:19:06Z
 	mutate(date = ymd(str_extract(start_time, "^[0-9]{4}-[0-9]{2}-[0-9]{2}"))) %>%
-	ungroup() %>%
-	
+	ungroup()
+
+df_stove_exclusive_use <-
+	df_events_stove_on %>%
 	group_by(study_arm_overall, hh_id, fcn_id, fuel_type, date) %>% # study_arm_overall
 	count(fuel_type) %>% # count number of cooking events for each fuel type
 	pivot_wider(names_from = fuel_type, values_from = n) %>%
 	mutate(
-		exclusive_lpg = if_else(is.na(biomass), TRUE, FALSE),
 		exclusive_biomass = if_else(is.na(lpg), TRUE, FALSE),
+		exclusive_lpg = if_else(is.na(biomass), TRUE, FALSE),
 		mixed_use = if_else(!is.na(biomass) & !is.na(lpg), TRUE, FALSE)
-		) # %>%
-	# filter(mission_id == "5d7dbb50-0000-0000-0000-806FB0635AC1")
+	) %>%
+	rename(
+		cooking_events_with_biomass = biomass,
+		cooking_events_with_lpg = lpg
+	)
+
 ```
-
-
-Missions ids that have problems with mission name such that cannot extract fcn_id
-
-5d8d140d-0000-0000-0000-806FB0636675
-5d8f5e42-0000-0000-0000-806FB0636675				
-5d901f23-0000-0000-0000-806FB063449C				
-5d902936-0000-0000-0000-806FB0636675
-5f7d5f6c-0000-0000-0000-806FB06347B3
-5f7d5fd1-0000-0000-0000-806FB06369A3
-5d77cb8a-0000-0000-0000-806FB06367DD
-5d79e91e-0000-0000-0000-806FB063698F				
-5d79f0de-0000-0000-0000-806FB06367DD
-5d7e7e84-0000-0000-0000-806FB06369B4
-5dad34dc-0000-0000-0000-806FB0636187
-5dbd2046-0000-0000-0000-806FB063449C
-5dbd12a8-0000-0000-0000-806FB06347D5
-5dc8f6bc-0000-0000-0000-806FB0636794
-5d7de18d-0000-0000-0000-806FB063667A
-5d7a928a-0000-0000-0000-806FB063698F
-5d7a7527-0000-0000-0000-806FB06369B2			
-5d77e4bf-0000-0000-0000-806FB06367DD
-5d769836-0000-0000-0000-806FB06367DD
-5dd4e462-0000-0000-0000-806FB0636397			
-5dd4e46f-0000-0000-0000-806FB0636397
-5dd77254-0000-0000-0000-806FB0635AF6
-5dd8ece8-0000-0000-0000-806FB06367C8
-5dd8e8e3-0000-0000-0000-806FB0636995
-5dda053f-0000-0000-0000-806FB063426D
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 should have a marker for whether or not the hh had LPG dep on survey data 
@@ -212,16 +179,34 @@ first_receive_lpg
 # survey_data %>% filter(!is.na(first_enrolled_lpg)) %>% select(timepoint, fcn_id, first_enrolled_lpg, first_receive_lpg) %>%
 # 	left_join(df_events_stove_on, by = "fcn_id")
 
-survey_data %>%
-		filter(!is.na(first_enrolled_lpg)) %>%
+# In the baseline surveys the enrollment date was saved as dmy
+df_first_enrolled_lpg_baseline_comparison <- 
+	survey_data %>%
+	filter(timepoint == "baseline", study_arm_overall == "comparison") %>%
+	filter(!is.na(first_enrolled_lpg)) %>%
 	mutate(
 		first_enrolled_lpg_ymd = dmy(as.character(first_enrolled_lpg)),
-				 first_receive_lpg_ymd = dmy(as.character(first_receive_lpg))
-		) %>%
-
-	select(fcn_id, first_enrolled_lpg_ymd, first_receive_lpg_ymd)
-	filter(fcn_id %in% c(no_exclusive_use_fcn_id)) %>%
+		first_receive_lpg_ymd = dmy(as.character(first_receive_lpg))
+	) %>%
 	
+	select(fcn_id, first_enrolled_lpg_ymd, first_receive_lpg_ymd)
+filter(fcn_id %in% c(no_exclusive_use_fcn_id))
+
+# In the baseline surveys the enrollment date was saved as mdy
+df_first_enrolled_lpg_endline_intervention <- 
+	survey_data %>%
+	filter(timepoint == "endline", study_arm_overall == "intervention") %>%
+	filter(!is.na(first_enrolled_lpg)) %>%
+	mutate(
+		first_enrolled_lpg_ymd = mdy(as.character(first_enrolled_lpg)),
+		first_receive_lpg_ymd = mdy(as.character(first_receive_lpg))
+	) %>%
+	select(fcn_id, first_enrolled_lpg_ymd, first_receive_lpg_ymd)
+filter(fcn_id %in% c(no_exclusive_use_fcn_id))
+
+df_first_enrolled_lpg <-
+	bind_rows(df_first_enrolled_lpg_baseline_comparison, df_first_enrolled_lpg_endline_intervention)
+
 ```
 
 
@@ -229,16 +214,16 @@ survey_data %>%
 ```{r}
 
 exclusive_use <-
-   df_events_stove_on %>%
+	df_stove_exclusive_use %>%
 	ungroup() %>%
 	mutate(
 		lpg_enrolled = 
-				 	case_when(
-				 		study_arm_overall == "comparison" ~ TRUE,
-				 		study_arm_overall == "intervention" & date > "2019-12-15" ~ TRUE,
-				 		TRUE ~ FALSE # defaul to false
-				 		)
-		) %>%
+			case_when(
+				study_arm_overall == "comparison" ~ TRUE,
+				study_arm_overall == "intervention" & date > "2019-12-15" ~ TRUE,
+				TRUE ~ FALSE # defaul to false
+			)
+	) %>%
 	
 	# examine exclusive use only when the hh was receiving LPG
 	filter(lpg_enrolled == TRUE) %>%
@@ -247,36 +232,36 @@ exclusive_use <-
 	group_by(study_arm_overall, lpg_enrolled, fcn_id) %>%
 	summarise(mean = mean(exclusive_lpg == TRUE, na.rm = TRUE),
 						sd = mean(exclusive_lpg == TRUE, na.rm = TRUE)
-						)
-	
+	)
+
 exclusive_use %>%
-tabyl(study_arm_overall)
+	tabyl(study_arm_overall)
 
 
 
 no_exclusive_use_fcn_id <-
 	exclusive_use %>%
 	filter(mean == 0) %>% pull(fcn_id)
-	
+
 fig_exclusive_use <-
 	exclusive_use %>%
 	mutate(
 		study_arm_overall = 
-				 	ordered(
-				 		study_arm_overall,
-				 		levels = c("intervention", "comparison"),
-				 		labels = c("Intervention", "Comparison"),
-				 	)
-				 ) %>%
+			ordered(
+				study_arm_overall,
+				levels = c("intervention", "comparison"),
+				labels = c("Intervention", "Comparison"),
+			)
+	) %>%
 	ggplot(aes(x = study_arm_overall, y = mean, color = study_arm_overall)) + 
 	# geom_boxplot() + 
 	geom_jitter(size = 2) +
 	viridis::scale_fill_viridis(
-	discrete = TRUE,
-	end = 2/3
-) +
+		discrete = TRUE,
+		end = 2/3
+	) +
 	scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
-		scale_color_manual(
+	scale_color_manual(
 		name = "Group",
 		breaks = c("Intervention", "Comparison"),
 		# labels = c("Pre-intervention", "Intervention", "Outdoor"),
@@ -295,7 +280,7 @@ fig_exclusive_use <-
 		# legend.direction = "horizontal"
 	) + 
 	guides(
-		color = guide_legend(title.position="top", title.hjust = 0.5)
+		color = guide_legend(title.position = "top", title.hjust = 0.5)
 	) +
 	labs(
 		title = "Households' exclusive use of LPG, \nafter enrollment into LPG distribution program",
@@ -320,11 +305,12 @@ exclusive_use %>%
 	group_by(study_arm_overall) %>%
 	summarise(mean = mean(mean, na.rm = TRUE), sd = sd(mean, na.rm = TRUE))
 ```
+
 study_arm_overall  n   percent
-        comparison 81 0.4628571
-      intervention 94 0.5371429
-      
-      Average exclusive use 94% in comparison and 85% in intervention group
+comparison 81 0.4628571
+intervention 94 0.5371429
+
+Average exclusive use 94% in comparison and 85% in intervention group
 
 
 

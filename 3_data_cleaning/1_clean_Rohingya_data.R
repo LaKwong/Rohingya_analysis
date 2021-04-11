@@ -10,12 +10,12 @@ source(here::here("0_config.R"))
 
 # ============================================================================
 # Parameters
-file_in_1 <- here::here("2_data_raw/RohingyaFuel_survey_data_long.rds") # Use the paired dataset instead of this one
-file_in_2 <- here::here("2_data_raw/RohingyaFuel_survey_data_long_host.rds") # Use the paired dataset instead of this one
+file_in_1 <- here::here("2_data_raw/RohingyaFuel_survey_data_long.rds")
+file_in_2 <- here::here("2_data_raw/RohingyaFuel_survey_data_long_host.rds") 
 
 
-file_out_1 <- here::here("4_data/RohingyaFuel_survey_data_clean.rds") # Use the paired dataset instead of this one
-file_out_2 <- here::here("4_data/RohingyaFuel_survey_data_clean_host.rds") # Use the paired dataset instead of this one
+file_out_1 <- here::here("4_data/RohingyaFuel_survey_data_clean.rds")
+file_out_2 <- here::here("4_data/RohingyaFuel_survey_data_clean_host.rds")
 
 # ============================================================================
 
