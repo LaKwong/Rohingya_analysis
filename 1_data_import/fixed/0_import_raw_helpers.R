@@ -52,6 +52,33 @@ raw_import_clean_character <- function(x) {
   x
 }
 
+raw_import_timepoint_date_windows <- function() {
+  data.frame(
+    timepoint = c("baseline", "midline", "endline"),
+    start_date = as.Date(c("2019-09-01", "2020-09-01", "2022-01-15")),
+    end_date = as.Date(c("2020-04-15", "2020-12-15", "2022-08-15")),
+    stringsAsFactors = FALSE
+  )
+}
+
+raw_import_collection_date_reference <- function() {
+  data.frame(
+    data_source = rep(c("household_survey", "indoor_pm25", "geocene_stove_use"), each = 3L),
+    timepoint = rep(c("baseline", "midline", "endline"), times = 3L),
+    start_date = as.Date(c(
+      "2019-09-13", "2020-09-17", "2022-05-17",
+      "2019-09-14", "2020-10-01", "2022-02-03",
+      "2019-11-22", "2020-10-01", "2022-04-01"
+    )),
+    end_date = as.Date(c(
+      "2019-11-04", "2020-11-30", "2022-07-30",
+      "2019-11-17", "2020-10-26", "2022-06-07",
+      "2020-03-31", "2020-10-29", "2022-06-12"
+    )),
+    stringsAsFactors = FALSE
+  )
+}
+
 raw_import_extract_date_any <- function(x) {
   if (inherits(x, "POSIXt") || inherits(x, "Date")) {
     return(as.Date(x))
@@ -129,11 +156,17 @@ raw_import_extract_year_any <- function(x) {
 }
 
 raw_import_timepoint_from_date <- function(date) {
-  date <- as.Date(date)
+  date <- raw_import_extract_date_any(date)
   out <- rep(NA_character_, length(date))
-  out[!is.na(date) & date >= as.Date("2019-08-01") & date <= as.Date("2020-03-31")] <- "baseline"
-  out[!is.na(date) & date >= as.Date("2020-08-01") & date <= as.Date("2021-03-31")] <- "midline"
-  out[!is.na(date) & date >= as.Date("2022-04-01") & date <= as.Date("2022-08-31")] <- "endline"
+  windows <- raw_import_timepoint_date_windows()
+
+  for (i in seq_len(nrow(windows))) {
+    in_window <- !is.na(date) &
+      date >= windows$start_date[i] &
+      date <= windows$end_date[i]
+    out[in_window] <- windows$timepoint[i]
+  }
+
   out
 }
 

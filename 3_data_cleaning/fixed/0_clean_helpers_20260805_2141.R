@@ -52,6 +52,33 @@ as_clean_character <- function(x) {
   x
 }
 
+timepoint_date_windows <- function() {
+  data.frame(
+    timepoint = c("baseline", "midline", "endline"),
+    start_date = as.Date(c("2019-09-01", "2020-09-01", "2022-01-15")),
+    end_date = as.Date(c("2020-04-15", "2020-12-15", "2022-08-15")),
+    stringsAsFactors = FALSE
+  )
+}
+
+collection_date_reference <- function() {
+  data.frame(
+    data_source = rep(c("household_survey", "indoor_pm25", "geocene_stove_use"), each = 3L),
+    timepoint = rep(c("baseline", "midline", "endline"), times = 3L),
+    start_date = as.Date(c(
+      "2019-09-13", "2020-09-17", "2022-05-17",
+      "2019-09-14", "2020-10-01", "2022-02-03",
+      "2019-11-22", "2020-10-01", "2022-04-01"
+    )),
+    end_date = as.Date(c(
+      "2019-11-04", "2020-11-30", "2022-07-30",
+      "2019-11-17", "2020-10-26", "2022-06-07",
+      "2020-03-31", "2020-10-29", "2022-06-12"
+    )),
+    stringsAsFactors = FALSE
+  )
+}
+
 extract_date_any <- function(x) {
   if (inherits(x, "POSIXt") || inherits(x, "Date")) {
     return(as.Date(x))
@@ -129,11 +156,17 @@ extract_year_any <- function(x) {
 }
 
 timepoint_from_date <- function(date) {
-  date <- as.Date(date)
+  date <- extract_date_any(date)
   out <- rep(NA_character_, length(date))
-  out[!is.na(date) & date >= as.Date("2019-08-01") & date <= as.Date("2020-03-31")] <- "baseline"
-  out[!is.na(date) & date >= as.Date("2020-08-01") & date <= as.Date("2021-03-31")] <- "midline"
-  out[!is.na(date) & date >= as.Date("2022-04-01") & date <= as.Date("2022-08-31")] <- "endline"
+  windows <- timepoint_date_windows()
+
+  for (i in seq_len(nrow(windows))) {
+    in_window <- !is.na(date) &
+      date >= windows$start_date[i] &
+      date <= windows$end_date[i]
+    out[in_window] <- windows$timepoint[i]
+  }
+
   out
 }
 
@@ -253,6 +286,121 @@ drop_identifier_columns <- function(data, keep = character()) {
   list(data = data, removed = removed)
 }
 
+first_nonmissing_id <- function(data, cols) {
+  cols <- intersect(cols, names(data))
+  out <- rep(NA_character_, nrow(data))
+  if (!length(cols)) return(out)
+
+  for (col in cols) {
+    value <- as_clean_character(data[[col]])
+    fill <- is.na(out) & !is.na(value)
+    out[fill] <- value[fill]
+  }
+  out
+}
+
+make_anonymous_id <- function(x, prefix) {
+  x <- as_clean_character(x)
+  values <- unique(x[!is.na(x)])
+  out <- rep(NA_character_, length(x))
+  if (!length(values)) return(out)
+
+  lookup <- stats::setNames(
+    sprintf("%s_%05d", prefix, seq_along(values)),
+    values
+  )
+  out[!is.na(x)] <- unname(lookup[x[!is.na(x)]])
+  out
+}
+
+shareable_identifier_columns <- function(data, keep = character()) {
+  patterns <- c(
+    "(^|_)name($|_)",
+    "^target_(child|respondent)_(current|new)$",
+    "^respondent_sl$",
+    "(^|_)dob($|_)",
+    "date_of_birth",
+    "phone",
+    "mobile",
+    "nat_id",
+    "national",
+    "UNHCR",
+    "unhcr",
+    "consent_form",
+    "signature",
+    "gps",
+    "latitude",
+    "longitude",
+    "^lat$",
+    "^lon$",
+    "photo",
+    "image",
+    "^KEY$",
+    "^PARENT_KEY$",
+    "uuid",
+    "^instanceID$",
+    "^instanceName$",
+    "^fcn_id($|_)",
+    "^hh_id($|_)",
+    "^hh_id_short$",
+    "^unique_id$",
+    "^PM_monitor$",
+    "^raw_source_file$",
+    "^raw_source_path$",
+    "^source_path$",
+    "^source_file$",
+    "^SubmissionDate$",
+    "^starttime$",
+    "^endtime$",
+    "^deviceid$",
+    "^upazila_id$",
+    "^union_id$",
+    "^ward_id$",
+    "^village_id$",
+    "^house_id$"
+  )
+
+  candidates <- unique(unlist(lapply(
+    patterns,
+    function(pattern) grep(pattern, names(data), ignore.case = TRUE, value = TRUE)
+  )))
+  setdiff(candidates, keep)
+}
+
+make_shareable_dataset <- function(
+    data,
+    dataset_name,
+    keep = character(),
+    household_id_cols = c("fcn_id", "hh_id", "PARENT_KEY", "KEY", "unique_id"),
+    record_id_cols = c("KEY", "uuid", "unique_id")) {
+  household_id_source <- first_nonmissing_id(data, household_id_cols)
+  record_id_source <- first_nonmissing_id(data, record_id_cols)
+
+  if (any(!is.na(household_id_source))) {
+    data$anon_household_id <- make_anonymous_id(
+      paste(dataset_name, household_id_source, sep = "::"),
+      "hh"
+    )
+  }
+
+  if (any(!is.na(record_id_source))) {
+    data$anon_record_id <- make_anonymous_id(
+      paste(dataset_name, record_id_source, sep = "::"),
+      "record"
+    )
+  } else {
+    data$anon_record_id <- sprintf("record_%05d", seq_len(nrow(data)))
+  }
+
+  removed <- shareable_identifier_columns(data, keep = keep)
+  if (length(removed)) {
+    data[removed] <- NULL
+  }
+  data <- move_columns_first(data, c("anon_household_id", "anon_record_id"))
+
+  list(data = data, removed = removed)
+}
+
 move_columns_first <- function(data, cols) {
   cols <- intersect(cols, names(data))
   data[c(cols, setdiff(names(data), cols))]
@@ -263,6 +411,19 @@ write_final_rds <- function(data, relative_path) {
   ensure_parent_dir(path)
   saveRDS(data, path)
   normalizePath(path, winslash = "/", mustWork = TRUE)
+}
+
+write_shareable_rds <- function(data, relative_path) {
+  remaining_identifiers <- shareable_identifier_columns(data)
+  if (length(remaining_identifiers)) {
+    stop(
+      "Shareable output still contains identifier-like columns: ",
+      paste(remaining_identifiers, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  output_file <- basename(relative_path)
+  write_final_rds(data, file.path("4_data", "clean_final", "shareable", output_file))
 }
 
 
@@ -324,10 +485,19 @@ make_inventory_entry <- function(
     output_path,
     source_paths,
     removed_identifier_columns,
+    privacy_level = "restricted_internal",
+    shareable_output_path = NA_character_,
+    shareable_removed_identifier_columns = character(),
     notes) {
   data.frame(
     dataset_name = dataset_name,
     output_path = normalizePath(output_path, winslash = "/", mustWork = TRUE),
+    privacy_level = privacy_level,
+    shareable_output_path = if (is.na(shareable_output_path)) {
+      NA_character_
+    } else {
+      normalizePath(shareable_output_path, winslash = "/", mustWork = TRUE)
+    },
     rows = nrow(data),
     columns = ncol(data),
     communities = if ("community" %in% names(data)) compact_counts(data$community) else "",
@@ -336,6 +506,8 @@ make_inventory_entry <- function(
     source_paths = paste(normalizePath(source_paths, winslash = "/", mustWork = TRUE), collapse = " | "),
     removed_identifier_column_count = length(removed_identifier_columns),
     removed_identifier_columns = paste(removed_identifier_columns, collapse = "; "),
+    shareable_removed_identifier_column_count = length(shareable_removed_identifier_columns),
+    shareable_removed_identifier_columns = paste(shareable_removed_identifier_columns, collapse = "; "),
     notes = notes,
     stringsAsFactors = FALSE
   )
@@ -348,6 +520,11 @@ update_inventory <- function(entry) {
   if (file.exists(path)) {
     inventory <- read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
     inventory <- inventory[inventory$dataset_name != entry$dataset_name, , drop = FALSE]
+    missing_inventory_cols <- setdiff(names(entry), names(inventory))
+    missing_entry_cols <- setdiff(names(inventory), names(entry))
+    for (col in missing_inventory_cols) inventory[[col]] <- NA_character_
+    for (col in missing_entry_cols) entry[[col]] <- NA_character_
+    inventory <- inventory[names(entry)]
     inventory <- rbind(inventory, entry)
   } else {
     inventory <- entry
@@ -424,6 +601,7 @@ write_cleaning_fix_log <- function() {
     "- Corrected the earlier final-pipeline mistake by rebuilding final outputs from raw imports rather than relying on intermediate RDS/CSV files outside clean_final.",
     "- Explicitly included the 2022 refugee survey folder `2_data_raw/survey_endline`, the 2022 host survey folder `2_data_raw/survey_endline_HOST`, and the 2022 sensor folder `2_data_raw/ALL DATA_ENDLINE_2022_220703`.",
     "- Applied the baseline household correction workbook and structured endline refugee survey review workbooks inside `3_data_cleaning/fixed/clean_survey_refugee_20260805_2141.R`; correction audit CSVs are written under `4_data/clean_final/`.",
+    "- Treats root `4_data/clean_final/*.rds` files as restricted internal outputs when they retain linkage identifiers needed for cleaning, joins, or audits; shareable de-identified RDS copies are written under `4_data/clean_final/shareable/` with direct identifiers, raw form keys, UUIDs, UNHCR-like fields, household IDs, and source filenames removed.",
     "",
     "## Resulting datasets",
     "",

@@ -21,6 +21,17 @@ suppressPackageStartupMessages({
 `%notin%` <- Negate(`%in%`)
 dataset_scope <- "geocene_refugee_raw"
 
+geocene_timepoint_from_date <- function(date) {
+  date <- raw_import_extract_date_any(date)
+  timepoint <- raw_import_timepoint_from_date(date)
+  early_endline <- is.na(timepoint) &
+    !is.na(date) &
+    date >= as.Date("2022-01-01") &
+    date < as.Date("2022-01-15")
+  timepoint[early_endline] <- "endline"
+  timepoint
+}
+
 geocene_dir <- raw_import_path("2_data_raw", "Geocene_220705")
 files <- c(
   events = file.path(geocene_dir, "events_22.csv"),
@@ -184,21 +195,148 @@ df_events_stove_on <- df_events %>%
     date = as.Date(start_time),
     stove_on_min = as.numeric(difftime(stop_time, start_time, units = "mins")),
     lpg_enrolled_and_receiving = case_when(
+      study_arm_overall == "comparison" ~ "receiving LPG through distribution program",
+      date < first_receive_lpg_ymd | is.na(first_receive_lpg_ymd) ~ "not yet receiving LPG through distribution program",
+      date >= first_receive_lpg_ymd ~ "receiving LPG through distribution program",
+      TRUE ~ "not yet receiving LPG through distribution program"
+    ),
+    lpg_enrolled_and_receiving_previous_rule_order = case_when(
       date < first_receive_lpg_ymd | is.na(first_receive_lpg_ymd) ~ "not yet receiving LPG through distribution program",
       date >= first_receive_lpg_ymd ~ "receiving LPG through distribution program",
       study_arm_overall == "comparison" ~ "receiving LPG through distribution program",
       TRUE ~ "not yet receiving LPG through distribution program"
-    )
+    ),
+    included_by_reviewed_rule_order =
+      lpg_enrolled_and_receiving == "receiving LPG through distribution program",
+    included_by_previous_rule_order =
+      lpg_enrolled_and_receiving_previous_rule_order == "receiving LPG through distribution program",
+    included_only_after_comparison_rule_fix =
+      included_by_reviewed_rule_order & !included_by_previous_rule_order
   ) %>%
   filter(!is.na(start_time), !is.na(stop_time), !is.na(date), !is.na(fuel_type)) %>%
   distinct()
+df_geocene_import_inclusion_audit_by_household <- df_events_stove_on %>%
+  group_by(study_arm_overall, fcn_id, hh_id) %>%
+  summarise(
+    n_events_valid_raw = n(),
+    n_household_days_valid_raw = n_distinct(date),
+    n_events_included_previous_rule_order =
+      sum(included_by_previous_rule_order, na.rm = TRUE),
+    n_events_included_reviewed_rule_order =
+      sum(included_by_reviewed_rule_order, na.rm = TRUE),
+    n_events_excluded_reviewed_rule_order =
+      sum(!included_by_reviewed_rule_order, na.rm = TRUE),
+    n_events_restored_by_comparison_rule_fix =
+      sum(included_only_after_comparison_rule_fix, na.rm = TRUE),
+    n_household_days_restored_by_comparison_rule_fix =
+      n_distinct(date[included_only_after_comparison_rule_fix]),
+    first_restored_date = if (any(included_only_after_comparison_rule_fix, na.rm = TRUE)) {
+      min(date[included_only_after_comparison_rule_fix], na.rm = TRUE)
+    } else {
+      as.Date(NA)
+    },
+    last_restored_date = if (any(included_only_after_comparison_rule_fix, na.rm = TRUE)) {
+      max(date[included_only_after_comparison_rule_fix], na.rm = TRUE)
+    } else {
+      as.Date(NA)
+    },
+    missing_first_receive_lpg_ymd_any = any(is.na(first_receive_lpg_ymd)),
+    .groups = "drop"
+  ) %>%
+  arrange(study_arm_overall, fcn_id, hh_id)
+
+df_geocene_import_inclusion_audit_by_arm <- df_geocene_import_inclusion_audit_by_household %>%
+  mutate(
+    restored_by_comparison_rule_fix =
+      n_events_restored_by_comparison_rule_fix > 0,
+    valid_restored_fcn_id =
+      restored_by_comparison_rule_fix & !is.na(fcn_id) & fcn_id != ""
+  ) %>%
+  group_by(study_arm_overall) %>%
+  summarise(
+    n_households = n_distinct(fcn_id),
+    n_events_valid_raw = sum(n_events_valid_raw, na.rm = TRUE),
+    n_household_days_valid_raw = sum(n_household_days_valid_raw, na.rm = TRUE),
+    n_events_included_previous_rule_order =
+      sum(n_events_included_previous_rule_order, na.rm = TRUE),
+    n_events_included_reviewed_rule_order =
+      sum(n_events_included_reviewed_rule_order, na.rm = TRUE),
+    n_events_excluded_reviewed_rule_order =
+      sum(n_events_excluded_reviewed_rule_order, na.rm = TRUE),
+    n_events_restored_by_comparison_rule_fix =
+      sum(n_events_restored_by_comparison_rule_fix, na.rm = TRUE),
+    n_household_days_restored_by_comparison_rule_fix =
+      sum(n_household_days_restored_by_comparison_rule_fix, na.rm = TRUE),
+    n_households_restored_by_comparison_rule_fix =
+      n_distinct(fcn_id[valid_restored_fcn_id]),
+    n_household_rows_restored_by_comparison_rule_fix =
+      sum(restored_by_comparison_rule_fix, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+df_monitor_days_raw <- df_mission_logs %>%
+  left_join(df_missions_hh_id, by = "mission_id") %>%
+  left_join(df_mission_id_to_analyze, by = "mission_id") %>%
+  left_join(df_first_enrolled_lpg, by = "fcn_id") %>%
+  mutate(
+    phone_time = parse_geocene_time(phone_time),
+    meter_time = parse_geocene_time(meter_time),
+    date = as.Date(coalesce(phone_time, meter_time)),
+    num_samples = suppressWarnings(as.numeric(num_samples)),
+    lpg_enrolled_and_receiving = case_when(
+      study_arm_overall == "comparison" ~ "receiving LPG through distribution program",
+      date < first_receive_lpg_ymd | is.na(first_receive_lpg_ymd) ~ "not yet receiving LPG through distribution program",
+      date >= first_receive_lpg_ymd ~ "receiving LPG through distribution program",
+      TRUE ~ "not yet receiving LPG through distribution program"
+    ),
+    community = "refugee",
+    data_type = "geocene_stove_monitor_day",
+    collection_date = date,
+    collection_year = year(date),
+    timepoint = geocene_timepoint_from_date(collection_date),
+    raw_collection_round = "geocene_220705_raw_exports",
+    raw_source_file = "mission_logs_22.csv; missions_22.csv; tags_22.csv",
+    raw_source_path = normalizePath(geocene_dir, winslash = "/", mustWork = TRUE)
+  ) %>%
+  filter(
+    !is.na(date),
+    !is.na(fcn_id),
+    !is.na(fuel_type),
+    !is.na(num_samples),
+    num_samples > 0
+  ) %>%
+  distinct(
+    study_arm_overall, hh_id, fcn_id, fuel_type, date,
+    .keep_all = TRUE
+  )
+
+df_monitor_day_denominator_by_household <- df_monitor_days_raw %>%
+  group_by(timepoint, study_arm_overall, fcn_id, hh_id, fuel_type) %>%
+  summarise(
+    n_monitor_stove_days = n(),
+    first_monitor_date = min(date, na.rm = TRUE),
+    last_monitor_date = max(date, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(timepoint, study_arm_overall, fcn_id, fuel_type)
+
+df_monitor_day_denominator_by_arm <- df_monitor_days_raw %>%
+  group_by(timepoint, study_arm_overall, fuel_type) %>%
+  summarise(
+    n_monitor_stove_days = n(),
+    n_households = n_distinct(fcn_id),
+    first_monitor_date = min(date, na.rm = TRUE),
+    last_monitor_date = max(date, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(timepoint, study_arm_overall, fuel_type)
 
 df_have_geocene_but_no_survey_data <- df_events_stove_on %>%
-  filter(is.na(first_receive_lpg_ymd)) %>%
+  filter(is.na(first_receive_lpg_ymd), study_arm_overall != "comparison") %>%
   distinct(fcn_id, .keep_all = TRUE) %>%
   select(hh_id, fcn_id, date) %>%
   mutate(
-    timepoint = raw_import_timepoint_from_date(date)
+    timepoint = geocene_timepoint_from_date(date)
   )
 
 df_have_geocene_but_no_survey_data_fcn_id <- df_have_geocene_but_no_survey_data %>%
@@ -214,6 +352,68 @@ max_date_mission <- df_events_stove_on %>%
 df_events_stove_on_lt_3mo <- df_events_stove_on %>%
   left_join(max_date_mission, by = "mission_id") %>%
   filter(stop_time < max_date)
+
+df_geocene_import_inclusion_audit_analysis_eligible_by_household <-
+  df_events_stove_on_lt_3mo %>%
+  filter(
+    !is.na(fcn_id),
+    fcn_id != "",
+    fcn_id %notin% df_have_geocene_but_no_survey_data_fcn_id
+  ) %>%
+  group_by(study_arm_overall, fcn_id, hh_id) %>%
+  summarise(
+    n_events_analysis_eligible = n(),
+    n_household_days_analysis_eligible = n_distinct(date),
+    n_events_included_previous_rule_order =
+      sum(included_by_previous_rule_order, na.rm = TRUE),
+    n_events_included_reviewed_rule_order =
+      sum(included_by_reviewed_rule_order, na.rm = TRUE),
+    n_events_restored_by_comparison_rule_fix =
+      sum(included_only_after_comparison_rule_fix, na.rm = TRUE),
+    n_household_days_restored_by_comparison_rule_fix =
+      n_distinct(date[included_only_after_comparison_rule_fix]),
+    first_restored_date = if (any(included_only_after_comparison_rule_fix, na.rm = TRUE)) {
+      min(date[included_only_after_comparison_rule_fix], na.rm = TRUE)
+    } else {
+      as.Date(NA)
+    },
+    last_restored_date = if (any(included_only_after_comparison_rule_fix, na.rm = TRUE)) {
+      max(date[included_only_after_comparison_rule_fix], na.rm = TRUE)
+    } else {
+      as.Date(NA)
+    },
+    .groups = "drop"
+  ) %>%
+  arrange(study_arm_overall, fcn_id, hh_id)
+
+df_geocene_import_inclusion_audit_analysis_eligible_by_arm <-
+  df_geocene_import_inclusion_audit_analysis_eligible_by_household %>%
+  mutate(
+    restored_by_comparison_rule_fix =
+      n_events_restored_by_comparison_rule_fix > 0,
+    valid_restored_fcn_id =
+      restored_by_comparison_rule_fix & !is.na(fcn_id) & fcn_id != ""
+  ) %>%
+  group_by(study_arm_overall) %>%
+  summarise(
+    n_households = n_distinct(fcn_id),
+    n_events_analysis_eligible = sum(n_events_analysis_eligible, na.rm = TRUE),
+    n_household_days_analysis_eligible =
+      sum(n_household_days_analysis_eligible, na.rm = TRUE),
+    n_events_included_previous_rule_order =
+      sum(n_events_included_previous_rule_order, na.rm = TRUE),
+    n_events_included_reviewed_rule_order =
+      sum(n_events_included_reviewed_rule_order, na.rm = TRUE),
+    n_events_restored_by_comparison_rule_fix =
+      sum(n_events_restored_by_comparison_rule_fix, na.rm = TRUE),
+    n_household_days_restored_by_comparison_rule_fix =
+      sum(n_household_days_restored_by_comparison_rule_fix, na.rm = TRUE),
+    n_households_restored_by_comparison_rule_fix =
+      n_distinct(fcn_id[valid_restored_fcn_id]),
+    n_household_rows_restored_by_comparison_rule_fix =
+      sum(restored_by_comparison_rule_fix, na.rm = TRUE),
+    .groups = "drop"
+  )
 
 df_events_stove_on_per_day <- df_events_stove_on_lt_3mo %>%
   filter(fcn_id %notin% df_have_geocene_but_no_survey_data_fcn_id) %>%
@@ -240,7 +440,7 @@ df_events_stove_on_per_day <- df_events_stove_on_lt_3mo %>%
     data_type = "geocene_stove_use_daily",
     collection_date = date,
     collection_year = year(date),
-    timepoint = raw_import_timepoint_from_date(collection_date),
+    timepoint = geocene_timepoint_from_date(collection_date),
     raw_collection_round = "geocene_220705_raw_exports",
     raw_source_file = "events_22.csv; missions_22.csv; tags_22.csv",
     raw_source_path = normalizePath(geocene_dir, winslash = "/", mustWork = TRUE)
@@ -258,6 +458,34 @@ events_path <- raw_import_write_rds(
 daily_path <- raw_import_write_rds(
   df_events_stove_on_per_day,
   file.path("4_data", "clean_final", "imported_raw", "stove_use_geocene_refugee_daily_raw.rds")
+)
+monitor_days_path <- raw_import_write_rds(
+  df_monitor_days_raw,
+  file.path("4_data", "clean_final", "imported_raw", "geocene_refugee_monitor_days_derived_raw.rds")
+)
+inclusion_audit_household_path <- raw_import_write_csv(
+  df_geocene_import_inclusion_audit_by_household,
+  file.path("4_data", "clean_final", "imported_raw", "geocene_refugee_import_inclusion_audit_by_household.csv")
+)
+inclusion_audit_arm_path <- raw_import_write_csv(
+  df_geocene_import_inclusion_audit_by_arm,
+  file.path("4_data", "clean_final", "imported_raw", "geocene_refugee_import_inclusion_audit_by_arm.csv")
+)
+inclusion_audit_analysis_household_path <- raw_import_write_csv(
+  df_geocene_import_inclusion_audit_analysis_eligible_by_household,
+  file.path("4_data", "clean_final", "imported_raw", "geocene_refugee_import_inclusion_audit_analysis_eligible_by_household.csv")
+)
+inclusion_audit_analysis_arm_path <- raw_import_write_csv(
+  df_geocene_import_inclusion_audit_analysis_eligible_by_arm,
+  file.path("4_data", "clean_final", "imported_raw", "geocene_refugee_import_inclusion_audit_analysis_eligible_by_arm.csv")
+)
+monitor_day_household_path <- raw_import_write_csv(
+  df_monitor_day_denominator_by_household,
+  file.path("4_data", "clean_final", "imported_raw", "geocene_refugee_monitor_day_denominator_by_household.csv")
+)
+monitor_day_arm_path <- raw_import_write_csv(
+  df_monitor_day_denominator_by_arm,
+  file.path("4_data", "clean_final", "imported_raw", "geocene_refugee_monitor_day_denominator_by_arm.csv")
 )
 no_survey_path <- raw_import_write_csv(
   df_have_geocene_but_no_survey_data,
@@ -279,9 +507,42 @@ manifest <- data.frame(
 raw_import_update_manifest(manifest, dataset_scope)
 
 summary <- data.frame(
-  dataset = c("geocene_refugee_stove_events_derived_raw", "stove_use_geocene_refugee_daily_raw", "geocene_refugee_no_survey_match"),
-  output_path = c(events_path, daily_path, no_survey_path),
-  rows = c(nrow(df_events_stove_on), nrow(df_events_stove_on_per_day), nrow(df_have_geocene_but_no_survey_data)),
+  dataset = c(
+    "geocene_refugee_stove_events_derived_raw",
+    "stove_use_geocene_refugee_daily_raw",
+    "geocene_refugee_monitor_days_derived_raw",
+    "geocene_refugee_import_inclusion_audit_by_household",
+    "geocene_refugee_import_inclusion_audit_by_arm",
+    "geocene_refugee_import_inclusion_audit_analysis_eligible_by_household",
+    "geocene_refugee_import_inclusion_audit_analysis_eligible_by_arm",
+    "geocene_refugee_monitor_day_denominator_by_household",
+    "geocene_refugee_monitor_day_denominator_by_arm",
+    "geocene_refugee_no_survey_match"
+  ),
+  output_path = c(
+    events_path,
+    daily_path,
+    monitor_days_path,
+    inclusion_audit_household_path,
+    inclusion_audit_arm_path,
+    inclusion_audit_analysis_household_path,
+    inclusion_audit_analysis_arm_path,
+    monitor_day_household_path,
+    monitor_day_arm_path,
+    no_survey_path
+  ),
+  rows = c(
+    nrow(df_events_stove_on),
+    nrow(df_events_stove_on_per_day),
+    nrow(df_monitor_days_raw),
+    nrow(df_geocene_import_inclusion_audit_by_household),
+    nrow(df_geocene_import_inclusion_audit_by_arm),
+    nrow(df_geocene_import_inclusion_audit_analysis_eligible_by_household),
+    nrow(df_geocene_import_inclusion_audit_analysis_eligible_by_arm),
+    nrow(df_monitor_day_denominator_by_household),
+    nrow(df_monitor_day_denominator_by_arm),
+    nrow(df_have_geocene_but_no_survey_data)
+  ),
   stringsAsFactors = FALSE
 )
 raw_import_write_csv(

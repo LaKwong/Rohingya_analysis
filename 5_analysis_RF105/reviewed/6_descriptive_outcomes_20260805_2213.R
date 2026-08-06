@@ -68,6 +68,21 @@ as_number <- function(x) {
   suppressWarnings(as.numeric(as.character(x)))
 }
 
+collapse_collection_years <- function(x) {
+  years <- sort(unique(as.integer(x[!is.na(x)])))
+  if (length(years) == 0) {
+    return(NA_character_)
+  }
+  paste(years, collapse = ", ")
+}
+
+month_axis_label <- function(base_label, collection_years) {
+  if (length(collection_years) == 0 || is.na(collection_years) || !nzchar(collection_years)) {
+    return(base_label)
+  }
+  paste0(base_label, " (data collected ", collection_years, ")")
+}
+
 var_present <- function(df, var) {
   var %in% names(df)
 }
@@ -381,7 +396,12 @@ fuel_30_labels <- tibble(
 
 fuel_30_summary <- summarise_binary_vars(
   survey, fuel_30_labels, "fuel_used_past_30_days"
-)
+) %>%
+  mutate(
+    collection_year = timepoint_collection_year(timepoint),
+    timepoint_year_label = timepoint_label_with_year(timepoint)
+  ) %>%
+  relocate(collection_year, timepoint_year_label, .after = timepoint)
 write_reviewed_csv(
   fuel_30_summary,
   "table_descriptive_fuel_use_past_month.csv"
@@ -393,11 +413,18 @@ fuel_30_plot_data <- fuel_30_summary %>%
     "fuel_30_gather_scraps", "fuel_30_collect_wood", "fuel_30_receive_wood",
     "fuel_30_buy_wood", "fuel_30_receive_lpg", "fuel_30_buy_lpg",
     "fuel_30_receive_crh", "fuel_30_buy_crh", "fuel_30_other"
-  ))
+  )) %>%
+  mutate(
+    timepoint_year_label = factor(
+      timepoint_year_label,
+      levels = timepoint_label_with_year_levels,
+      ordered = TRUE
+    )
+  )
 
 fig_fuel_30 <- ggplot(
   fuel_30_plot_data,
-  aes(x = timepoint, y = percent, fill = study_arm_overall)
+  aes(x = timepoint_year_label, y = percent, fill = study_arm_overall)
 ) +
   geom_col(position = position_dodge(width = 0.75), width = 0.65) +
   geom_errorbar(
@@ -410,7 +437,7 @@ fig_fuel_30 <- ggplot(
   theme_classic() +
   theme(axis.text.x = element_text(angle = 35, hjust = 1)) +
   labs(
-    x = "Timepoint",
+    x = "Timepoint (data collection year)",
     y = "Households using fuel in past 30 days",
     fill = "Study arm"
   )
@@ -980,31 +1007,55 @@ add_health_descriptive_vars <- function(df) {
     df$target_child_disturbed_speech_yn <- df$target_child_distrubed_speech_yn
   }
 
-  if (all(c("target_child_wheezing_yn", "target_child_distrubed_speech_yn") %in% names(df))) {
+  if ("target_child_wheezing_yn" %in% names(df)) {
     df <- df %>%
       mutate(
         target_child_asthma = case_when(
           target_child_wheezing_yn == 1 ~ 1L,
           target_child_wheezing_yn == 0 ~ 0L,
           TRUE ~ NA_integer_
-        ),
-        target_child_severe_asthma = case_when(
-          target_child_wheezing_yn == 1 & target_child_distrubed_speech_yn == 1 ~ 1L,
-          target_child_wheezing_yn == 0 | target_child_distrubed_speech_yn == 0 ~ 0L,
-          TRUE ~ NA_integer_
         )
       )
   }
+
+  df <- derive_child_severe_asthma_vars(df)
 
   df
 }
 
 survey_health <- add_health_descriptive_vars(survey)
 
+severe_asthma_descriptive_coding_audit <- survey_health %>%
+  group_by(timepoint, study_arm_overall, target_child_disturbed_speech_missing_type) %>%
+  summarise(
+    n_records = n(),
+    n_child_wheeze_yes = sum(target_child_wheezing_yn == 1, na.rm = TRUE),
+    n_disturbed_speech_nonmissing = sum(!is.na(target_child_distrubed_speech_yn_na_preserving)),
+    n_severe_asthma_na_preserving_nonmissing = sum(!is.na(target_child_severe_asthma)),
+    n_severe_asthma_skip_as_no_nonmissing = sum(!is.na(target_child_severe_asthma_skip_as_no)),
+    n_severe_asthma_na_preserving_yes = sum(target_child_severe_asthma == 1, na.rm = TRUE),
+    n_severe_asthma_skip_as_no_yes = sum(target_child_severe_asthma_skip_as_no == 1, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(timepoint, study_arm_overall, target_child_disturbed_speech_missing_type)
+
+write_reviewed_csv(
+  severe_asthma_descriptive_coding_audit,
+  "table_descriptive_child_severe_asthma_coding_audit.csv",
+  subfolder = "qa"
+)
 asthma_labels <- tibble(
-  source_variable = c("target_child_asthma", "target_child_severe_asthma"),
+  source_variable = c(
+    "target_child_asthma",
+    "target_child_severe_asthma",
+    "target_child_severe_asthma_skip_as_no"
+  ),
   outcome_name = source_variable,
-  outcome_label = c("Child asthma proxy", "Child severe asthma proxy")
+  outcome_label = c(
+    "Child asthma proxy",
+    "Child severe asthma proxy (NA-preserving)",
+    "Child severe asthma proxy (skip-as-no sensitivity)"
+  )
 ) %>%
   filter(source_variable %in% names(survey_health))
 
@@ -1872,7 +1923,7 @@ harassment_category_plot_data <- harassment_household_category_summary %>%
   filter(n_nonmissing > 0) %>%
   mutate(
     outcome_label = factor(as.character(outcome_label), levels = harassment_category_levels),
-    timepoint = factor(timepoint, levels = timepoint_levels)
+    timepoint = as_ordered_timepoint(timepoint)
   )
 
 fig_harassment_category <- ggplot(
@@ -1954,7 +2005,7 @@ coverage <- tribble(
   4, "Strategies used to cope with shortage of food", "table_descriptive_food_shortage_coping.csv", "fig_descriptive_food_shortage_coping.png", "complete", "Coping labels copied from 3_data_cleaning/1.5_define_vector_columns.R.",
   5, "Strategies used to cope with shortage of fuel", "table_descriptive_fuel_shortage_coping.csv", "fig_descriptive_fuel_shortage_coping.png", "complete", "Coping labels copied from 3_data_cleaning/1.5_define_vector_columns.R; code 1 note retained.",
   6, "Food insecurity", "table_descriptive_food_insecurity_scores.csv", "fig_descriptive_food_insecurity_scores.png", "complete", "Recalculates FCS from weekly food-frequency variables and categorizes poor/borderline/acceptable.",
-  7, "Asthma and severe asthma", "table_descriptive_child_asthma_prevalence.csv", "fig_descriptive_child_asthma_prevalence.png", "complete", "Uses reviewed child wheeze proxy and severe asthma proxy from wheeze plus disturbed speech.",
+  7, "Asthma and severe asthma", "table_descriptive_child_asthma_prevalence.csv", "fig_descriptive_child_asthma_prevalence.png", "complete", "Uses reviewed child wheeze proxy and severe asthma proxy from wheeze plus disturbed speech, with NA-preserving and skip-as-no severe-asthma rows.",
   8, "Time collecting fuel", "table_descriptive_fuel_collection_time.csv", "fig_descriptive_fuel_collection_time.png", "complete", "Summarizes walking/waiting time variables in hours; values <0.01 treated as missing as in old script.",
   9, "Time cooking", "table_descriptive_time_use_changes.csv", "fig_descriptive_time_use_changes.png", "complete", "Categorical more/same/less change variable time_cooking.",
   10, "Time caring for self", "table_descriptive_time_use_changes.csv", "fig_descriptive_time_use_changes.png", "partial", "No exact time_caring_for_self variable found in clean_final; time_eating is shown as a proxy and flagged in the label.",
@@ -3055,8 +3106,16 @@ as_logical_clean <- function(x) {
 geocene_daily_file <- "table_descriptive_stove_daily_dataset.csv"
 geocene_daily_summary_file <- "table_descriptive_geocene_daily_summary.csv"
 
-stove_data_raw <- read_geocene_reviewed_csv(geocene_daily_file)
-geocene_daily_summary <- read_geocene_reviewed_csv(geocene_daily_summary_file)
+stove_data_raw <- read_geocene_reviewed_csv(geocene_daily_file) %>%
+  mutate(
+    timepoint = as_ordered_timepoint(timepoint),
+    study_arm_overall = factor(study_arm_overall, levels = c(arm_levels, "missing_study_arm"))
+  )
+geocene_daily_summary <- read_geocene_reviewed_csv(geocene_daily_summary_file) %>%
+  mutate(
+    timepoint = as_ordered_timepoint(timepoint),
+    study_arm_overall = factor(study_arm_overall, levels = c(arm_levels, "missing_study_arm"))
+  )
 
 stove_result_source_dependency <- tibble(
   downstream_section = "stove_monitor_uptake_descriptive_section",
@@ -3116,9 +3175,10 @@ stove_data <- stove_data_raw %>%
   mutate(
     fcn_id = str_squish(as.character(fcn_id)),
     hh_id = str_squish(as.character(hh_id)),
-    timepoint = str_squish(str_to_lower(as.character(timepoint))),
+    timepoint = as_ordered_timepoint(timepoint),
     study_arm_overall = str_squish(str_to_lower(as.character(study_arm_overall))),
     date = as.Date(date),
+    collection_year = lubridate::year(date),
     days_after_first_receiving =
       suppressWarnings(as.numeric(days_after_first_receiving)),
     months_after_first_receiving_numeric =
@@ -3164,6 +3224,7 @@ write_reviewed_csv(
 stove_sample_counts <- stove_data %>%
   group_by(timepoint, study_arm_overall) %>%
   summarise(
+    collection_years = collapse_collection_years(collection_year),
     n_daily_records = n(),
     n_households = n_distinct(fcn_id),
     first_monitoring_date = min(date, na.rm = TRUE),
@@ -3217,6 +3278,7 @@ stove_early_day_sensitivity <- early_day_thresholds %>%
   group_by(sensitivity, min_days_after_first_receiving,
            timepoint, study_arm_overall) %>%
   summarise(
+    collection_years = collapse_collection_years(collection_year),
     n_daily_records = n(),
     n_households = n_distinct(fcn_id),
     pct_exclusive_lpg_days =
@@ -3242,10 +3304,16 @@ write_reviewed_csv(
 # Month-after-receipt summaries and figures
 ################################################################################
 
+stove_month_collection_years <- stove_data %>%
+  filter(!is.na(months_after_first_receiving_numeric)) %>%
+  pull(collection_year) %>%
+  collapse_collection_years()
+
 stove_month_summary <- stove_data %>%
   filter(!is.na(months_after_first_receiving_numeric)) %>%
   group_by(months_after_first_receiving_numeric, study_arm_overall) %>%
   summarise(
+    collection_years = collapse_collection_years(collection_year),
     n_daily_records = n(),
     n_households = n_distinct(fcn_id),
     pct_exclusive_lpg_days =
@@ -3284,7 +3352,7 @@ fig_exclusive_lpg <- ggplot(
     na.translate = FALSE
   ) +
   labs(
-    x = "Months after first receiving LPG",
+    x = month_axis_label("Months after first receiving LPG", stove_month_collection_years),
     y = "Daily records with exclusive LPG use",
     color = "Study arm"
   ) +
@@ -3333,7 +3401,7 @@ fig_stove_minutes <- ggplot(
   facet_wrap(~ study_arm_overall) +
   scale_color_manual(values = c(LPG = "#F28E2B", Biomass = "#4E79A7")) +
   labs(
-    x = "Months after first receiving LPG",
+    x = month_axis_label("Months after first receiving LPG", stove_month_collection_years),
     y = "Mean stove-on minutes per day",
     color = "Fuel type"
   ) +
@@ -3496,19 +3564,8 @@ derive_health_outcomes <- function(df) {
     df$target_child_disturbed_speech_yn <- df$target_child_distrubed_speech_yn
   }
 
-  if ("target_child_distrubed_speech_yn" %in% names(df)) {
-    df$target_child_distrubed_speech_yn <- replace_na(
-      df$target_child_distrubed_speech_yn, 0L
-    )
-  }
-
-  if ("respondent_disturbed_speech_yn" %in% names(df)) {
-    df$respondent_disturbed_speech_yn <- replace_na(
-      df$respondent_disturbed_speech_yn, 0L
-    )
-  }
-
-
+  # Preserve true disturbed-speech missingness. Severe asthma is derived below
+  # with an NA-preserving primary definition and a skip-as-no sensitivity.
   if ("target_child_wheezing_yn" %in% names(df)) {
     df <- df %>%
       mutate(
@@ -3520,17 +3577,7 @@ derive_health_outcomes <- function(df) {
       )
   }
 
-  if (all(c("target_child_wheezing_yn", "target_child_distrubed_speech_yn") %in% names(df))) {
-    df <- df %>%
-      mutate(
-        target_child_severe_asthma = case_when(
-          target_child_wheezing_yn == 1 & target_child_distrubed_speech_yn == 1 ~ 1L,
-          target_child_wheezing_yn == 0 | target_child_distrubed_speech_yn == 0 ~ 0L,
-          TRUE ~ NA_integer_
-        )
-      )
-  }
-
+  df <- derive_child_severe_asthma_vars(df)
   if ("healthcare_visits_6mo" %in% names(df)) {
     df <- df %>%
       mutate(
@@ -3582,6 +3629,7 @@ resp_vars_impacted <- c(
   "respondent_eye_sore_yn",
   "target_child_asthma",
   "target_child_severe_asthma",
+  "target_child_severe_asthma_skip_as_no",
   "target_child_cough_yn",
   "target_child_fever_yn",
   "target_child_resp_rate_yn"
@@ -3623,7 +3671,8 @@ health_labels <- c(
   respondent_eye_itch_yn = "Respondent itchy eyes",
   respondent_eye_sore_yn = "Respondent sore eyes",
   target_child_asthma = "Child asthma proxy",
-  target_child_severe_asthma = "Child severe asthma proxy",
+  target_child_severe_asthma = "Child severe asthma proxy (NA-preserving)",
+  target_child_severe_asthma_skip_as_no = "Child severe asthma proxy (skip-as-no sensitivity)",
   target_child_cough_yn = "Child persistent cough",
   target_child_fever_yn = "Child fever",
   target_child_resp_rate_yn = "Child increased respiratory rate",
@@ -4704,6 +4753,21 @@ as_number <- function(x) {
   suppressWarnings(as.numeric(as.character(x)))
 }
 
+collapse_collection_years <- function(x) {
+  years <- sort(unique(as.integer(x[!is.na(x)])))
+  if (length(years) == 0) {
+    return(NA_character_)
+  }
+  paste(years, collapse = ", ")
+}
+
+month_axis_label <- function(base_label, collection_years) {
+  if (length(collection_years) == 0 || is.na(collection_years) || !nzchar(collection_years)) {
+    return(base_label)
+  }
+  paste0(base_label, " (data collected ", collection_years, ")")
+}
+
 var_present <- function(df, var) {
   var %in% names(df)
 }
@@ -4813,8 +4877,8 @@ change_colors <- c(more = "#2F8F5B", less = "#B6463A")
 
 manuscript_figure_targets <- tibble(
   figure_description = c(
-    "Exclusive LPG stove use by month since receipt",
-    "Daily stove-use minutes by fuel and month since receipt",
+    "Exclusive LPG stove use by month since receipt (2020 data collection)",
+    "Daily stove-use minutes by fuel and month since receipt (2020 data collection)",
     "Child time-use changes",
     "Respondent time-use changes",
     "Harassment while collecting fuel",
@@ -4876,15 +4940,21 @@ stove_midline_intervention <- stove_daily %>%
   mutate(
     days_after_first_receiving = as_number(days_after_first_receiving),
     months_after_first_receiving = as_number(months_after_first_receiving_numeric),
+    collection_year = lubridate::year(as.Date(date)),
     stove_on_min_sum_lpg_zero = as_number(stove_on_min_sum_lpg_zero),
     stove_on_min_sum_biomass_zero = as_number(stove_on_min_sum_biomass_zero),
     exclusive_lpg_recalc = as.integer(as.logical(exclusive_lpg_recalc))
   )
 
+stove_midline_collection_years <- collapse_collection_years(
+  stove_midline_intervention$collection_year
+)
+
 stove_exclusive_plot_data <- stove_midline_intervention %>%
   filter(!is.na(months_after_first_receiving), !is.na(exclusive_lpg_recalc)) %>%
   group_by(months_after_first_receiving) %>%
   summarise(
+    collection_years = collapse_collection_years(collection_year),
     n_daily_records = n(),
     n_households = n_distinct(fcn_id),
     n_exclusive_lpg_days = sum(exclusive_lpg_recalc == 1, na.rm = TRUE),
@@ -4920,7 +4990,10 @@ fig_stove_exclusive <- ggplot(
   theme_bw() +
   theme(legend.position = "none") +
   labs(
-    x = "Months after first receiving LPG through free distribution program",
+    x = month_axis_label(
+      "Months after first receiving LPG through free distribution program",
+      stove_midline_collection_years
+    ),
     y = "Percent of days household exclusively used LPG when cooking"
   ) +
   coord_cartesian(clip = "off")
@@ -4939,6 +5012,7 @@ stove_minutes_plot_data <- stove_midline_intervention %>%
     fcn_id,
     hh_id,
     date,
+    collection_year,
     timepoint,
     study_arm_overall,
     raw_source_file,
@@ -4960,6 +5034,7 @@ stove_minutes_plot_data <- stove_midline_intervention %>%
 stove_minutes_summary <- stove_minutes_plot_data %>%
   group_by(fuel_type, fuel_type_label) %>%
   summarise(
+    collection_years = collapse_collection_years(collection_year),
     n_daily_records = n(),
     n_households = n_distinct(fcn_id),
     mean_minutes = mean(stove_on_min_sum, na.rm = TRUE),
@@ -5008,7 +5083,10 @@ fig_stove_minutes <- ggplot(
   ) +
   theme_bw() +
   labs(
-    x = "Days after first receiving LPG through free distribution program",
+    x = month_axis_label(
+      "Days after first receiving LPG through free distribution program",
+      stove_midline_collection_years
+    ),
     y = "Minutes of use"
   )
 
@@ -5310,29 +5388,50 @@ save_plot_if_data(
 # PM2.5 by hour of day, using reviewed clean indoor PM data
 ################################################################################
 
-pm_hourly_plot_data <- pm_indoor %>%
+pm_household_hourly_input <- pm_indoor %>%
   clean_timepoint_arm() %>%
   filter(
     !is.na(timepoint),
     !is.na(study_arm_overall),
     !is.na(PM_Estimate),
     PM_Estimate > 0,
-    !is.na(nearest_min)
+    !is.na(nearest_min),
+    !is.na(fcn_id)
   ) %>%
   mutate(
     nearest_min_60 = lubridate::floor_date(nearest_min, "60 minutes"),
-    PM_Estimate = as_number(PM_Estimate)
+    PM_Estimate = as_number(PM_Estimate),
+    fcn_id = as.character(fcn_id),
+    hh_id = as.character(hh_id),
+    raw_source_file = as.character(raw_source_file),
+    PM_monitor = as.character(PM_monitor)
   ) %>%
+  group_by(timepoint, study_arm_overall, fcn_id, hh_id, raw_source_file, PM_monitor, nearest_min_60) %>%
+  summarise(
+    n_minute_records = n(),
+    PM_Estimate_household_hour = mean(PM_Estimate, na.rm = TRUE),
+    PM_Estimate_household_hour_sd_minute = sd(PM_Estimate, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+write_reviewed_csv(
+  pm_household_hourly_input,
+  "table_descriptive_pm25_household_hour_inputs_internal.csv"
+)
+
+pm_hourly_plot_data <- pm_household_hourly_input %>%
   group_by(timepoint, study_arm_overall, nearest_min_60) %>%
   summarise(
-    n_records = n(),
+    n_household_hours = n(),
+    n_records = sum(n_minute_records, na.rm = TRUE),
     n_households = n_distinct(fcn_id),
     n_source_files = n_distinct(raw_source_file),
-    PM_Estimate_av = mean(PM_Estimate, na.rm = TRUE),
-    PM_Estimate_sd = sd(PM_Estimate, na.rm = TRUE),
-    se_pm_estimate = PM_Estimate_sd / sqrt(n_records),
-    lower_ci = pmax(0.1, PM_Estimate_av - 1.96 * se_pm_estimate),
-    upper_ci = pmax(0.1, PM_Estimate_av + 1.96 * se_pm_estimate),
+    PM_Estimate_av = mean(PM_Estimate_household_hour, na.rm = TRUE),
+    PM_Estimate_sd = sd(PM_Estimate_household_hour, na.rm = TRUE),
+    se_pm_estimate = if_else(n_household_hours > 1, PM_Estimate_sd / sqrt(n_household_hours), NA_real_),
+    lower_ci = if_else(!is.na(se_pm_estimate), pmax(0.1, PM_Estimate_av - 1.96 * se_pm_estimate), NA_real_),
+    upper_ci = if_else(!is.na(se_pm_estimate), pmax(0.1, PM_Estimate_av + 1.96 * se_pm_estimate), NA_real_),
+    uncertainty_unit = "household_hour",
     .groups = "drop"
   ) %>%
   arrange(timepoint, study_arm_overall, nearest_min_60)
@@ -5990,7 +6089,7 @@ if (file.exists(ambient_household_file)) {
     show_col_types = FALSE
   ) %>%
     mutate(
-      timepoint = factor(timepoint, levels = timepoint_levels),
+      timepoint = as_ordered_timepoint(timepoint),
       study_arm_overall = factor(study_arm_overall, levels = arm_levels),
       has_concurrent_ambient = as.logical(has_concurrent_ambient)
     ) %>%

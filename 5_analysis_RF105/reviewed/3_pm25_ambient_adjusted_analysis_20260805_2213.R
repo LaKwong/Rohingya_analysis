@@ -37,6 +37,15 @@ library(lme4)
 
 timepoint_levels <- c("baseline", "midline", "endline")
 arm_levels <- c("comparison", "intervention")
+
+as_ordered_timepoint <- function(x, extra_levels = character()) {
+  x_clean <- trimws(tolower(as.character(x)))
+  factor(
+    x_clean,
+    levels = c(timepoint_levels, extra_levels),
+    ordered = TRUE
+  )
+}
 primary_model_label <- "primary_log_indoor_ambient_calendar_lmer"
 default_material_infiltration_factor <- 0.75
 sensitivity_infiltration_factors <- c(0.25, 0.50, 1.00)
@@ -80,6 +89,7 @@ project_root <- if (nzchar(project_root_env)) {
 
 clean_final_dir <- file.path(project_root, "4_data", "clean_final")
 input_indoor_path <- file.path(clean_final_dir, "pm25_pats_refugee_indoor.rds")
+input_indoor_anomaly_retained_path <- file.path(clean_final_dir, "pm25_pats_refugee_indoor_anomaly_retained_sensitivity.rds")
 input_ambient_path <- file.path(clean_final_dir, "pm25_pats_refugee_ambient.rds")
 input_survey_household_path <- file.path(clean_final_dir, "survey_refugee_household.rds")
 input_survey_location_path <- file.path(clean_final_dir, "survey_refugee_location.rds")
@@ -194,6 +204,11 @@ if (!file.exists(input_survey_location_path)) stop("Missing input file: ", input
 if (!file.exists(input_survey_hh_members_path)) stop("Missing input file: ", input_survey_hh_members_path, call. = FALSE)
 
 indoor <- readRDS(input_indoor_path)
+indoor_anomaly_retained <- if (file.exists(input_indoor_anomaly_retained_path)) {
+  readRDS(input_indoor_anomaly_retained_path)
+} else {
+  NULL
+}
 ambient <- readRDS(input_ambient_path)
 survey_household <- readRDS(input_survey_household_path)
 survey_location <- readRDS(input_survey_location_path)
@@ -207,6 +222,16 @@ check_required_columns(
   ),
   "pm25_pats_refugee_indoor.rds"
 )
+if (!is.null(indoor_anomaly_retained)) {
+  check_required_columns(
+    indoor_anomaly_retained,
+    c(
+      "timepoint", "study_arm_overall", "hh_id", "fcn_id", "hh_id_note",
+      "raw_source_file", "PM_monitor", "dateTime", "pm25_ug_m3"
+    ),
+    "pm25_pats_refugee_indoor_anomaly_retained_sensitivity.rds"
+  )
+}
 check_required_columns(
   ambient,
   c(
@@ -231,23 +256,30 @@ check_required_columns(
   "survey_refugee_hh_members.rds"
 )
 
-indoor <- indoor %>%
-  mutate(
-    dateTime = as_clean_datetime(dateTime),
-    timepoint = as.character(timepoint),
-    study_arm_overall = as.character(study_arm_overall),
-    hh_id = as.character(hh_id),
-    fcn_id = as.character(fcn_id),
-    hh_id_note = as.character(hh_id_note),
-    raw_source_file = as.character(raw_source_file),
-    PM_monitor = as.character(PM_monitor),
-    pm25_ug_m3 = as.numeric(pm25_ug_m3)
-  )
+prepare_indoor_pm <- function(data) {
+  data %>%
+    mutate(
+      dateTime = as_clean_datetime(dateTime),
+      timepoint = as_ordered_timepoint(timepoint),
+      study_arm_overall = as.character(study_arm_overall),
+      hh_id = as.character(hh_id),
+      fcn_id = as.character(fcn_id),
+      hh_id_note = as.character(hh_id_note),
+      raw_source_file = as.character(raw_source_file),
+      PM_monitor = as.character(PM_monitor),
+      pm25_ug_m3 = as.numeric(pm25_ug_m3)
+    )
+}
+
+indoor <- prepare_indoor_pm(indoor)
+if (!is.null(indoor_anomaly_retained)) {
+  indoor_anomaly_retained <- prepare_indoor_pm(indoor_anomaly_retained)
+}
 
 ambient <- ambient %>%
   mutate(
     dateTime = as_clean_datetime(dateTime),
-    timepoint = as.character(timepoint),
+    timepoint = as_ordered_timepoint(timepoint),
     study_arm_overall = as.character(study_arm_overall),
     ambient_site_id = as.character(ambient_site_id),
     note_clean = as.character(note_clean),
@@ -294,7 +326,7 @@ indoor_windows <- indoor %>%
   ) %>%
   mutate(
     household_window_id = sprintf("pm_window_%04d", row_number()),
-    timepoint = factor(timepoint, levels = timepoint_levels),
+    timepoint = as_ordered_timepoint(timepoint),
     study_arm_overall = factor(study_arm_overall, levels = arm_levels)
   ) %>%
   arrange(timepoint, study_arm_overall, start_datetime, household_window_id)
@@ -310,6 +342,137 @@ ambient_clean <- ambient %>%
     ambient_hour = lubridate::floor_date(dateTime, unit = "hour")
   )
 
+make_analysis_data_from_indoor <- function(indoor_input, dataset_label) {
+  indoor_windows_local <- indoor_input %>%
+    filter(
+      timepoint %in% timepoint_levels,
+      study_arm_overall %in% arm_levels,
+      !is.na(hh_id),
+      !is.na(dateTime),
+      !is.na(pm25_ug_m3),
+      is.finite(pm25_ug_m3),
+      pm25_ug_m3 > 0
+    ) %>%
+    group_by(timepoint, study_arm_overall, hh_id, fcn_id, hh_id_note, raw_source_file, PM_monitor) %>%
+    summarise(
+      start_datetime = min(dateTime, na.rm = TRUE),
+      end_datetime = max(dateTime, na.rm = TRUE),
+      midpoint_datetime = mean_datetime(dateTime),
+      n_obs_indoor = n(),
+      n_hours_indoor = n_distinct(lubridate::floor_date(dateTime, unit = "hour")),
+      duration_hours = as.numeric(difftime(max(dateTime, na.rm = TRUE), min(dateTime, na.rm = TRUE), units = "hours")),
+      indoor_mean_pm = mean(pm25_ug_m3, na.rm = TRUE),
+      indoor_gmean_pm = geo_mean(pm25_ug_m3),
+      indoor_median_pm = median(pm25_ug_m3, na.rm = TRUE),
+      indoor_p05_pm = safe_quantile(pm25_ug_m3, 0.05),
+      indoor_p25_pm = safe_quantile(pm25_ug_m3, 0.25),
+      indoor_p75_pm = safe_quantile(pm25_ug_m3, 0.75),
+      indoor_p95_pm = safe_quantile(pm25_ug_m3, 0.95),
+      indoor_p99_pm = safe_quantile(pm25_ug_m3, 0.99),
+      indoor_max_pm = max(pm25_ug_m3, na.rm = TRUE),
+      pct_obs_gt_35 = mean(pm25_ug_m3 > 35, na.rm = TRUE) * 100,
+      pct_obs_gt_75 = mean(pm25_ug_m3 > 75, na.rm = TRUE) * 100,
+      pct_obs_gt_150 = mean(pm25_ug_m3 > 150, na.rm = TRUE) * 100,
+      pct_obs_gt_400 = mean(pm25_ug_m3 > 400, na.rm = TRUE) * 100,
+      pct_obs_gt_1000 = mean(pm25_ug_m3 >= 1000, na.rm = TRUE) * 100,
+      pct_obs_gt_5000 = mean(pm25_ug_m3 >= 5000, na.rm = TRUE) * 100,
+      .groups = "drop"
+    ) %>%
+    mutate(
+      household_window_id = sprintf(paste0(dataset_label, "_pm_window_%04d"), row_number()),
+      timepoint = as_ordered_timepoint(timepoint),
+      study_arm_overall = factor(study_arm_overall, levels = arm_levels)
+    ) %>%
+    arrange(timepoint, study_arm_overall, start_datetime, household_window_id)
+
+  match_one_window_local <- function(i) {
+    start_i <- indoor_windows_local$start_datetime[[i]]
+    end_i <- indoor_windows_local$end_datetime[[i]]
+    arm_i <- as.character(indoor_windows_local$study_arm_overall[[i]])
+    duration_i <- indoor_windows_local$duration_hours[[i]]
+
+    concurrent <- ambient_clean %>% filter(dateTime >= start_i, dateTime <= end_i)
+    concurrent_same_arm <- concurrent %>% filter(study_arm_overall == arm_i)
+
+    summarize_ambient <- function(data, prefix) {
+      if (nrow(data) == 0) {
+        out <- data.frame(
+          n_rows = 0L,
+          n_files = 0L,
+          n_hours = 0L,
+          coverage_prop = NA_real_,
+          mean_pm = NA_real_,
+          gmean_pm = NA_real_,
+          median_pm = NA_real_,
+          p05_pm = NA_real_,
+          p95_pm = NA_real_,
+          first_datetime = as.POSIXct(NA_real_, origin = "1970-01-01", tz = "UTC"),
+          last_datetime = as.POSIXct(NA_real_, origin = "1970-01-01", tz = "UTC"),
+          sites = NA_character_,
+          notes = NA_character_,
+          stringsAsFactors = FALSE
+        )
+      } else {
+        n_hours <- n_distinct(data$ambient_hour)
+        expected_hours <- max(1, ceiling(duration_i))
+        out <- data.frame(
+          n_rows = nrow(data),
+          n_files = n_distinct(data$raw_source_file),
+          n_hours = n_hours,
+          coverage_prop = min(1, n_hours / expected_hours),
+          mean_pm = mean(data$pm25_ug_m3, na.rm = TRUE),
+          gmean_pm = geo_mean(data$pm25_ug_m3),
+          median_pm = median(data$pm25_ug_m3, na.rm = TRUE),
+          p05_pm = safe_quantile(data$pm25_ug_m3, 0.05),
+          p95_pm = safe_quantile(data$pm25_ug_m3, 0.95),
+          first_datetime = min(data$dateTime, na.rm = TRUE),
+          last_datetime = max(data$dateTime, na.rm = TRUE),
+          sites = paste(sort(unique(na.omit(data$ambient_site_id))), collapse = "; "),
+          notes = paste(sort(unique(na.omit(data$note_clean))), collapse = "; "),
+          stringsAsFactors = FALSE
+        )
+        if (!nzchar(out$sites)) out$sites <- NA_character_
+        if (!nzchar(out$notes)) out$notes <- NA_character_
+      }
+      names(out) <- paste0(prefix, names(out))
+      out
+    }
+
+    cbind(
+      summarize_ambient(concurrent, "ambient_all_"),
+      summarize_ambient(concurrent_same_arm, "ambient_same_arm_")
+    )
+  }
+
+  ambient_matches_local <- bind_rows(lapply(seq_len(nrow(indoor_windows_local)), match_one_window_local))
+  out <- bind_cols(indoor_windows_local, ambient_matches_local) %>%
+    mutate(
+      midpoint_date = as.Date(midpoint_datetime),
+      midpoint_day_num = as.numeric(midpoint_date),
+      log_indoor_gmean_pm = log(indoor_gmean_pm),
+      log_indoor_mean_pm = log(indoor_mean_pm),
+      log_ambient_gmean_pm = log(ambient_all_gmean_pm),
+      log_ambient_mean_pm = log(ambient_all_mean_pm),
+      log_io_ratio = log(indoor_gmean_pm / ambient_all_gmean_pm),
+      indoor_minus_ambient_material_default = indoor_mean_pm - default_material_infiltration_factor * ambient_all_mean_pm,
+      indoor_minus_ambient_f025 = indoor_mean_pm - 0.25 * ambient_all_mean_pm,
+      indoor_minus_ambient_f050 = indoor_mean_pm - 0.50 * ambient_all_mean_pm,
+      indoor_minus_ambient_f075 = indoor_mean_pm - 0.75 * ambient_all_mean_pm,
+      indoor_minus_ambient_f100 = indoor_mean_pm - 1.00 * ambient_all_mean_pm,
+      has_concurrent_ambient = ambient_all_n_rows > 0,
+      timepoint = as_ordered_timepoint(timepoint),
+      study_arm_overall = factor(study_arm_overall, levels = arm_levels),
+      analysis_population = dataset_label
+    )
+
+  round_start_dates_local <- out %>%
+    group_by(timepoint) %>%
+    summarise(round_start_day_num = min(midpoint_day_num, na.rm = TRUE), .groups = "drop")
+
+  out %>%
+    left_join(round_start_dates_local, by = "timepoint") %>%
+    mutate(days_since_round_start = midpoint_day_num - round_start_day_num)
+}
 message("Matching household windows to concurrent ambient PM2.5")
 match_one_window <- function(i) {
   start_i <- indoor_windows$start_datetime[[i]]
@@ -389,7 +552,7 @@ analysis_data <- bind_cols(indoor_windows, ambient_matches) %>%
     indoor_minus_ambient_f075 = indoor_mean_pm - 0.75 * ambient_all_mean_pm,
     indoor_minus_ambient_f100 = indoor_mean_pm - 1.00 * ambient_all_mean_pm,
     has_concurrent_ambient = ambient_all_n_rows > 0,
-    timepoint = factor(timepoint, levels = timepoint_levels),
+    timepoint = as_ordered_timepoint(timepoint),
     study_arm_overall = factor(study_arm_overall, levels = arm_levels)
   )
 
@@ -587,6 +750,63 @@ analysis_deidentified <- analysis_data %>%
   )
 readr::write_csv(analysis_deidentified, analysis_deidentified_path, na = "")
 
+add_common_support_indicators <- function(data) {
+  common_support_by_arm_local <- data %>%
+    filter(has_concurrent_ambient) %>%
+    group_by(timepoint, study_arm_overall) %>%
+    summarise(
+      n_windows = n(),
+      midpoint_day_min = min(midpoint_day_num, na.rm = TRUE),
+      midpoint_day_max = max(midpoint_day_num, na.rm = TRUE),
+      ambient_gmean_min = min(ambient_all_gmean_pm, na.rm = TRUE),
+      ambient_gmean_max = max(ambient_all_gmean_pm, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  common_support_diagnostics_local <- bind_rows(lapply(timepoint_levels, function(tp) {
+    x <- common_support_by_arm_local %>% filter(as.character(timepoint) == tp)
+    if (n_distinct(as.character(x$study_arm_overall)) < 2) {
+      return(data.frame(
+        timepoint = tp,
+        has_both_arms = FALSE,
+        overlap_midpoint_day_min = NA_real_,
+        overlap_midpoint_day_max = NA_real_,
+        has_date_overlap = FALSE,
+        overlap_ambient_gmean_min = NA_real_,
+        overlap_ambient_gmean_max = NA_real_,
+        has_ambient_overlap = FALSE,
+        stringsAsFactors = FALSE
+      ))
+    }
+    date_min <- max(x$midpoint_day_min, na.rm = TRUE)
+    date_max <- min(x$midpoint_day_max, na.rm = TRUE)
+    ambient_min <- max(x$ambient_gmean_min, na.rm = TRUE)
+    ambient_max <- min(x$ambient_gmean_max, na.rm = TRUE)
+    data.frame(
+      timepoint = tp,
+      has_both_arms = TRUE,
+      overlap_midpoint_day_min = date_min,
+      overlap_midpoint_day_max = date_max,
+      has_date_overlap = is.finite(date_min) && is.finite(date_max) && date_min <= date_max,
+      overlap_ambient_gmean_min = ambient_min,
+      overlap_ambient_gmean_max = ambient_max,
+      has_ambient_overlap = is.finite(ambient_min) && is.finite(ambient_max) && ambient_min <= ambient_max,
+      stringsAsFactors = FALSE
+    )
+  }))
+
+  data %>%
+    left_join(common_support_diagnostics_local, by = "timepoint") %>%
+    mutate(
+      in_common_support = has_concurrent_ambient &
+        has_date_overlap &
+        has_ambient_overlap &
+        midpoint_day_num >= overlap_midpoint_day_min &
+        midpoint_day_num <= overlap_midpoint_day_max &
+        ambient_all_gmean_pm >= overlap_ambient_gmean_min &
+        ambient_all_gmean_pm <= overlap_ambient_gmean_max
+    )
+}
 date_adjustment_term <- function(data) {
   n_unique_days <- length(unique(data$midpoint_day_num[is.finite(data$midpoint_day_num)]))
   if (n_unique_days >= 4) {
@@ -751,7 +971,7 @@ fit_arm_contrast_model <- function(
       is.finite(.data[[outcome]])
     ) %>%
     mutate(
-      timepoint = factor(as.character(timepoint), levels = timepoint_levels),
+      timepoint = as_ordered_timepoint(timepoint),
       study_arm_overall = factor(as.character(study_arm_overall), levels = arm_levels),
       hh_id = factor(hh_id)
     )
@@ -1224,6 +1444,148 @@ readr::write_csv(
   na = ""
 )
 
+analysis_data_anomaly_retained <- NULL
+anomaly_retained_model_results <- data.frame(stringsAsFactors = FALSE)
+anomaly_retained_window_counts <- data.frame(stringsAsFactors = FALSE)
+if (!is.null(indoor_anomaly_retained)) {
+  message("Running retained high-PM compatibility/check PM2.5 models")
+  analysis_data_anomaly_retained <- make_analysis_data_from_indoor(
+    indoor_anomaly_retained,
+    "anomaly_retained_sensitivity"
+  ) %>%
+    add_common_support_indicators()
+
+  readr::write_csv(
+    analysis_data_anomaly_retained,
+    file.path(table_dir, "table_pm25_window_dataset_anomaly_retained_internal.csv"),
+    na = ""
+  )
+  readr::write_csv(
+    analysis_data_anomaly_retained %>%
+      select(-any_of(c(
+        "hh_id", "fcn_id", "hh_id_note", "raw_source_file", "PM_monitor",
+        "ambient_all_sites", "ambient_same_arm_sites"
+      ))),
+    file.path(table_dir, "table_pm25_window_dataset_anomaly_retained_deidentified.csv"),
+    na = ""
+  )
+
+  anomaly_retained_window_counts <- analysis_data_anomaly_retained %>%
+    group_by(timepoint, study_arm_overall) %>%
+    summarise(
+      n_households = n_distinct(hh_id),
+      n_windows = n(),
+      n_monitor_files = n_distinct(raw_source_file),
+      n_pm_rows = sum(n_obs_indoor, na.rm = TRUE),
+      n_windows_with_concurrent_ambient = sum(has_concurrent_ambient, na.rm = TRUE),
+      n_windows_without_concurrent_ambient = sum(!has_concurrent_ambient, na.rm = TRUE),
+      n_windows_common_support = sum(in_common_support, na.rm = TRUE),
+      count_unit = "one row per household monitoring file/window",
+      .groups = "drop"
+    ) %>%
+    mutate(
+      timepoint = as_ordered_timepoint(timepoint),
+      study_arm_overall = as.character(study_arm_overall),
+      analysis_population = "anomaly_retained_sensitivity"
+    )
+  write_scaffolded_csv(
+    anomaly_retained_window_counts,
+    file.path(table_dir, "table_pm25_window_counts_anomaly_retained_sensitivity.csv")
+  )
+
+  primary_data_anomaly_retained <- analysis_data_anomaly_retained %>%
+    filter(has_concurrent_ambient, !is.na(log_ambient_gmean_pm), is.finite(log_ambient_gmean_pm))
+  common_support_data_anomaly_retained <- primary_data_anomaly_retained %>% filter(in_common_support)
+
+  anomaly_retained_excess_results <- bind_rows(lapply(seq_len(nrow(excess_specs)), function(i) {
+    model_label_i <- if (identical(excess_specs$infiltration_factor_role[[i]], "default_tarp_wall_material_assumption")) {
+      sprintf("anomaly_retained_absolute_excess_F_material_default_%0.2f_calendar_lmer", excess_specs$f_value[[i]])
+    } else {
+      sprintf("anomaly_retained_absolute_excess_sensitivity_F_%0.2f_calendar_lmer", excess_specs$f_value[[i]])
+    }
+
+    fit_arm_contrast_model(
+      data = primary_data_anomaly_retained,
+      outcome = excess_specs$outcome[[i]],
+      model_label = model_label_i,
+      adjustment_terms = character(),
+      date_adjust = TRUE,
+      outcome_scale = "absolute_pm"
+    ) %>%
+      mutate(
+        infiltration_factor = excess_specs$f_value[[i]],
+        infiltration_factor_role = excess_specs$infiltration_factor_role[[i]]
+      )
+  }))
+
+  anomaly_retained_model_results <- bind_rows(
+    fit_arm_contrast_model(
+      data = analysis_data_anomaly_retained,
+      outcome = "log_indoor_gmean_pm",
+      model_label = "anomaly_retained_unadjusted_log_indoor_lmer",
+      adjustment_terms = character(),
+      date_adjust = FALSE,
+      outcome_scale = "log_ratio"
+    ),
+    fit_arm_contrast_model(
+      data = primary_data_anomaly_retained,
+      outcome = "log_indoor_gmean_pm",
+      model_label = "anomaly_retained_ambient_adjusted_no_calendar_lmer",
+      adjustment_terms = "log_ambient_gmean_pm",
+      date_adjust = FALSE,
+      outcome_scale = "log_ratio"
+    ),
+    fit_arm_contrast_model(
+      data = primary_data_anomaly_retained,
+      outcome = "log_indoor_gmean_pm",
+      model_label = paste0("anomaly_retained_", primary_model_label),
+      adjustment_terms = "log_ambient_gmean_pm",
+      date_adjust = TRUE,
+      outcome_scale = "log_ratio"
+    ),
+    fit_arm_contrast_model(
+      data = common_support_data_anomaly_retained,
+      outcome = "log_indoor_gmean_pm",
+      model_label = "anomaly_retained_common_support_log_indoor_ambient_calendar_lmer",
+      adjustment_terms = "log_ambient_gmean_pm",
+      date_adjust = TRUE,
+      outcome_scale = "log_ratio"
+    ),
+    anomaly_retained_excess_results,
+    fit_arm_contrast_model(
+      data = primary_data_anomaly_retained,
+      outcome = "log_io_ratio",
+      model_label = "anomaly_retained_log_indoor_outdoor_ratio_calendar_lmer",
+      adjustment_terms = character(),
+      date_adjust = TRUE,
+      outcome_scale = "log_ratio"
+    )
+  ) %>%
+    mutate(
+      analysis_population = "anomaly_retained_sensitivity",
+      sensitivity_note = "Compatibility check using the retained-high-PM dataset. The two reviewed endline high-PM traces are now retained in the primary cleaned indoor PM2.5 dataset; PM values remain capped at 30000 ug/m3."
+    )
+
+  readr::write_csv(
+    anomaly_retained_model_results,
+    file.path(table_dir, "table_pm25_anomaly_retained_sensitivity_results.csv"),
+    na = ""
+  )
+  readr::write_csv(
+    bind_rows(
+      primary_model_results %>%
+        mutate(
+          analysis_population = "primary_reviewed_high_pm_retained",
+          sensitivity_note = "Primary cleaned indoor PM2.5 dataset retains the two manually reviewed endline high-PM traces; PM values remain capped at 30000 ug/m3."
+        ),
+      anomaly_retained_model_results %>%
+        filter(model_label == paste0("anomaly_retained_", primary_model_label))
+    ),
+    file.path(table_dir, "table_pm25_primary_vs_anomaly_retained_sensitivity_results.csv"),
+    na = ""
+  )
+}
+
 message("Running rDiD analyses for ambient-excess indoor PM2.5 outcomes")
 rdid_xvars <- c("hh_size", "hh_per_structure")
 
@@ -1265,7 +1627,12 @@ rdid_excess_household <- primary_data %>%
     indoor_minus_ambient_f100 = weighted_mean_pm(indoor_minus_ambient_f100, n_obs_indoor),
     .groups = "drop"
   ) %>%
-  filter(timepoint %in% timepoint_levels, study_arm_overall %in% arm_levels)
+  filter(timepoint %in% timepoint_levels, study_arm_overall %in% arm_levels) %>%
+  mutate(
+    timepoint = as_ordered_timepoint(timepoint),
+    study_arm_overall = factor(study_arm_overall, levels = arm_levels)
+  ) %>%
+  arrange(timepoint, study_arm_overall, fcn_id)
 
 readr::write_csv(
   rdid_excess_household,
@@ -1479,6 +1846,169 @@ readr::write_csv(
   na = ""
 )
 
+rdid_anomaly_retained_results <- data.frame(stringsAsFactors = FALSE)
+if (!is.null(analysis_data_anomaly_retained)) {
+  message("Running retained high-PM compatibility/check rDiD PM2.5 analyses")
+  rdid_excess_household_anomaly_retained <- primary_data_anomaly_retained %>%
+    filter(!is.na(fcn_id), nzchar(fcn_id)) %>%
+    mutate(
+      fcn_id = as.character(fcn_id),
+      study_arm_overall = as.character(study_arm_overall),
+      timepoint = as.character(timepoint)
+    ) %>%
+    group_by(fcn_id, timepoint) %>%
+    summarise(
+      study_arm_overall = as.character(first_nonmissing(study_arm_overall)),
+      collection_date_min = as.Date(min(start_datetime, na.rm = TRUE)),
+      collection_date_max = as.Date(max(end_datetime, na.rm = TRUE)),
+      n_windows = n(),
+      n_monitor_files = n_distinct(raw_source_file),
+      n_pm_observations = sum(n_obs_indoor, na.rm = TRUE),
+      mean_ambient_coverage_prop = mean(ambient_all_coverage_prop, na.rm = TRUE),
+      indoor_minus_ambient_material_default = weighted_mean_pm(indoor_minus_ambient_material_default, n_obs_indoor),
+      indoor_minus_ambient_f025 = weighted_mean_pm(indoor_minus_ambient_f025, n_obs_indoor),
+      indoor_minus_ambient_f050 = weighted_mean_pm(indoor_minus_ambient_f050, n_obs_indoor),
+      indoor_minus_ambient_f075 = weighted_mean_pm(indoor_minus_ambient_f075, n_obs_indoor),
+      indoor_minus_ambient_f100 = weighted_mean_pm(indoor_minus_ambient_f100, n_obs_indoor),
+      .groups = "drop"
+    ) %>%
+    filter(timepoint %in% timepoint_levels, study_arm_overall %in% arm_levels) %>%
+    mutate(
+      timepoint = as_ordered_timepoint(timepoint),
+      study_arm_overall = factor(study_arm_overall, levels = arm_levels)
+    ) %>%
+    arrange(timepoint, study_arm_overall, fcn_id)
+
+  readr::write_csv(
+    rdid_excess_household_anomaly_retained,
+    file.path(table_dir, "table_rDiD_pm25_panel_anomaly_retained_internal.csv"),
+    na = ""
+  )
+  readr::write_csv(
+    rdid_excess_household_anomaly_retained %>% select(-fcn_id),
+    file.path(table_dir, "table_rDiD_pm25_panel_anomaly_retained_deidentified.csv"),
+    na = ""
+  )
+
+  make_rdid_excess_panel_anomaly_retained <- function(outcome_name, followup_timepoint) {
+    baseline_y <- rdid_excess_household_anomaly_retained %>%
+      filter(timepoint == "baseline") %>%
+      transmute(
+        fcn_id,
+        Z = as_number(.data[[outcome_name]]),
+        baseline_collection_date_min = collection_date_min,
+        baseline_collection_date_max = collection_date_max
+      )
+
+    followup_y <- rdid_excess_household_anomaly_retained %>%
+      filter(timepoint == followup_timepoint) %>%
+      transmute(
+        fcn_id,
+        Y = as_number(.data[[outcome_name]]),
+        followup_collection_date_min = collection_date_min,
+        followup_collection_date_max = collection_date_max
+      )
+
+    rdid_baseline_covars %>%
+      select(fcn_id, A, all_of(rdid_xvars), baseline_survey_arm, baseline_pm_arm, treatment_source) %>%
+      inner_join(baseline_y, by = "fcn_id") %>%
+      inner_join(followup_y, by = "fcn_id") %>%
+      filter(!is.na(A), !is.na(Z), !is.na(Y))
+  }
+
+  make_rdid_panel_count_anomaly_retained <- function(outcome_info, followup_timepoint, contrast) {
+    panel <- make_rdid_excess_panel_anomaly_retained(outcome_info$outcome, followup_timepoint)
+    data.frame(
+      contrast = contrast,
+      followup_timepoint = followup_timepoint,
+      outcome = outcome_info$outcome,
+      outcome_label = outcome_info$outcome_label,
+      infiltration_factor = outcome_info$f_value,
+      infiltration_factor_role = outcome_info$infiltration_factor_role,
+      n_households = nrow(panel),
+      n_intervention = sum(panel$A == 1, na.rm = TRUE),
+      n_comparison = sum(panel$A == 0, na.rm = TRUE),
+      baseline_min_collection_date = if (nrow(panel) == 0) as.Date(NA) else min(panel$baseline_collection_date_min, na.rm = TRUE),
+      baseline_max_collection_date = if (nrow(panel) == 0) as.Date(NA) else max(panel$baseline_collection_date_max, na.rm = TRUE),
+      followup_min_collection_date = if (nrow(panel) == 0) as.Date(NA) else min(panel$followup_collection_date_min, na.rm = TRUE),
+      followup_max_collection_date = if (nrow(panel) == 0) as.Date(NA) else max(panel$followup_collection_date_max, na.rm = TRUE),
+      analysis_population = "anomaly_retained_sensitivity",
+      stringsAsFactors = FALSE
+    )
+  }
+
+  run_rdid_excess_contrast_anomaly_retained <- function(followup_timepoint, contrast, seed_offset) {
+    bind_rows(lapply(seq_len(nrow(rdid_outcome_specs)), function(i) {
+      outcome_info <- rdid_outcome_specs[i, , drop = FALSE]
+      message("Running retained high-PM check rDiD ", contrast, ": ", outcome_info$outcome)
+      panel <- make_rdid_excess_panel_anomaly_retained(outcome_info$outcome, followup_timepoint)
+      res_xgb <- rdid_dml_xgb(panel, rdid_xvars, seed = 202607 + seed_offset + i)
+      res_glm <- rdid_glm_sensitivity(panel, rdid_xvars)
+
+      bind_rows(
+        format_rdid_result_row(
+          res_xgb,
+          outcome_info,
+          contrast,
+          followup_timepoint,
+          "rDID_XGBoost",
+          panel
+        ),
+        format_rdid_result_row(
+          res_glm,
+          outcome_info,
+          contrast,
+          followup_timepoint,
+          "rDID_GLM_sensitivity",
+          panel
+        )
+      )
+    }))
+  }
+
+  rdid_anomaly_retained_panel_counts <- bind_rows(
+    bind_rows(lapply(seq_len(nrow(rdid_outcome_specs)), function(i) {
+      make_rdid_panel_count_anomaly_retained(rdid_outcome_specs[i, , drop = FALSE], "midline", "primary_baseline_midline")
+    })),
+    bind_rows(lapply(seq_len(nrow(rdid_outcome_specs)), function(i) {
+      make_rdid_panel_count_anomaly_retained(rdid_outcome_specs[i, , drop = FALSE], "endline", "secondary_baseline_endline")
+    }))
+  )
+  readr::write_csv(
+    rdid_anomaly_retained_panel_counts,
+    file.path(table_dir, "table_rDiD_pm25_panel_counts_anomaly_retained_sensitivity.csv"),
+    na = ""
+  )
+
+  rdid_anomaly_retained_results <- bind_rows(
+    run_rdid_excess_contrast_anomaly_retained("midline", "primary_baseline_midline", seed_offset = 110),
+    run_rdid_excess_contrast_anomaly_retained("endline", "secondary_baseline_endline", seed_offset = 120)
+  ) %>%
+    mutate(
+      analysis_population = "anomaly_retained_sensitivity",
+      sensitivity_note = "Compatibility check using the retained-high-PM dataset. The two reviewed endline high-PM traces are now retained in the primary cleaned indoor PM2.5 dataset; PM values remain capped at 30000 ug/m3."
+    ) %>%
+    arrange(contrast, outcome, estimator)
+
+  readr::write_csv(
+    rdid_anomaly_retained_results,
+    file.path(table_dir, "table_rDiD_pm25_anomaly_retained_reduction_results.csv"),
+    na = ""
+  )
+  readr::write_csv(
+    bind_rows(
+      rdid_results %>%
+        mutate(
+          analysis_population = "primary_reviewed_high_pm_retained",
+          sensitivity_note = "Primary cleaned indoor PM2.5 dataset retains the two manually reviewed endline high-PM traces; PM values remain capped at 30000 ug/m3."
+        ),
+      rdid_anomaly_retained_results
+    ),
+    file.path(table_dir, "table_rDiD_pm25_primary_vs_anomaly_retained_reduction_results.csv"),
+    na = ""
+  )
+}
+
 rdid_package_versions <- data.frame(
   package = c("R", "xgboost", "dplyr", "lme4"),
   version = c(
@@ -1655,7 +2185,7 @@ individual_hours_household <- bind_rows(
   mutate(
     hours_inside = 24 - hours_outside,
     pct_time_inside = hours_inside / 24 * 100,
-    timepoint = factor(timepoint, levels = timepoint_levels),
+    timepoint = as_ordered_timepoint(timepoint),
     study_arm_overall = factor(study_arm_overall, levels = arm_levels)
   )
 
@@ -1724,9 +2254,12 @@ round_ambient_pm <- ambient_clean %>%
 pm_time_weight_inputs <- pm_time_weight_inputs %>%
   left_join(round_ambient_pm, by = "timepoint") %>%
   mutate(
+    timepoint = as_ordered_timepoint(timepoint),
+    study_arm_overall = factor(study_arm_overall, levels = arm_levels),
     mean_pm2_5_outdoor_for_weighting = coalesce(mean_pm2_5_outdoor_concurrent, mean_pm2_5_outdoor_round),
     outdoor_pm_source = if_else(!is.na(mean_pm2_5_outdoor_concurrent), "concurrent_household_window_ambient", "round_ambient_mean")
-  )
+  ) %>%
+  arrange(timepoint, study_arm_overall)
 
 readr::write_csv(
   pm_time_weight_inputs,
@@ -1876,6 +2409,7 @@ run_manifest <- data.frame(
     "analysis_date",
     "project_root",
     "input_indoor_path",
+    "input_indoor_anomaly_retained_path",
     "input_ambient_path",
     "input_survey_household_path",
     "input_survey_location_path",
@@ -1887,6 +2421,9 @@ run_manifest <- data.frame(
     "n_household_windows",
     "n_household_windows_with_concurrent_ambient",
     "n_household_windows_common_support",
+    "n_anomaly_retained_sensitivity_windows",
+    "n_anomaly_retained_sensitivity_model_rows",
+    "n_anomaly_retained_sensitivity_rdid_rows",
     "n_time_weighted_exposure_rows",
     "n_time_weighted_exposure_household_hours_rows",
     "primary_model_label"
@@ -1895,6 +2432,7 @@ run_manifest <- data.frame(
     analysis_date,
     project_root,
     input_indoor_path,
+    if (file.exists(input_indoor_anomaly_retained_path)) input_indoor_anomaly_retained_path else "",
     input_ambient_path,
     input_survey_household_path,
     input_survey_location_path,
@@ -1906,6 +2444,9 @@ run_manifest <- data.frame(
     as.character(nrow(analysis_data)),
     as.character(sum(analysis_data$has_concurrent_ambient, na.rm = TRUE)),
     as.character(sum(analysis_data$in_common_support, na.rm = TRUE)),
+    as.character(if (!is.null(analysis_data_anomaly_retained)) nrow(analysis_data_anomaly_retained) else 0L),
+    as.character(nrow(anomaly_retained_model_results)),
+    as.character(nrow(rdid_anomaly_retained_results)),
     as.character(nrow(time_weighted_exposure)),
     as.character(nrow(individual_hours_household)),
     primary_model_label
@@ -1917,6 +2458,7 @@ readr::write_csv(run_manifest, file.path(table_dir, "table_pm25_run_manifest.csv
 message("Done.")
 message("Tables: ", normalizePath(table_dir, winslash = "/", mustWork = TRUE))
 message("Figures: ", normalizePath(figure_dir, winslash = "/", mustWork = TRUE))
+
 
 
 

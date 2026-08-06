@@ -13,10 +13,11 @@
 #     Sys.setenv(ROHINGYA_ANALYSIS_ROOT = "G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis")
 #
 # Active reviewed workflow:
-#   1. Build reviewed Geocene stove-use daily analysis products.
-#   2. Build ambient-adjusted PM2.5 household-timepoint products.
-#   3. Fit and post-process all rDiD/XGBoost and GLM sensitivity models.
-#   4. Generate all descriptive tables and figures from one main descriptive file.
+#   1. Run household fcn_id/study-arm QA, including allocation-master reconciliation.
+#   2. Build reviewed Geocene stove-use daily analysis products.
+#   3. Build ambient-adjusted PM2.5 household-timepoint products.
+#   4. Fit and post-process all rDiD/XGBoost and GLM sensitivity models.
+#   5. Generate all descriptive tables and figures from one main descriptive file.
 #
 # Outputs:
 #   Tables:  7_tables/RF105_reviewed_YYYYMMDD/
@@ -46,6 +47,7 @@ get_script_dir <- function() {
 }
 
 script_dir <- get_script_dir()
+runner_script_dir <- script_dir
 
 project_root <- Sys.getenv("ROHINGYA_ANALYSIS_ROOT", unset = "")
 if (!nzchar(project_root)) {
@@ -62,17 +64,36 @@ is_absolute_path <- function(x) {
   grepl("^([A-Za-z]:|/|\\\\)", x)
 }
 
+# Keep the default workflow conservative on shared laptops/desktops. XGBoost and
+# OpenMP-backed libraries can otherwise over-request threads and fail before QA
+# outputs are reviewed.
+rf105_default_thread_env <- c(
+  OMP_NUM_THREADS = "1",
+  OMP_THREAD_LIMIT = "1",
+  OPENBLAS_NUM_THREADS = "1",
+  MKL_NUM_THREADS = "1",
+  VECLIB_MAXIMUM_THREADS = "1",
+  NUMEXPR_NUM_THREADS = "1",
+  RF105_XGB_NTHREAD = "1"
+)
+for (env_name in names(rf105_default_thread_env)) {
+  if (!nzchar(Sys.getenv(env_name, unset = ""))) {
+    do.call(Sys.setenv, as.list(setNames(rf105_default_thread_env[[env_name]], env_name)))
+  }
+}
 reviewed_scripts <- c(
+  "0.1_fcn_id_presence_by_arm_20260805_2213.R",
   "8_geocene_stove_use_combined_20260805_2213.R",
   "3_pm25_ambient_adjusted_analysis_20260805_2213.R",
+  "7_pm25_anomaly_household_comparison_20260806.R",
   "4_rdid_xgboost_20260805_2213.R",
   "6_descriptive_outcomes_20260805_2213.R"
 )
 
 for (script in reviewed_scripts) {
-  script_path <- if (is_absolute_path(script)) script else file.path(script_dir, script)
+  script_path <- if (is_absolute_path(script)) script else file.path(runner_script_dir, script)
   message("Running ", script_path)
-  source(script_path, chdir = TRUE)
+  source(script_path, chdir = FALSE)
 }
 
 message("RF105 reviewed analyses complete.")

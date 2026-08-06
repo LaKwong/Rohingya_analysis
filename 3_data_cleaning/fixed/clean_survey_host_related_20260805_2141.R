@@ -54,12 +54,16 @@ clean_related_survey <- function(role, dataset_name, output_file) {
   )
 
   output_path <- write_final_rds(data, file.path("4_data", "clean_final", output_file))
+  shareable <- make_shareable_dataset(data, dataset_name)
+  shareable_path <- write_shareable_rds(shareable$data, output_file)
   entry <- make_inventory_entry(
     dataset_name = dataset_name,
     data = data,
     output_path = output_path,
     source_paths = clean_final_path(source_rel),
     removed_identifier_columns = deidentified$removed,
+    shareable_output_path = shareable_path,
+    shareable_removed_identifier_columns = shareable$removed,
     notes = paste("Host", role, "survey subform rebuilt from raw-first imports.")
   )
   update_inventory(entry)

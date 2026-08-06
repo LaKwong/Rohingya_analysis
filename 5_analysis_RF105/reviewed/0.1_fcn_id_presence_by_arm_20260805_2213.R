@@ -96,6 +96,156 @@ ensure_cols <- function(df, vars) {
   df
 }
 
+read_allocation_master <- function(path = file.path(
+  project_root,
+  "2_data_raw",
+  "RohingyaFuelMaster_hh_data - Copy.xlsx"
+)) {
+  if (!file.exists(path)) {
+    stop("Allocation master file not found: ", path, call. = FALSE)
+  }
+  if (!requireNamespace("readxl", quietly = TRUE)) {
+    stop("Package `readxl` is required for allocation-master reconciliation.", call. = FALSE)
+  }
+
+  allocation_raw <- readxl::read_excel(path, sheet = 1, col_types = "text") %>%
+    as_tibble() %>%
+    ensure_cols(c(
+      "study_arm", "fcn_id", "hh_id", "camp_id", "block_id", "subblock_id",
+      "name_hh_head", "name_respondent", "target_child_name"
+    )) %>%
+    mutate(
+      fcn_id = str_squish(as.character(fcn_id)),
+      fcn_id = na_if(fcn_id, ""),
+      allocation_master_fcn_id_original = fcn_id,
+      fcn_id = recode(fcn_id, "999999" = "101595", .default = fcn_id),
+      allocation_master_fcn_id_recode_note = if_else(
+        allocation_master_fcn_id_original == "999999",
+        "Reconciled allocation-master placeholder 999999 to fcn_id 101595 based on geocene_data_but_no_survey_error_fix_fcn_id.xlsx.",
+        NA_character_
+      ),
+      allocation_study_arm_label_raw = str_squish(str_to_lower(as.character(study_arm))),
+      allocation_study_arm_label_raw = na_if(allocation_study_arm_label_raw, "")
+    ) %>%
+    filter(!is.na(fcn_id))
+
+  derive_allocation_arm <- function(labels) {
+    labels <- labels[!is.na(labels) & labels != ""]
+    has_intervention_labels <- any(labels %in% c("pre-intervention", "post-intervention"))
+    has_comparison_labels <- any(labels %in% c("intervention", "intervention follow-up"))
+
+    case_when(
+      has_intervention_labels ~ "intervention",
+      has_comparison_labels ~ "comparison",
+      TRUE ~ NA_character_
+    )
+  }
+
+  derive_allocation_status <- function(labels) {
+    labels <- labels[!is.na(labels) & labels != ""]
+    has_intervention_labels <- any(labels %in% c("pre-intervention", "post-intervention"))
+    has_comparison_labels <- any(labels %in% c("intervention", "intervention follow-up"))
+
+    case_when(
+      has_intervention_labels & has_comparison_labels ~
+        "mixed_old_labels_resolved_to_intervention",
+      has_intervention_labels ~
+        "old_pre_post_intervention_labels_resolved_to_intervention",
+      has_comparison_labels ~
+        "old_intervention_followup_labels_resolved_to_comparison",
+      TRUE ~ "no_recognized_allocation_label"
+    )
+  }
+
+  allocation_raw %>%
+    group_by(fcn_id) %>%
+    summarise(
+      allocation_master_path = normalizePath(path, winslash = "/", mustWork = TRUE),
+      allocation_master_rows = n(),
+      allocation_master_fcn_id_originals = collapse_unique(allocation_master_fcn_id_original),
+      allocation_master_fcn_id_recode_notes = collapse_unique(allocation_master_fcn_id_recode_note),
+      allocation_master_arm = derive_allocation_arm(allocation_study_arm_label_raw),
+      allocation_master_status = derive_allocation_status(allocation_study_arm_label_raw),
+      allocation_master_study_arm_labels = collapse_unique(allocation_study_arm_label_raw),
+      allocation_master_hh_ids = collapse_unique(hh_id),
+      allocation_master_camp_ids = collapse_unique(camp_id),
+      allocation_master_block_ids = collapse_unique(block_id),
+      allocation_master_subblock_ids = collapse_unique(subblock_id),
+      allocation_master_names_available = any(
+        !is.na(name_hh_head) | !is.na(name_respondent) | !is.na(target_child_name)
+      ),
+      .groups = "drop"
+    )
+}
+
+make_allocation_master_reconciliation <- function(df) {
+  allocation_master <- read_allocation_master()
+
+  survey_for_reconciliation <- df %>%
+    ensure_cols(c(
+      "fcn_id", "hh_id", "timepoint", "study_arm_overall", "camp_id",
+      "block_id", "subblock_id", "collection_date", "raw_source_file"
+    )) %>%
+    mutate(
+      fcn_id = str_squish(as.character(fcn_id)),
+      fcn_id = na_if(fcn_id, ""),
+      study_arm_overall = str_squish(str_to_lower(as.character(study_arm_overall))),
+      study_arm_overall = na_if(study_arm_overall, "")
+    ) %>%
+    filter(!is.na(fcn_id))
+
+  cleaned_arm_by_fcn <- survey_for_reconciliation %>%
+    group_by(fcn_id) %>%
+    summarise(
+      cleaned_survey_rows = n(),
+      cleaned_timepoints = collapse_unique(as.character(timepoint)),
+      cleaned_study_arm_values = collapse_unique(study_arm_overall),
+      cleaned_n_distinct_study_arm_values = n_distinct(study_arm_overall, na.rm = TRUE),
+      cleaned_study_arm_overall = if_else(
+        cleaned_n_distinct_study_arm_values == 1L,
+        first(study_arm_overall[!is.na(study_arm_overall)]),
+        NA_character_
+      ),
+      cleaned_hh_ids = collapse_unique(hh_id),
+      cleaned_camp_ids = collapse_unique(camp_id),
+      cleaned_block_ids = collapse_unique(block_id),
+      cleaned_subblock_ids = collapse_unique(subblock_id),
+      cleaned_collection_dates = collapse_unique(collection_date),
+      cleaned_raw_source_files = collapse_unique(raw_source_file),
+      .groups = "drop"
+    )
+
+  full_join(cleaned_arm_by_fcn, allocation_master, by = "fcn_id") %>%
+    mutate(
+      reconciliation_status = case_when(
+        is.na(cleaned_survey_rows) & !is.na(allocation_master_rows) ~
+          "in_allocation_master_not_cleaned_survey",
+        !is.na(cleaned_survey_rows) & is.na(allocation_master_rows) ~
+          "in_cleaned_survey_not_allocation_master",
+        cleaned_n_distinct_study_arm_values > 1L ~
+          "cleaned_survey_conflicting_arms_for_fcn_id",
+        is.na(allocation_master_arm) ~
+          "allocation_master_no_recognized_arm",
+        cleaned_study_arm_overall == allocation_master_arm ~
+          "matched_cleaned_to_allocation_master",
+        TRUE ~ "mismatch_cleaned_vs_allocation_master"
+      ),
+      allocation_reconciliation_note = case_when(
+        reconciliation_status == "matched_cleaned_to_allocation_master" ~
+          "Cleaned study_arm_overall agrees with the fcn_id allocation master.",
+        reconciliation_status == "mismatch_cleaned_vs_allocation_master" ~
+          "Cleaned study_arm_overall disagrees with the fcn_id allocation master; review before analysis.",
+        reconciliation_status == "cleaned_survey_conflicting_arms_for_fcn_id" ~
+          "The cleaned survey assigns more than one study_arm_overall to this fcn_id.",
+        reconciliation_status == "in_cleaned_survey_not_allocation_master" ~
+          "This cleaned fcn_id is not present in the allocation master.",
+        reconciliation_status == "in_allocation_master_not_cleaned_survey" ~
+          "This allocation-master fcn_id is not present in the cleaned survey file.",
+        TRUE ~ "Allocation-master labels could not be resolved to intervention/comparison."
+      )
+    ) %>%
+    arrange(reconciliation_status, allocation_master_arm, cleaned_study_arm_overall, fcn_id)
+}
 make_population_listing <- function(df, population_name, source_file_summary) {
   optional_vars <- c(
     "hh_id", "uuid", "collection_date", "raw_source_file",
@@ -253,6 +403,20 @@ population_datasets <- list(
            study_arm_overall = as.character(study_arm_overall))
 )
 
+allocation_reconciliation <- make_allocation_master_reconciliation(
+  population_datasets$all_deduplicated
+)
+
+allocation_reconciliation_summary <- allocation_reconciliation %>%
+  count(
+    reconciliation_status,
+    allocation_master_status,
+    allocation_master_arm,
+    cleaned_study_arm_overall,
+    name = "n_fcn_id"
+  ) %>%
+  arrange(reconciliation_status, allocation_master_status,
+          allocation_master_arm, cleaned_study_arm_overall)
 presence_long <- bind_rows(
   make_population_listing(
     population_datasets$all_deduplicated,
@@ -415,6 +579,17 @@ write_reviewed_csv(
 )
 
 write_reviewed_csv(
+  allocation_reconciliation,
+  audit_output_file("table_qa_fcn_allocation_master_reconciliation.csv"),
+  subfolder = "qa"
+)
+
+write_reviewed_csv(
+  allocation_reconciliation_summary,
+  audit_output_file("table_qa_fcn_allocation_master_summary.csv"),
+  subfolder = "qa"
+)
+write_reviewed_csv(
   set_difference_counts,
   audit_output_file("table_qa_fcn_set_differences.csv"),
   subfolder = "qa"
@@ -432,6 +607,32 @@ write_reviewed_csv(
   subfolder = "qa"
 )
 
+allocation_blocking_statuses <- c(
+  "mismatch_cleaned_vs_allocation_master",
+  "cleaned_survey_conflicting_arms_for_fcn_id",
+  "allocation_master_no_recognized_arm"
+)
+allocation_blocking_n <- allocation_reconciliation %>%
+  filter(reconciliation_status %in% allocation_blocking_statuses) %>%
+  nrow()
+if (allocation_blocking_n > 0) {
+  stop(
+    "Allocation-master reconciliation found ", allocation_blocking_n,
+    " blocking study-arm issue(s). Review table_qa_fcn_allocation_master_reconciliation.csv.",
+    call. = FALSE
+  )
+}
+
+allocation_missing_master_n <- allocation_reconciliation %>%
+  filter(reconciliation_status == "in_cleaned_survey_not_allocation_master") %>%
+  nrow()
+if (allocation_missing_master_n > 0) {
+  warning(
+    "Allocation-master reconciliation found ", allocation_missing_master_n,
+    " cleaned fcn_id value(s) not present in the allocation master; see QA output.",
+    call. = FALSE
+  )
+}
 message("fcn_id presence checks complete.")
 
 

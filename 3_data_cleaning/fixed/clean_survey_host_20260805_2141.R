@@ -385,6 +385,8 @@ survey <- move_columns_first(
 )
 
 output_path <- write_final_rds(survey, "4_data/clean_final/survey_host_household.rds")
+shareable <- make_shareable_dataset(survey, dataset_name)
+shareable_path <- write_shareable_rds(shareable$data, "survey_host_household.rds")
 
 entry <- make_inventory_entry(
   dataset_name = dataset_name,
@@ -392,6 +394,8 @@ entry <- make_inventory_entry(
   output_path = output_path,
   source_paths = clean_final_path(source_rel),
   removed_identifier_columns = deidentified$removed,
+  shareable_output_path = shareable_path,
+  shareable_removed_identifier_columns = shareable$removed,
   notes = paste(
     "Host household survey final dataset rebuilt from raw-first imports in 2_data_raw.",
     "Raw host hh_id is preserved as hh_id_original; final hh_id is derived from normalized T0#### tokens in house_id first, then serial_id.",

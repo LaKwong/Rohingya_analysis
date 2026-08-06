@@ -126,6 +126,20 @@ apply_refugee_legacy_manual_corrections <- function(data) {
     set_by_fcn(col, mapping, timepoint, arm, rule_id, note)
   }
 
+  data$.legacy_source_row_number <- if ("raw_source_file" %in% names(data)) {
+    ave(seq_len(nrow(data)), data$raw_source_file, FUN = seq_along)
+  } else {
+    rep(NA_integer_, nrow(data))
+  }
+
+  legacy_case <- function(source_file, raw_row_number) {
+    if (!all(c("raw_source_file", ".legacy_source_row_number") %in% names(data))) {
+      return(rep(FALSE, nrow(data)))
+    }
+    clean_chr(data$raw_source_file) == source_file &
+      data$.legacy_source_row_number %in% raw_row_number
+  }
+
   if (!"study_arm_original" %in% names(data) && "study_arm" %in% names(data)) {
     data$study_arm_original <- as.character(data$study_arm)
   }
@@ -159,24 +173,24 @@ apply_refugee_legacy_manual_corrections <- function(data) {
     "Keep study_arm_overall aligned with the reclassified intervention arm."
   )
 
-  # Baseline household listing and duplicate-survey corrections.
-  idx <- is_timepoint("baseline") & is_arm("intervention") &
+  # Baseline household listing and duplicate-survey corrections. Cases that
+  # previously matched on participant/child names now use non-identifying raw
+  # source row numbers from the imported baseline file.
+  idx <- legacy_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 2) &
+    is_timepoint("baseline") & is_arm("intervention") &
     col_equals("camp_id", "8W", TRUE) &
     col_equals("block_id", "D", TRUE) &
     col_equals("subblock_id", "I21", TRUE) &
-    col_equals("name_respondent", "Juhura khatun", TRUE) &
-    col_equals("target_child_name", "Shahida begum", TRUE) &
     col_missing_or("fcn_id", "x")
-  set_value("fcn_id", idx, "999999", "legacy_baseline_fcn_placeholder_999999", "Updated after a discussion with the team to clarify the hh_id.")
+  set_value("fcn_id", idx, "999999", "legacy_baseline_fcn_placeholder_001", "Updated after a discussion with the team to clarify the hh_id.")
 
-  idx <- is_timepoint("baseline") & is_arm("intervention") &
+  idx <- legacy_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 42) &
+    is_timepoint("baseline") & is_arm("intervention") &
     col_equals("camp_id", "8W", TRUE) &
     col_equals("block_id", "D", TRUE) &
     col_equals("subblock_id", "I21", TRUE) &
-    col_equals("name_respondent", "Samina", TRUE) &
-    col_equals("target_child_name", "Mahbub rahman", TRUE) &
     col_missing_or("fcn_id")
-  set_value("fcn_id", idx, "999998", "legacy_baseline_fcn_placeholder_999998", "Updated after a discussion with the team to clarify the hh_id.")
+  set_value("fcn_id", idx, "999998", "legacy_baseline_fcn_placeholder_002", "Updated after a discussion with the team to clarify the hh_id.")
 
   enum_num <- if ("enumerator" %in% names(data)) suppressWarnings(as.numeric(as.character(data$enumerator))) else rep(NA_real_, nrow(data))
   drop_rows(is_timepoint("baseline") & is_arm("intervention") & fcn_in("117722") & enum_num == 8, "legacy_drop_duplicate_baseline_117722", "Accidentally surveyed twice in baseline.")
@@ -187,21 +201,37 @@ apply_refugee_legacy_manual_corrections <- function(data) {
   enum_num <- if ("enumerator" %in% names(data)) suppressWarnings(as.numeric(as.character(data$enumerator))) else rep(NA_real_, nrow(data))
   drop_rows(is_timepoint("baseline") & is_arm("comparison") & fcn_in("186890") & enum_num == 1, "legacy_drop_duplicate_baseline_186890", "Accidentally surveyed twice in baseline.")
 
-  idx <- is_timepoint("baseline") & is_arm("intervention") & col_equals("camp_id", "8W", TRUE) & col_equals("block_id", "B", TRUE) & col_equals("subblock_id", "A13", TRUE) & col_equals("name_respondent", "Noor Begum", TRUE)
-  set_value("fcn_id", idx, "122063", "legacy_baseline_fcn_noor_begum", "HH listing correction from legacy cleaner.")
-  idx <- is_timepoint("baseline") & is_arm("comparison") & col_equals("camp_id", "8E", TRUE) & col_equals("block_id", "C", TRUE) & col_equals("subblock_id", "B33", TRUE) & col_equals("name_respondent", "Yeasmin", TRUE)
-  set_value("fcn_id", idx, "114444", "legacy_baseline_fcn_yeasmin", "HH listing correction from legacy cleaner.")
+  idx <- legacy_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 201) &
+    is_timepoint("baseline") & is_arm("intervention") &
+    col_equals("camp_id", "8W", TRUE) &
+    col_equals("block_id", "B", TRUE) &
+    col_equals("subblock_id", "A13", TRUE)
+  set_value("fcn_id", idx, "122063", "legacy_baseline_fcn_001", "HH listing correction from legacy cleaner.")
+  idx <- legacy_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 1322) &
+    is_timepoint("baseline") & is_arm("comparison") &
+    col_equals("camp_id", "8E", TRUE) &
+    col_equals("block_id", "C", TRUE) &
+    col_equals("subblock_id", "B33", TRUE)
+  set_value("fcn_id", idx, "114444", "legacy_baseline_fcn_002", "HH listing correction from legacy cleaner.")
 
   # Targeted hh_id updates for the baseline fcn corrections above. These replace
   # the old fcn embedded in hh_id without reintroducing the legacy blanket rebuild.
-  idx <- is_timepoint("baseline") & is_arm("intervention") & col_equals("camp_id", "8W", TRUE) & col_equals("block_id", "B", TRUE) & col_equals("subblock_id", "A13", TRUE) & col_equals("name_respondent", "Noor Begum", TRUE)
-  set_value("hh_id", idx, "8wBA13122063_1067", "legacy_baseline_hh_id_noor_begum", "Targeted hh_id update paired with corrected baseline fcn_id.")
-  idx <- is_timepoint("baseline") & is_arm("comparison") & col_equals("camp_id", "8E", TRUE) & col_equals("block_id", "C", TRUE) & col_equals("subblock_id", "B33", TRUE) & col_equals("name_respondent", "Yeasmin", TRUE)
-  set_value("hh_id", idx, "8ECB33114444_4857", "legacy_baseline_hh_id_yeasmin", "Targeted hh_id update paired with corrected baseline fcn_id.")
-  idx <- is_timepoint("baseline") & is_arm("intervention") & col_equals("camp_id", "8W", TRUE) & col_equals("block_id", "B", TRUE) & col_equals("subblock_id", "A13", TRUE) & col_equals("name_respondent", "Rashida Begum", TRUE)
-  set_value("target_child_name", idx, "Omar", "legacy_baseline_child_name_rashida", "Target child name correction from legacy cleaner.")
-  idx <- is_timepoint("baseline") & is_arm("intervention") & col_equals("camp_id", "8W", TRUE) & col_equals("block_id", "B", TRUE) & col_equals("subblock_id", "A13", TRUE) & col_equals("name_respondent", "Noor Begum", TRUE)
-  set_value("target_child_name", idx, "Noor halima", "legacy_baseline_child_name_noor", "Target child name correction from legacy cleaner.")
+  idx <- legacy_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 201) &
+    is_timepoint("baseline") & is_arm("intervention") &
+    col_equals("camp_id", "8W", TRUE) &
+    col_equals("block_id", "B", TRUE) &
+    col_equals("subblock_id", "A13", TRUE)
+  set_value("hh_id", idx, "8wBA13122063_1067", "legacy_baseline_hh_id_001", "Targeted hh_id update paired with corrected baseline fcn_id.")
+  idx <- legacy_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 1322) &
+    is_timepoint("baseline") & is_arm("comparison") &
+    col_equals("camp_id", "8E", TRUE) &
+    col_equals("block_id", "C", TRUE) &
+    col_equals("subblock_id", "B33", TRUE)
+  set_value("hh_id", idx, "8ECB33114444_4857", "legacy_baseline_hh_id_002", "Targeted hh_id update paired with corrected baseline fcn_id.")
+
+  # Legacy direct-name corrections are intentionally not ported. Name fields are
+  # removed from final datasets, and shareable outputs get an additional strict
+  # de-identification pass.
 
   set_by_fcn(
     "collect_wood_forest_start",
@@ -313,7 +343,7 @@ apply_refugee_legacy_manual_corrections <- function(data) {
   set_constant("shelter", "111327", 20000, "midline", rule_id = "legacy_midline_shelter", note = "Manual value correction from legacy cleaner.")
   set_constant("shelter", "110693", 30000, "midline", rule_id = "legacy_midline_shelter", note = "Manual value correction from legacy cleaner.")
   set_constant("spent_total_month", "128915", 3120, "midline", rule_id = "legacy_midline_spent_total_month", note = "Manual value correction from legacy cleaner.")
-  set_constant("target_respondent_current", "107012", "Emtiaz Fatema", "midline", rule_id = "legacy_midline_target_respondent_current", note = "Manual value correction from legacy cleaner.")
+  # Direct-name-only legacy corrections are omitted from this archived copy.
   set_constant("time_cooking", c("107012", "107019", "108549", "111470", "111944", "112138", "113921", "115548", "115756", "115771", "115792", "115817", "117514", "123568", "123569", "123570", "123657", "123670", "123845", "123976", "192633", "192730", "193582", "195381", "201161", "289608", "289648"), 3, "midline", rule_id = "legacy_midline_time_cooking", note = "Manual value correction from legacy cleaner.")
   set_constant("time_harvesting_wood", c("123571", "123665", "201612"), 2, "midline", rule_id = "legacy_midline_time_harvesting_wood", note = "Manual value correction from legacy cleaner.")
   set_constant("time_harvesting_wood", c("100959", "100971", "100972", "100999", "101034", "101038", "101618", "101705", "102330", "106585", "106586", "108169", "108351", "108549", "109673", "109807", "111470", "111944", "112138", "115371", "115465", "115756", "115771", "115817", "116542", "116707", "116710", "116932", "116985", "116987", "117514", "117943", "119603", "121962", "122092", "122093", "122150", "122241", "122378", "123005", "123568", "123656", "123657", "123677", "123845", "123847", "123976", "193130", "193582", "195381", "289608", "289648", "600019"), 3, "midline", rule_id = "legacy_midline_time_harvesting_wood", note = "Manual value correction from legacy cleaner.")
@@ -354,8 +384,7 @@ apply_refugee_legacy_manual_corrections <- function(data) {
   set_constant("income_home_garden", c("111472", "111470", "111589", "112010"), 0, "endline", rule_id = "legacy_endline_income_home_garden", note = "Manual value correction from legacy cleaner.")
   set_constant("lpg_willingness_to_pay", "302244", 100, "endline", rule_id = "legacy_endline_lpg_willingness_to_pay", note = "Manual value correction from legacy cleaner.")
   set_constant("meat_consumption", "278797", 0, "endline", rule_id = "legacy_endline_meat_consumption", note = "Manual value correction from legacy cleaner.")
-  set_constant("name_respondent", "115660", "Nure jannat", "endline", rule_id = "legacy_endline_name_respondent_115660", note = "Manual value correction from legacy cleaner.")
-  set_constant("name_respondent", "170934", "Tasmin", "endline", rule_id = "legacy_endline_name_respondent_170934", note = "Manual value correction from legacy cleaner.")
+  # Direct respondent-name legacy corrections are omitted from this archived copy.
   set_constant("sleep_fall_asleep_min", c("292314", "174188", "171478", " 186825"), 10, "endline", rule_id = "legacy_endline_sleep_fall_asleep_min", note = "Manual value correction from legacy cleaner.")
   set_constant("sleep_hours", "278797", 10, "endline", rule_id = "legacy_endline_sleep_hours", note = "Manual value correction from legacy cleaner.")
   set_constant("sleep_hours", "181279", 7, "endline", rule_id = "legacy_endline_sleep_hours", note = "Manual value correction from legacy cleaner.")
@@ -364,22 +393,8 @@ apply_refugee_legacy_manual_corrections <- function(data) {
   set_constant("veggies_adults_week", "152849", 3, "endline", rule_id = "legacy_endline_veggies_adults_week", note = "Manual value correction from legacy cleaner.")
   set_constant("veggies_source", "123571", "2 3", "endline", rule_id = "legacy_endline_veggies_source", note = "Manual value correction from legacy cleaner.")
 
-  # Enumerator labels and legacy override.
-  if ("enumerator" %in% names(data)) {
-    enumerator_map <- c(
-      "1" = "Tunajjina Alam", "2" = "Rayhanul Jannat", "3" = "Shamima Akter",
-      "4" = "Morsida Akter", "5" = "Way May Marma", "6" = "Morselina Akter",
-      "7" = "Farhana Suma", "8" = "Nishat Farjana", "9" = "Arefa Khanam",
-      "10" = "Daliya Akter", "11" = "Md. Jamilur Rahman", "12" = "Md. Razu Ahmed",
-      "13" = "Mohammad Alamgir", "14" = "Nazrin Akter", "15" = "dummy",
-      "16" = "Fatema Akter", "17" = "Tanij Akter"
-    )
-    if (!"enumerator_name" %in% names(data)) data$enumerator_name <- NA_character_
-    enum_key <- as.character(suppressWarnings(as.integer(as.numeric(as.character(data$enumerator)))))
-    idx <- !is.na(enum_key) & enum_key %in% names(enumerator_map)
-    set_value("enumerator_name", idx, unname(enumerator_map[enum_key[idx]]), "legacy_enumerator_name_map", "Map enumerator numeric IDs to names as in legacy cleaner.")
-  }
-  set_constant("enumerator_name", c("105441", "111470", "600010"), "Shamima Akter", "midline", rule_id = "legacy_midline_enumerator_name_override", note = "Manual enumerator-name correction from legacy cleaner.")
+  # Enumerator names are not derived in this archived copy; keep numeric
+  # enumerator codes only unless a separate restricted lookup is needed.
 
   # Legacy fill: add LPG timing fields to endline when they were not asked.
   fill_endline_from_midline <- function(col) {
@@ -407,5 +422,8 @@ apply_refugee_legacy_manual_corrections <- function(data) {
   ensure_parent_dir(audit_path)
   write.csv(audit, audit_path, row.names = FALSE, na = "")
 
+  if (".legacy_source_row_number" %in% names(data)) {
+    data$.legacy_source_row_number <- NULL
+  }
   data
 }

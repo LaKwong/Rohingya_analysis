@@ -116,7 +116,7 @@ rdid_xgboost_tuning_settings <- tibble(
   value = c(
     Sys.getenv("RF105_XGB_MAX_NROUNDS", unset = "100"),
     Sys.getenv("RF105_XGB_EARLY_STOP", unset = "10"),
-    Sys.getenv("RF105_XGB_NTHREAD", unset = "2"),
+    Sys.getenv("RF105_XGB_NTHREAD", unset = "1"),
     Sys.getenv("RF105_XGB_DEPTHS", unset = "2"),
     Sys.getenv("RF105_XGB_ETAS", unset = "0.05")
   )
@@ -264,6 +264,26 @@ make_nonnegative_number <- function(x) {
   out
 }
 
+zero_if_structural_no <- function(value, activity_yn) {
+  value <- as_number(value)
+  activity_yn <- as.integer(activity_yn)
+  case_when(
+    activity_yn == 0 & is.na(value) ~ 0,
+    TRUE ~ value
+  )
+}
+
+skip_followup_as_no_if_parent_no <- function(value_yn, parent_yn) {
+  value_yn <- as.integer(value_yn)
+  parent_yn <- as.integer(parent_yn)
+  case_when(
+    !is.na(value_yn) ~ value_yn,
+    parent_yn == 0 ~ 0L,
+    parent_yn == 1 ~ NA_integer_,
+    TRUE ~ NA_integer_
+  )
+}
+
 multi_select_code_yn <- function(df, base_var, option_code,
                                  asked_var = NULL) {
   option_code <- as.character(option_code)
@@ -359,17 +379,14 @@ derive_rdid_survey_outcomes <- function(df) {
     }
   }
 
-  if ("target_child_distrubed_speech_yn" %in% names(df)) {
-    df$target_child_distrubed_speech_yn <- replace_na(
-      df$target_child_distrubed_speech_yn, 0L
-    )
+  if ("target_child_distrubed_speech_yn" %in% names(df) &&
+      "target_child_disturbed_speech_yn" %notin% names(df)) {
+    df$target_child_disturbed_speech_yn <- df$target_child_distrubed_speech_yn
   }
 
-  if ("respondent_disturbed_speech_yn" %in% names(df)) {
-    df$respondent_disturbed_speech_yn <- replace_na(
-      df$respondent_disturbed_speech_yn, 0L
-    )
-  }
+  # Do not silently recode all disturbed-speech missingness to no. The helper
+  # preserves true missing values and creates a separate skip-as-no sensitivity.
+  df <- derive_child_severe_asthma_vars(df)
 
   df <- df %>%
     mutate(
@@ -378,10 +395,24 @@ derive_rdid_survey_outcomes <- function(df) {
         target_child_wheezing_yn == 0 ~ 0L,
         TRUE ~ NA_integer_
       ),
-      target_child_severe_asthma = case_when(
-        target_child_wheezing_yn == 1 & target_child_distrubed_speech_yn == 1 ~ 1L,
-        target_child_wheezing_yn == 0 | target_child_distrubed_speech_yn == 0 ~ 0L,
-        TRUE ~ NA_integer_
+      target_child_severe_asthma = target_child_severe_asthma_na_preserving,
+      respondent_disturbed_sleep_missing_type = case_when(
+        !is.na(respondent_disturbed_sleep_yn) ~ "observed_disturbed_sleep",
+        respondent_wheezing_yn == 0 ~ "structural_skip_no_wheeze",
+        respondent_wheezing_yn == 1 ~ "true_missing_among_wheeze",
+        TRUE ~ "missing_wheeze_or_unknown"
+      ),
+      respondent_disturbed_speech_missing_type = case_when(
+        !is.na(respondent_disturbed_speech_yn) ~ "observed_disturbed_speech",
+        respondent_wheezing_yn == 0 ~ "structural_skip_no_wheeze",
+        respondent_wheezing_yn == 1 ~ "true_missing_among_wheeze",
+        TRUE ~ "missing_wheeze_or_unknown"
+      ),
+      respondent_disturbed_sleep_yn = skip_followup_as_no_if_parent_no(
+        respondent_disturbed_sleep_yn, respondent_wheezing_yn
+      ),
+      respondent_disturbed_speech_yn = skip_followup_as_no_if_parent_no(
+        respondent_disturbed_speech_yn, respondent_wheezing_yn
       ),
       exchange_rate = exchange_bdt_per_usd[as.character(timepoint)],
       fuel_30_gather_scraps_yn = make_yn_rdid(single_num_var(., "fuel_30_gather_scraps")),
@@ -393,17 +424,21 @@ derive_rdid_survey_outcomes <- function(df) {
       fuel_30_receive_crh_yn = make_yn_rdid(single_num_var(., "fuel_30_receive_crh")),
       fuel_30_buy_crh_yn = make_yn_rdid(single_num_var(., "fuel_30_buy_crh")),
       fuel_30_other_yn = make_yn_rdid(single_num_var(., "fuel_30_other")),
-      collect_wood_times_week = dplyr::coalesce(
+      collect_wood_times_week_raw = dplyr::coalesce(
         single_num_var(., "collect_wood_times_week"),
         single_num_var(., "times_wood_day")
       ),
-      collect_wood_walk_hr_clean = make_nonnegative_number(
+      collect_wood_times_week = zero_if_structural_no(
+        make_nonnegative_number(collect_wood_times_week_raw),
+        fuel_30_collect_wood_yn
+      ),
+      collect_wood_walk_hr_raw = make_nonnegative_number(
         single_num_var(., "collect_wood_walk_hr")
       ),
-      collect_wood_walk_hr_clean = if_else(
-        collect_wood_walk_hr_clean < 0.01,
-        NA_real_,
-        collect_wood_walk_hr_clean
+      collect_wood_walk_hr_clean = case_when(
+        fuel_30_collect_wood_yn == 0 & is.na(collect_wood_walk_hr_raw) ~ 0,
+        fuel_30_collect_wood_yn == 1 & collect_wood_walk_hr_raw < 0.01 ~ NA_real_,
+        TRUE ~ collect_wood_walk_hr_raw
       ),
       plastic_burn_gt1_yn = case_when(
         is.na(single_num_var(., "burn_plastic_frequency")) ~ NA_integer_,
@@ -414,7 +449,11 @@ derive_rdid_survey_outcomes <- function(df) {
         single_num_var(., "boil_yesterday_times")
       ),
       spent_food_bdt = make_nonnegative_number(single_num_var(., "spent_food")),
-      buy_wood_cost_bdt = make_nonnegative_number(single_num_var(., "buy_wood_cost")),
+      buy_wood_cost_bdt_raw = make_nonnegative_number(single_num_var(., "buy_wood_cost")),
+      buy_wood_cost_bdt = zero_if_structural_no(
+        buy_wood_cost_bdt_raw,
+        fuel_30_buy_wood_yn
+      ),
       spent_total_month_bdt = make_nonnegative_number(single_num_var(., "spent_total_month")),
       spent_tobacco_pan_bdt = make_nonnegative_number(single_num_var(., "spent_tobacco_pan")),
       spent_food_usd = spent_food_bdt / exchange_rate,
@@ -538,6 +577,87 @@ safe_write_reviewed_csv(
 
 survey_model_data <- analysis_population$all_deduplicated %>%
   derive_rdid_survey_outcomes()
+
+severe_asthma_coding_audit <- survey_model_data %>%
+  group_by(timepoint, study_arm_overall, target_child_disturbed_speech_missing_type) %>%
+  summarise(
+    n_records = n(),
+    n_child_wheeze_yes = sum(target_child_wheezing_yn == 1, na.rm = TRUE),
+    n_disturbed_speech_nonmissing = sum(!is.na(target_child_distrubed_speech_yn_na_preserving)),
+    n_severe_asthma_na_preserving_nonmissing = sum(!is.na(target_child_severe_asthma)),
+    n_severe_asthma_skip_as_no_nonmissing = sum(!is.na(target_child_severe_asthma_skip_as_no)),
+    n_severe_asthma_na_preserving_yes = sum(target_child_severe_asthma == 1, na.rm = TRUE),
+    n_severe_asthma_skip_as_no_yes = sum(target_child_severe_asthma_skip_as_no == 1, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(timepoint, study_arm_overall, target_child_disturbed_speech_missing_type)
+
+safe_write_reviewed_csv(
+  severe_asthma_coding_audit,
+  "table_rDiD_severe_asthma_coding_audit.csv",
+  subfolder = "qa"
+)
+
+structural_zero_coding_audit <- survey_model_data %>%
+  group_by(timepoint, study_arm_overall) %>%
+  summarise(
+    n_records = n(),
+    n_no_wood_purchase_missing_cost_set_zero = sum(
+      fuel_30_buy_wood_yn == 0 & is.na(buy_wood_cost_bdt_raw) &
+        buy_wood_cost_bdt == 0,
+      na.rm = TRUE
+    ),
+    n_wood_purchasers_missing_cost_preserved_missing = sum(
+      fuel_30_buy_wood_yn == 1 & is.na(buy_wood_cost_bdt_raw),
+      na.rm = TRUE
+    ),
+    n_no_collection_missing_frequency_set_zero = sum(
+      fuel_30_collect_wood_yn == 0 & is.na(collect_wood_times_week_raw) &
+        collect_wood_times_week == 0,
+      na.rm = TRUE
+    ),
+    n_collectors_missing_frequency_preserved_missing = sum(
+      fuel_30_collect_wood_yn == 1 & is.na(collect_wood_times_week_raw),
+      na.rm = TRUE
+    ),
+    n_no_collection_missing_walk_time_set_zero = sum(
+      fuel_30_collect_wood_yn == 0 & is.na(collect_wood_walk_hr_raw) &
+        collect_wood_walk_hr_clean == 0,
+      na.rm = TRUE
+    ),
+    n_collectors_missing_walk_time_preserved_missing = sum(
+      fuel_30_collect_wood_yn == 1 & is.na(collect_wood_walk_hr_raw),
+      na.rm = TRUE
+    ),
+    n_no_wheeze_disturbed_sleep_skips_set_zero = sum(
+      respondent_disturbed_sleep_missing_type == "structural_skip_no_wheeze" &
+        respondent_disturbed_sleep_yn == 0,
+      na.rm = TRUE
+    ),
+    n_wheeze_disturbed_sleep_true_missing_preserved = sum(
+      respondent_disturbed_sleep_missing_type == "true_missing_among_wheeze" &
+        is.na(respondent_disturbed_sleep_yn),
+      na.rm = TRUE
+    ),
+    n_no_wheeze_disturbed_speech_skips_set_zero = sum(
+      respondent_disturbed_speech_missing_type == "structural_skip_no_wheeze" &
+        respondent_disturbed_speech_yn == 0,
+      na.rm = TRUE
+    ),
+    n_wheeze_disturbed_speech_true_missing_preserved = sum(
+      respondent_disturbed_speech_missing_type == "true_missing_among_wheeze" &
+        is.na(respondent_disturbed_speech_yn),
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(timepoint, study_arm_overall)
+
+safe_write_reviewed_csv(
+  structural_zero_coding_audit,
+  "table_rDiD_structural_zero_coding_audit.csv",
+  subfolder = "qa"
+)
 
 total_income_30_derivation_audit <- survey_model_data %>%
   group_by(timepoint, study_arm_overall) %>%
@@ -676,7 +796,8 @@ survey_outcomes <- tribble(
   "target_child_lethargy_yn", "Child lethargy", "Child health", "binary", "percentage_points",
   "target_child_weight_loss_yn", "Child unexplained weight loss", "Child health", "binary", "percentage_points",
   "target_child_asthma", "Child asthma proxy", "Child health", "binary", "percentage_points",
-  "target_child_severe_asthma", "Child severe asthma proxy", "Child health", "binary", "percentage_points",
+  "target_child_severe_asthma", "Child severe asthma proxy (NA-preserving)", "Child health", "binary", "percentage_points",
+  "target_child_severe_asthma_skip_as_no", "Child severe asthma proxy (skip-as-no sensitivity)", "Child health sensitivity", "binary", "percentage_points",
   "respondent_disturbed_speech_yn", "Respondent disturbed speech during wheeze", "Respondent health", "binary", "percentage_points",
   "respondent_eye_red_yn", "Respondent red eyes", "Respondent health", "binary", "percentage_points",
   "respondent_eye_itch_yn", "Respondent itchy eyes", "Respondent health", "binary", "percentage_points",
@@ -770,8 +891,8 @@ rf105_source_outcome_audit <- tribble(
 "target_child_eye_red_yn", "target_child_eye_red_yn", "implemented_in_current_rdid_script", "included", "Binary yes/no derived from target_child_eye_red using the current binary recode.",
 "target_child_clinic_resp_yn", "target_child_clinic_resp_yn", "implemented_in_current_rdid_script", "included", "Binary yes/no derived from target_child_clinic_resp; refused/don't know values are set to missing.",
 "target_child_wheezing_yn", "target_child_wheezing_yn", "implemented_in_current_rdid_script", "included", "Binary yes/no derived from target_child_wheezing; refused/don't know values are set to missing.",
-"target_child_distrubed_speech_yn", "target_child_distrubed_speech_yn", "implemented_in_current_rdid_script", "included", "Matches RF105B XGBoost code by setting skipped/missing disturbed-speech responses to 0 before modeling.",
-"respondent_disturbed_speech_yn", "respondent_disturbed_speech_yn", "implemented_in_current_rdid_script", "included", "Matches RF105B XGBoost code by setting skipped/missing disturbed-speech responses to 0 before modeling.",
+"target_child_distrubed_speech_yn", "target_child_distrubed_speech_yn", "implemented_in_current_rdid_script", "included", "Binary disturbed-speech indicator preserves missing/refused/don't know responses; structural no-wheeze skips are handled only in the explicit skip-as-no severe-asthma sensitivity.",
+"respondent_disturbed_speech_yn", "respondent_disturbed_speech_yn", "implemented_in_current_rdid_script", "included", "Binary disturbed-speech indicator treats structurally skipped responses among respondents without wheeze as no disturbed speech, while preserving true missing values among respondents with wheeze.",
 "respondent_eye_red_yn", "respondent_eye_red_yn", "implemented_in_current_rdid_script", "included", "Binary any-symptom indicator derived from respondent_eye_red.",
 "respondent_eye_itch_yn", "respondent_eye_itch_yn", "implemented_in_current_rdid_script", "included", "Binary any-symptom indicator derived from respondent_eye_itch.",
 "respondent_eye_sore_yn", "respondent_eye_sore_yn", "implemented_in_current_rdid_script", "included", "Binary any-symptom indicator derived from respondent_eye_sore.",
@@ -782,7 +903,7 @@ rf105_source_outcome_audit <- tribble(
 "target_child_lethargy", "target_child_lethargy_yn", "implemented_in_current_rdid_script", "included_as_binary", "Added after audit because this child general-health outcome was in the requested outcome audit.",
 "target_child_weight_loss", "target_child_weight_loss_yn", "implemented_in_current_rdid_script", "included_as_binary", "Added after audit because this child general-health outcome was in the requested outcome audit.",
 "respondent_cough", "respondent_cough_yn", "implemented_in_current_rdid_script", "included_as_binary", "Added after audit because this respondent respiratory outcome was in the requested outcome audit.",
-"respondent_disturbed_sleep", "respondent_disturbed_sleep_yn", "implemented_in_current_rdid_script", "included_as_binary", "Added after audit; keep sample-size columns visible because this skip-pattern variable has many missing values.",
+"respondent_disturbed_sleep", "respondent_disturbed_sleep_yn", "implemented_in_current_rdid_script", "included_as_binary", "Binary disturbed-sleep indicator treats structurally skipped responses among respondents without wheeze as no disturbed sleep, while preserving true missing values among respondents with wheeze.",
 "respondent_headache", "respondent_headache_yn", "implemented_in_current_rdid_script", "included_as_binary", "Added after audit because this respondent non-respiratory symptom was in the requested outcome audit.",
 "respondent_backache", "respondent_backache_yn", "implemented_in_current_rdid_script", "included_as_binary", "Added after audit because this respondent non-respiratory symptom was in the requested outcome audit.",
 "fcs", "fcs", "implemented_in_current_rdid_script", "included_corrected", "Recalculated from weekly food-group variables, cap at 7 days, apply WFP weights, and classify using <=21, 21.5-35, >35 cutoffs.",
@@ -809,7 +930,8 @@ rf105_source_outcome_audit <- tribble(
 "CES_D_o16_score", "CES_D_o16_score", "implemented_in_current_rdid_script", "included_corrected", "CES-D score is the sum of all 20 cleaned CES-D items; reviewed code now sets the score to missing if any item is missing, matching rowwise sum() behavior.",
 "suicidal_thoughts_30_yn", "suicidal_thoughts_30_yn", "implemented_in_current_rdid_script", "included", "Binary indicator equals 0 for never and 1 for any nonzero frequency.",
 "target_child_asthma", "target_child_asthma", "implemented_in_current_rdid_script", "included", "Binary asthma proxy equals child wheeze.",
-"target_child_severe_asthma", "target_child_severe_asthma", "implemented_in_current_rdid_script", "included_corrected", "Corrected to wheeze AND disturbed speech only; the reviewed script had incorrectly included disturbed sleep.",
+"target_child_severe_asthma", "target_child_severe_asthma", "implemented_in_current_rdid_script", "included_corrected_na_preserving", "Severe asthma equals child wheeze AND disturbed speech. Missing disturbed-speech severity responses remain missing in this primary definition; skipped no-wheeze responses are not silently recoded here.",
+"target_child_severe_asthma_skip_as_no", "target_child_severe_asthma_skip_as_no", "implemented_in_current_rdid_script", "included_sensitivity", "Sensitivity definition treats structurally skipped disturbed-speech responses among children with no wheeze as no severe asthma, while preserving true missing disturbed-speech values among children with wheeze.",
   "respondent_resp_rate", NA_character_, "1.5_define_vector_columns.R; host respiratory scripts", "not_available_in_clean_final", "Column was requested in the outcome audit but is not present in survey_refugee_household.rds.",
   "respondent_weight_loss", NA_character_, "1.5_define_vector_columns.R; host respiratory scripts", "not_available_in_clean_final", "Column was requested in the outcome audit but is not present in survey_refugee_household.rds.",
 "respondent_eye_red", "respondent_eye_red_yn", "implemented_in_current_rdid_script", "represented_as_binary", "The old exploratory DiD file also included raw ordinal/frequency symptom variables; reviewed RF105B rDiD models the binary any-symptom indicators used by the RF105B XGBoost workflow.",
@@ -1127,7 +1249,7 @@ safe_write_reviewed_csv(
 
 requested_rdid_outcome_coverage <- tribble(
   ~request_item, ~requested_outcome, ~rdid_status, ~modeled_outcomes, ~input_variables, ~calculation_note,
-  1, "Asthma and severe asthma", "modeled", "target_child_asthma; target_child_severe_asthma", "target_child_wheezing; target_child_distrubed_speech", "Child asthma proxy is child wheeze. Child severe-asthma proxy is child wheeze AND disturbed speech, matching the reviewed RF105B XGBoost logic.",
+  1, "Asthma and severe asthma", "modeled", "target_child_asthma; target_child_severe_asthma; target_child_severe_asthma_skip_as_no", "target_child_wheezing; target_child_distrubed_speech", "Child asthma proxy is child wheeze. Severe asthma is estimated two ways: an NA-preserving definition and a skip-as-no sensitivity for structurally skipped no-wheeze responses.",
   2, "Proportion of households collecting firewood", "modeled", "fuel_30_collect_wood_yn", "fuel_30_collect_wood", "Binary household indicator for firewood collection in the past 30 days.",
   3, "Amount of firewood collected", "partially_modeled_available_frequency_measure_only", "collect_wood_times_week", "times_wood_day; collect_wood_times_week alias in cleaning code", "clean_final does not contain a comparable baseline/follow-up weight, bundle, or volume measure of collected firewood. The reviewed rDiD model uses the available collection-frequency variable: trips to collect wood per week.",
   4, "Time spent collecting fuel", "partially_modeled_firewood_walking_time_only", "collect_wood_walk_hr_clean", "collect_wood_walk_hr", "The comparable baseline/follow-up measure is walking time to collect firewood. Broader LPG/CRH walking and waiting measures are not available at baseline in the same form for rDiD.",
@@ -1174,7 +1296,7 @@ writeLines(
     "- FCS is recalculated from weekly food-group variables using embedded caps, weights, and category cutoffs.",
     "- Dietary diversity is modeled using clean_final hdds_assume_misc_1, which is baseline-compatible and derived in the cleaner from weekly food-frequency variables using the embedded HDDS food-group mapping.",
     "- CES-D now requires all 20 cleaned CES-D items to be nonmissing, using complete-case CES-D scoring.",
-    "- The severe-asthma proxy now uses the embedded RF105 severe-asthma definition: child wheeze AND disturbed speech. The earlier reviewed script had also counted disturbed sleep.",
+    "- The severe-asthma proxy now uses child wheeze AND disturbed speech with an NA-preserving primary definition plus a skip-as-no sensitivity for structurally skipped no-wheeze responses.",
     "- Food and wood expenditures now use the project exchange rates defined in the active RF105 configuration: 84.88, 84.74, and 93.45 BDT/USD for baseline, midline, and endline.",
     "- Additional requested health outcomes were added as binary rDiD outcomes where the clean_final columns are available: child lethargy, child weight loss, respondent cough, respondent disturbed sleep, respondent headache, and respondent backache.",
     "",
@@ -1367,7 +1489,7 @@ safe_write_reviewed_csv(
 pm_missing_timepoint_counts <- pm_adjusted_raw %>%
   mutate(
     fcn_id = as.character(fcn_id),
-    timepoint = str_squish(str_to_lower(as.character(timepoint))),
+    timepoint = as_ordered_timepoint(timepoint),
     study_arm_overall = str_squish(str_to_lower(as.character(study_arm_overall)))
   ) %>%
   filter(
@@ -1400,6 +1522,10 @@ pm_outcomes <- tribble(
 ################################################################################
 
 xvars <- c("hh_size", "hh_per_structure")
+min_rdid_arm_households <- as.integer(Sys.getenv(
+  "RF105_RDID_MIN_ARM_HOUSEHOLDS",
+  unset = "25"
+))
 
 baseline_covars <- survey_model_data %>%
   filter(timepoint == "baseline") %>%
@@ -1527,6 +1653,128 @@ make_outcome_panel <- function(outcome_data, outcome_name, followup_timepoint,
     mutate(outcome_source = source_label)
 }
 
+make_outcome_panel_diagnostic <- function(outcome_data, outcome_info,
+                                          followup_timepoint, contrast,
+                                          source_label) {
+  baseline_y <- outcome_data %>%
+    filter(timepoint == "baseline") %>%
+    transmute(
+      fcn_id = as.character(fcn_id),
+      Z = as_number(.data[[outcome_info$outcome]])
+    )
+
+  followup_y <- outcome_data %>%
+    filter(timepoint == followup_timepoint) %>%
+    transmute(
+      fcn_id = as.character(fcn_id),
+      Y = as_number(.data[[outcome_info$outcome]])
+    )
+
+  baseline_covars %>%
+    mutate(
+      arm = case_when(
+        A == 1 ~ "intervention",
+        A == 0 ~ "comparison",
+        TRUE ~ "missing_arm"
+      )
+    ) %>%
+    left_join(baseline_y, by = "fcn_id") %>%
+    left_join(followup_y, by = "fcn_id") %>%
+    group_by(arm) %>%
+    summarise(
+      n_baseline_survey_households = n_distinct(fcn_id),
+      n_baseline_outcome_nonmissing = sum(!is.na(Z)),
+      n_followup_outcome_nonmissing = sum(!is.na(Y)),
+      n_complete_panel = sum(!is.na(A) & !is.na(Z) & !is.na(Y)),
+      n_missing_baseline_outcome = sum(is.na(Z)),
+      n_missing_followup_outcome = sum(is.na(Y)),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      contrast = contrast,
+      followup_timepoint = followup_timepoint,
+      outcome = outcome_info$outcome,
+      outcome_label = outcome_info$outcome_label,
+      domain = outcome_info$domain,
+      outcome_type = outcome_info$outcome_type,
+      outcome_source = source_label,
+      minimum_arm_households = min_rdid_arm_households,
+      below_minimum_arm_households = arm %in% c("comparison", "intervention") &
+        n_complete_panel < min_rdid_arm_households,
+      likely_panel_limiting_reason = case_when(
+        arm == "missing_arm" ~ "missing baseline study arm",
+        n_baseline_outcome_nonmissing < min_rdid_arm_households &
+          n_followup_outcome_nonmissing < min_rdid_arm_households ~
+          "baseline and follow-up outcome nonmissing counts below threshold",
+        n_baseline_outcome_nonmissing < min_rdid_arm_households ~
+          "baseline outcome nonmissing count below threshold",
+        n_followup_outcome_nonmissing < min_rdid_arm_households ~
+          "follow-up outcome nonmissing count below threshold",
+        n_complete_panel < min_rdid_arm_households ~
+          "paired complete-case panel below threshold after inner joins",
+        TRUE ~ "passes minimum arm threshold"
+      )
+    ) %>%
+    select(
+      contrast, followup_timepoint, outcome, outcome_label, domain,
+      outcome_type, outcome_source, arm, minimum_arm_households,
+      below_minimum_arm_households, likely_panel_limiting_reason,
+      n_baseline_survey_households, n_baseline_outcome_nonmissing,
+      n_followup_outcome_nonmissing, n_complete_panel,
+      n_missing_baseline_outcome, n_missing_followup_outcome
+    )
+}
+
+make_panel_diagnostics_for_defs <- function(outcome_data, outcome_defs,
+                                            followup_timepoint, contrast,
+                                            source_label) {
+  map_dfr(seq_len(nrow(outcome_defs)), function(i) {
+    make_outcome_panel_diagnostic(
+      outcome_data = outcome_data,
+      outcome_info = outcome_defs[i, ],
+      followup_timepoint = followup_timepoint,
+      contrast = contrast,
+      source_label = source_label
+    )
+  })
+}
+
+rdid_panel_diagnostics <- bind_rows(
+  make_panel_diagnostics_for_defs(
+    survey_model_data, survey_outcomes, "midline",
+    "primary_baseline_midline", "survey_clean_final"
+  ),
+  make_panel_diagnostics_for_defs(
+    survey_model_data, survey_outcomes, "endline",
+    "secondary_baseline_endline", "survey_clean_final"
+  ),
+  make_panel_diagnostics_for_defs(
+    pm_household, pm_outcomes, "midline",
+    "primary_baseline_midline", "pm25_indoor_household_mean"
+  ),
+  make_panel_diagnostics_for_defs(
+    pm_household, pm_outcomes, "endline",
+    "secondary_baseline_endline", "pm25_indoor_household_mean"
+  )
+) %>%
+  arrange(contrast, domain, outcome, arm)
+
+safe_write_reviewed_csv(
+  rdid_panel_diagnostics,
+  "table_rDiD_panel_diagnostics.csv",
+  subfolder = "qa"
+)
+
+rdid_small_panel_diagnostics <- rdid_panel_diagnostics %>%
+  filter(below_minimum_arm_households) %>%
+  arrange(contrast, domain, outcome, arm)
+
+safe_write_reviewed_csv(
+  rdid_small_panel_diagnostics,
+  "table_rDiD_small_panel_diagnostics.csv",
+  subfolder = "qa"
+)
+
 ################################################################################
 # Estimators
 ################################################################################
@@ -1559,7 +1807,7 @@ xgb_xfit <- function(X_tr, y_tr, X_te, objective,
         objective = objective,
         max_depth = mxd,
         eta = eta,
-        nthread = as.integer(Sys.getenv("RF105_XGB_NTHREAD", unset = "2")),
+        nthread = as.integer(Sys.getenv("RF105_XGB_NTHREAD", unset = "1")),
         verbosity = 0
       )
 
@@ -1607,22 +1855,33 @@ dml_drdid_reverse_xgb <- function(dat, x_vars, K = 5, seed = 1) {
     filter(!is.na(Z), !is.na(Y), !is.na(A))
 
   n <- nrow(dat)
-  arm_counts <- table(dat$A)
+  n_intervention <- sum(dat$A == 1, na.rm = TRUE)
+  n_comparison <- sum(dat$A == 0, na.rm = TRUE)
+  min_arm_n <- min(n_intervention, n_comparison)
 
-  if (n < 10 || length(arm_counts) < 2 || min(arm_counts) < 2) {
+  if (n_intervention < min_rdid_arm_households ||
+      n_comparison < min_rdid_arm_households) {
     return(list(
       estimate = NA_real_, se = NA_real_, conf.low = NA_real_,
       conf.high = NA_real_, p.value = NA_real_, n = n,
-      note = "insufficient data for rDiD/XGBoost"
+      note = paste0(
+        "not estimated: rDiD/XGBoost panel below minimum arm size of ",
+        min_rdid_arm_households, " households per arm; intervention=",
+        n_intervention, ", comparison=", n_comparison
+      )
     ))
   }
 
-  set.seed(seed)
   X <- data.matrix(dat[, x_vars, drop = FALSE])
   A <- as_number(dat$A)
   D <- as_number(dat$Y - dat$Z)
-  K_eff <- min(K, n, as.integer(min(arm_counts)))
-  folds <- sample(rep(seq_len(K_eff), length.out = n))
+  K_eff <- min(K, n_intervention, n_comparison)
+  folds <- integer(n)
+  set.seed(seed)
+  for (arm_value in c(0, 1)) {
+    arm_index <- which(A == arm_value)
+    folds[arm_index] <- sample(rep(seq_len(K_eff), length.out = length(arm_index)))
+  }
 
   m1_hat <- numeric(n)
   p_hat <- numeric(n)
@@ -1688,13 +1947,19 @@ drdid_reverse_glm <- function(dat, x_vars) {
     impute_xvars_for_glm(x_vars)
 
   n <- nrow(dat)
-  arm_counts <- table(dat$A)
+  n_intervention <- sum(dat$A == 1, na.rm = TRUE)
+  n_comparison <- sum(dat$A == 0, na.rm = TRUE)
 
-  if (n < 10 || length(arm_counts) < 2 || min(arm_counts) < 2) {
+  if (n_intervention < min_rdid_arm_households ||
+      n_comparison < min_rdid_arm_households) {
     return(list(
       estimate = NA_real_, se = NA_real_, conf.low = NA_real_,
       conf.high = NA_real_, p.value = NA_real_, n = n,
-      note = "insufficient data for rDiD/GLM"
+      note = paste0(
+        "not estimated: rDiD/GLM panel below minimum arm size of ",
+        min_rdid_arm_households, " households per arm; intervention=",
+        n_intervention, ", comparison=", n_comparison
+      )
     ))
   }
 
@@ -1781,6 +2046,9 @@ format_result_row <- function(res, outcome_info, contrast, followup_timepoint,
     n_households = res$n,
     n_intervention = sum(panel$A == 1, na.rm = TRUE),
     n_comparison = sum(panel$A == 0, na.rm = TRUE),
+    minimum_arm_households = min_rdid_arm_households,
+    passes_minimum_arm_households = n_intervention >= min_rdid_arm_households &
+      n_comparison >= min_rdid_arm_households,
     note = res$note
   )
 }
@@ -1859,6 +2127,18 @@ rdid_xgboost_results <- rdid_results_all %>%
 
 rdid_glm_results <- rdid_results_all %>%
   filter(estimator == "rDID_GLM_sensitivity")
+
+severe_asthma_coding_sensitivity_results <- rdid_results_all %>%
+  filter(outcome %in% c(
+    "target_child_severe_asthma",
+    "target_child_severe_asthma_skip_as_no"
+  )) %>%
+  arrange(contrast, estimator, outcome)
+
+safe_write_reviewed_csv(
+  severe_asthma_coding_sensitivity_results,
+  "table_rDiD_severe_asthma_coding_sensitivity_results.csv"
+)
 
 safe_write_reviewed_csv(
   rdid_xgboost_results,
@@ -1957,7 +2237,7 @@ safe_write_reviewed_csv(
 rdid_sample_counts <- rdid_xgboost_results %>%
   select(
     contrast, population, followup_timepoint, outcome, outcome_label, domain,
-    outcome_source, sample_size, n_households, n_intervention, n_comparison, note
+    outcome_source, sample_size, n_households, n_intervention, n_comparison, minimum_arm_households, passes_minimum_arm_households, note
   )
 
 safe_write_reviewed_csv(
@@ -2162,6 +2442,59 @@ previous_results <- tibble(
   previous_p.value = numeric(),
   previous_significant = logical()
 )
+
+find_previous_rdid_results <- function(current_dir) {
+  explicit_file <- Sys.getenv("RF105_PREVIOUS_RESULTS_FILE", unset = "")
+  if (nzchar(explicit_file) && file.exists(explicit_file)) {
+    return(normalizePath(explicit_file, winslash = "/", mustWork = FALSE))
+  }
+
+  explicit_dir <- Sys.getenv("RF105_PREVIOUS_OUTPUT_DIR", unset = "")
+  if (nzchar(explicit_dir)) {
+    candidate_file <- file.path(explicit_dir, "table_rDiD_xgboost_all_results.csv")
+    if (file.exists(candidate_file)) {
+      return(normalizePath(candidate_file, winslash = "/", mustWork = FALSE))
+    }
+  }
+
+  parent_dir <- dirname(current_dir)
+  current_name <- basename(normalizePath(current_dir, winslash = "/", mustWork = FALSE))
+  candidate_dirs <- list.dirs(parent_dir, recursive = FALSE, full.names = TRUE)
+  candidate_dirs <- candidate_dirs[grepl("^RF105_reviewed_[0-9]{8}$", basename(candidate_dirs))]
+  candidate_dirs <- candidate_dirs[basename(candidate_dirs) < current_name]
+  candidate_dirs <- sort(candidate_dirs)
+
+  if (length(candidate_dirs) == 0) {
+    return(NA_character_)
+  }
+
+  candidate_file <- file.path(tail(candidate_dirs, 1), "table_rDiD_xgboost_all_results.csv")
+  if (file.exists(candidate_file)) {
+    return(normalizePath(candidate_file, winslash = "/", mustWork = FALSE))
+  }
+
+  NA_character_
+}
+
+previous_results_file <- find_previous_rdid_results(dir_tables_reviewed)
+if (!is.na(previous_results_file) && file.exists(previous_results_file)) {
+  previous_results <- readr::read_csv(previous_results_file, show_col_types = FALSE) %>%
+    filter(estimator == "rDID_XGBoost") %>%
+    transmute(
+      outcome,
+      contrast,
+      previous_estimator = estimator,
+      previous_population = population,
+      previous_estimate = estimate,
+      previous_conf.low = conf.low,
+      previous_conf.high = conf.high,
+      previous_p.value = p.value,
+      previous_significant = statistically_significant
+    )
+  message("Using previous rDiD results for significance-change audit: ", previous_results_file)
+} else {
+  message("No previous rDiD results file found for automated significance-change audit.")
+}
 
 significance_change_audit <- rdid_xgboost_results %>%
   select(
@@ -2466,7 +2799,7 @@ safe_write_reviewed_csv(
 rdid_sample_counts <- rdid_xgboost_results %>%
   select(
     contrast, population, followup_timepoint, outcome, outcome_label, domain,
-    outcome_source, sample_size, n_households, n_intervention, n_comparison, note
+    outcome_source, sample_size, n_households, n_intervention, n_comparison, minimum_arm_households, passes_minimum_arm_households, note
   )
 safe_write_reviewed_csv(rdid_sample_counts, "table_rDiD_outcome_sample_counts.csv", subfolder = "qa")
 
@@ -2530,6 +2863,59 @@ previous_results <- tibble(
   previous_p.value = numeric(),
   previous_significant = logical()
 )
+
+find_previous_rdid_results <- function(current_dir) {
+  explicit_file <- Sys.getenv("RF105_PREVIOUS_RESULTS_FILE", unset = "")
+  if (nzchar(explicit_file) && file.exists(explicit_file)) {
+    return(normalizePath(explicit_file, winslash = "/", mustWork = FALSE))
+  }
+
+  explicit_dir <- Sys.getenv("RF105_PREVIOUS_OUTPUT_DIR", unset = "")
+  if (nzchar(explicit_dir)) {
+    candidate_file <- file.path(explicit_dir, "table_rDiD_xgboost_all_results.csv")
+    if (file.exists(candidate_file)) {
+      return(normalizePath(candidate_file, winslash = "/", mustWork = FALSE))
+    }
+  }
+
+  parent_dir <- dirname(current_dir)
+  current_name <- basename(normalizePath(current_dir, winslash = "/", mustWork = FALSE))
+  candidate_dirs <- list.dirs(parent_dir, recursive = FALSE, full.names = TRUE)
+  candidate_dirs <- candidate_dirs[grepl("^RF105_reviewed_[0-9]{8}$", basename(candidate_dirs))]
+  candidate_dirs <- candidate_dirs[basename(candidate_dirs) < current_name]
+  candidate_dirs <- sort(candidate_dirs)
+
+  if (length(candidate_dirs) == 0) {
+    return(NA_character_)
+  }
+
+  candidate_file <- file.path(tail(candidate_dirs, 1), "table_rDiD_xgboost_all_results.csv")
+  if (file.exists(candidate_file)) {
+    return(normalizePath(candidate_file, winslash = "/", mustWork = FALSE))
+  }
+
+  NA_character_
+}
+
+previous_results_file <- find_previous_rdid_results(dir_tables_reviewed)
+if (!is.na(previous_results_file) && file.exists(previous_results_file)) {
+  previous_results <- readr::read_csv(previous_results_file, show_col_types = FALSE) %>%
+    filter(estimator == "rDID_XGBoost") %>%
+    transmute(
+      outcome,
+      contrast,
+      previous_estimator = estimator,
+      previous_population = population,
+      previous_estimate = estimate,
+      previous_conf.low = conf.low,
+      previous_conf.high = conf.high,
+      previous_p.value = p.value,
+      previous_significant = statistically_significant
+    )
+  message("Using previous rDiD results for significance-change audit: ", previous_results_file)
+} else {
+  message("No previous rDiD results file found for automated significance-change audit.")
+}
 significance_change_audit <- rdid_xgboost_results %>%
   select(
     outcome, outcome_label, contrast, domain, unit,
@@ -2601,6 +2987,7 @@ message("Wrote summary document: ", summary_file)
 
 message("RF105 reviewed rDiD/XGBoost result post-processing complete.")
 })
+
 
 
 

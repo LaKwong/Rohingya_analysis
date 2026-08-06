@@ -141,6 +141,20 @@ apply_refugee_manual_corrections <- function(data) {
     set_by_fcn(col, mapping, timepoint, arm, rule_id, note)
   }
 
+  data$.manual_source_row_number <- if ("raw_source_file" %in% names(data)) {
+    ave(seq_len(nrow(data)), data$raw_source_file, FUN = seq_along)
+  } else {
+    rep(NA_integer_, nrow(data))
+  }
+
+  manual_case <- function(source_file, raw_row_number) {
+    if (!all(c("raw_source_file", ".manual_source_row_number") %in% names(data))) {
+      return(rep(FALSE, nrow(data)))
+    }
+    clean_chr(data$raw_source_file) == source_file &
+      data$.manual_source_row_number %in% raw_row_number
+  }
+
   if (!"study_arm_original" %in% names(data) && "study_arm" %in% names(data)) {
     data$study_arm_original <- as.character(data$study_arm)
   }
@@ -174,24 +188,25 @@ apply_refugee_manual_corrections <- function(data) {
     "Keep study_arm_overall aligned with the reclassified intervention arm."
   )
 
-  # Baseline household listing and duplicate-survey corrections.
-  idx <- is_timepoint("baseline") & is_arm("intervention") &
+  # Baseline household listing and duplicate-survey corrections. Cases that
+  # previously matched on participant/child names now use non-identifying raw
+  # source row numbers from the imported baseline file.
+  idx <- manual_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 2) &
+    is_timepoint("baseline") & is_arm("intervention") &
     col_equals("camp_id", "8W", TRUE) &
     col_equals("block_id", "D", TRUE) &
     col_equals("subblock_id", "I21", TRUE) &
-    col_equals("name_respondent", "Juhura khatun", TRUE) &
-    col_equals("target_child_name", "Shahida begum", TRUE) &
-    col_missing_or("fcn_id", "x")
-  set_value("fcn_id", idx, "999999", "manual_baseline_fcn_placeholder_999999", "Updated after a discussion with the team to clarify the hh_id.")
+    col_missing_or("fcn_id", c("x", "999999"))
+  set_value("fcn_id", idx, "101595", "manual_baseline_fcn_8wdi21_geocene_resolution", "Resolved using geocene_data_but_no_survey_error_fix_fcn_id.xlsx after a discussion with the team to clarify the hh_id.")
+  set_value("hh_id", idx, "8WDI21101595", "manual_baseline_hh_id_8wdi21_geocene_resolution", "Resolved using geocene_data_but_no_survey_error_fix_fcn_id.xlsx after a discussion with the team to clarify the hh_id.")
 
-  idx <- is_timepoint("baseline") & is_arm("intervention") &
+  idx <- manual_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 42) &
+    is_timepoint("baseline") & is_arm("intervention") &
     col_equals("camp_id", "8W", TRUE) &
     col_equals("block_id", "D", TRUE) &
     col_equals("subblock_id", "I21", TRUE) &
-    col_equals("name_respondent", "Samina", TRUE) &
-    col_equals("target_child_name", "Mahbub rahman", TRUE) &
     col_missing_or("fcn_id")
-  set_value("fcn_id", idx, "999998", "manual_baseline_fcn_placeholder_999998", "Updated after a discussion with the team to clarify the hh_id.")
+  set_value("fcn_id", idx, "999998", "manual_baseline_fcn_placeholder_002", "Updated after a discussion with the team to clarify the hh_id.")
 
   enum_num <- if ("enumerator" %in% names(data)) suppressWarnings(as.numeric(as.character(data$enumerator))) else rep(NA_real_, nrow(data))
   drop_rows(is_timepoint("baseline") & is_arm("intervention") & fcn_in("117722") & enum_num == 8, "manual_drop_duplicate_baseline_117722", "Accidentally surveyed twice in baseline.")
@@ -202,21 +217,37 @@ apply_refugee_manual_corrections <- function(data) {
   enum_num <- if ("enumerator" %in% names(data)) suppressWarnings(as.numeric(as.character(data$enumerator))) else rep(NA_real_, nrow(data))
   drop_rows(is_timepoint("baseline") & is_arm("comparison") & fcn_in("186890") & enum_num == 1, "manual_drop_duplicate_baseline_186890", "Accidentally surveyed twice in baseline.")
 
-  idx <- is_timepoint("baseline") & is_arm("intervention") & col_equals("camp_id", "8W", TRUE) & col_equals("block_id", "B", TRUE) & col_equals("subblock_id", "A13", TRUE) & col_equals("name_respondent", "Noor Begum", TRUE)
-  set_value("fcn_id", idx, "122063", "manual_baseline_fcn_noor_begum", "HH listing correction from manual cleaner.")
-  idx <- is_timepoint("baseline") & is_arm("comparison") & col_equals("camp_id", "8E", TRUE) & col_equals("block_id", "C", TRUE) & col_equals("subblock_id", "B33", TRUE) & col_equals("name_respondent", "Yeasmin", TRUE)
-  set_value("fcn_id", idx, "114444", "manual_baseline_fcn_yeasmin", "HH listing correction from manual cleaner.")
+  idx <- manual_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 201) &
+    is_timepoint("baseline") & is_arm("intervention") &
+    col_equals("camp_id", "8W", TRUE) &
+    col_equals("block_id", "B", TRUE) &
+    col_equals("subblock_id", "A13", TRUE)
+  set_value("fcn_id", idx, "122063", "manual_baseline_fcn_001", "HH listing correction from manual cleaner.")
+  idx <- manual_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 1322) &
+    is_timepoint("baseline") & is_arm("comparison") &
+    col_equals("camp_id", "8E", TRUE) &
+    col_equals("block_id", "C", TRUE) &
+    col_equals("subblock_id", "B33", TRUE)
+  set_value("fcn_id", idx, "114444", "manual_baseline_fcn_002", "HH listing correction from manual cleaner.")
 
   # Targeted hh_id updates for the baseline fcn corrections above. These replace
   # the old fcn embedded in hh_id without reintroducing the manual blanket rebuild.
-  idx <- is_timepoint("baseline") & is_arm("intervention") & col_equals("camp_id", "8W", TRUE) & col_equals("block_id", "B", TRUE) & col_equals("subblock_id", "A13", TRUE) & col_equals("name_respondent", "Noor Begum", TRUE)
-  set_value("hh_id", idx, "8wBA13122063_1067", "manual_baseline_hh_id_noor_begum", "Targeted hh_id update paired with corrected baseline fcn_id.")
-  idx <- is_timepoint("baseline") & is_arm("comparison") & col_equals("camp_id", "8E", TRUE) & col_equals("block_id", "C", TRUE) & col_equals("subblock_id", "B33", TRUE) & col_equals("name_respondent", "Yeasmin", TRUE)
-  set_value("hh_id", idx, "8ECB33114444_4857", "manual_baseline_hh_id_yeasmin", "Targeted hh_id update paired with corrected baseline fcn_id.")
-  idx <- is_timepoint("baseline") & is_arm("intervention") & col_equals("camp_id", "8W", TRUE) & col_equals("block_id", "B", TRUE) & col_equals("subblock_id", "A13", TRUE) & col_equals("name_respondent", "Rashida Begum", TRUE)
-  set_value("target_child_name", idx, "Omar", "manual_baseline_child_name_rashida", "Target child name correction from manual cleaner.")
-  idx <- is_timepoint("baseline") & is_arm("intervention") & col_equals("camp_id", "8W", TRUE) & col_equals("block_id", "B", TRUE) & col_equals("subblock_id", "A13", TRUE) & col_equals("name_respondent", "Noor Begum", TRUE)
-  set_value("target_child_name", idx, "Noor halima", "manual_baseline_child_name_noor", "Target child name correction from manual cleaner.")
+  idx <- manual_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 201) &
+    is_timepoint("baseline") & is_arm("intervention") &
+    col_equals("camp_id", "8W", TRUE) &
+    col_equals("block_id", "B", TRUE) &
+    col_equals("subblock_id", "A13", TRUE)
+  set_value("hh_id", idx, "8wBA13122063_1067", "manual_baseline_hh_id_001", "Targeted hh_id update paired with corrected baseline fcn_id.")
+  idx <- manual_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 1322) &
+    is_timepoint("baseline") & is_arm("comparison") &
+    col_equals("camp_id", "8E", TRUE) &
+    col_equals("block_id", "C", TRUE) &
+    col_equals("subblock_id", "B33", TRUE)
+  set_value("hh_id", idx, "8ECB33114444_4857", "manual_baseline_hh_id_002", "Targeted hh_id update paired with corrected baseline fcn_id.")
+
+  # Legacy direct-name corrections are intentionally not ported. Name fields are
+  # removed from final datasets, and shareable outputs get an additional strict
+  # de-identification pass.
 
   set_by_fcn(
     "collect_wood_forest_start",
@@ -328,7 +359,7 @@ apply_refugee_manual_corrections <- function(data) {
   set_constant("shelter", "111327", 20000, "midline", rule_id = "manual_midline_shelter", note = "Manual value correction from manual cleaner.")
   set_constant("shelter", "110693", 30000, "midline", rule_id = "manual_midline_shelter", note = "Manual value correction from manual cleaner.")
   set_constant("spent_total_month", "128915", 3120, "midline", rule_id = "manual_midline_spent_total_month", note = "Manual value correction from manual cleaner.")
-  set_constant("target_respondent_current", "107012", "Emtiaz Fatema", "midline", rule_id = "manual_midline_target_respondent_current", note = "Manual value correction from manual cleaner.")
+  # Direct-name-only manual corrections are omitted from the active cleaner.
   set_constant("time_cooking", c("107012", "107019", "108549", "111470", "111944", "112138", "113921", "115548", "115756", "115771", "115792", "115817", "117514", "123568", "123569", "123570", "123657", "123670", "123845", "123976", "192633", "192730", "193582", "195381", "201161", "289608", "289648"), 3, "midline", rule_id = "manual_midline_time_cooking", note = "Manual value correction from manual cleaner.")
   set_constant("time_harvesting_wood", c("123571", "123665", "201612"), 2, "midline", rule_id = "manual_midline_time_harvesting_wood", note = "Manual value correction from manual cleaner.")
   set_constant("time_harvesting_wood", c("100959", "100971", "100972", "100999", "101034", "101038", "101618", "101705", "102330", "106585", "106586", "108169", "108351", "108549", "109673", "109807", "111470", "111944", "112138", "115371", "115465", "115756", "115771", "115817", "116542", "116707", "116710", "116932", "116985", "116987", "117514", "117943", "119603", "121962", "122092", "122093", "122150", "122241", "122378", "123005", "123568", "123656", "123657", "123677", "123845", "123847", "123976", "193130", "193582", "195381", "289608", "289648", "600019"), 3, "midline", rule_id = "manual_midline_time_harvesting_wood", note = "Manual value correction from manual cleaner.")
@@ -338,8 +369,17 @@ apply_refugee_manual_corrections <- function(data) {
   # Endline corrections.
   set_constant("study_arm", c("115651", "115661"), "intervention", "endline", rule_id = "manual_endline_arm_reclassification", note = "manual script changed these two households to the intervention endline arm.")
   set_constant("study_arm_overall", c("115651", "115661"), "intervention", "endline", rule_id = "manual_endline_arm_reclassification", note = "Keep study_arm_overall aligned with the intervention endline arm.")
+  # These endline fcn_id corrections were decided by examining camp_id,
+  # block_id, subblock_id, and names of household head and respondent.
+  set_by_fcn(
+    "fcn_id",
+    c("201677" = "201628", "147235" = "174235", "451023" = "451022"),
+    "endline",
+    rule_id = "manual_endline_fcn_location_name_review",
+    note = "Decision based on camp_id, block_id, subblock_id, household-head name, and respondent name review."
+  )
   set_by_fcn("fcn_id", c("101841" = "101840", "108306" = "109306", "108796" = "108799", "111272" = "112172", "115603" = "115643", "123825" = "113825", "124324" = "124321", "191395" = "191359", "207984" = "107984"), "endline", "intervention", "manual_endline_intervention_fcn", "Manual fcn_id correction from manual cleaner.")
-  set_by_fcn("fcn_id", c("157669" = "177669", "171094" = "171098", "183398" = "283398", "297872" = "295872", "650711" = "295890", "207984" = "107984", "147235" = "174235"), "endline", "comparison", "manual_endline_comparison_fcn", "Manual fcn_id correction from manual cleaner.")
+  set_by_fcn("fcn_id", c("157669" = "177669", "171094" = "171098", "183398" = "283398", "297872" = "295872", "650711" = "295890", "207984" = "107984"), "endline", "comparison", "manual_endline_comparison_fcn", "Manual fcn_id correction from manual cleaner.")
   set_value("camp_id", is_timepoint("endline") & col_equals("hh_id", "DDH21291234", TRUE), "8W", "manual_endline_camp_ddh21291234", "Manual camp_id correction from manual cleaner.")
   set_constant("camp_id", "115766", "10", "endline", rule_id = "manual_endline_camp_115766", note = "Manual camp_id correction from manual cleaner.")
   set_value("block_id", is_timepoint("endline") & col_equals("block_id", "292302", TRUE), "E", "manual_endline_block_292302", "Manual block_id correction from manual cleaner.")
@@ -369,8 +409,7 @@ apply_refugee_manual_corrections <- function(data) {
   set_constant("income_home_garden", c("111472", "111470", "111589", "112010"), 0, "endline", rule_id = "manual_endline_income_home_garden", note = "Manual value correction from manual cleaner.")
   set_constant("lpg_willingness_to_pay", "302244", 100, "endline", rule_id = "manual_endline_lpg_willingness_to_pay", note = "Manual value correction from manual cleaner.")
   set_constant("meat_consumption", "278797", 0, "endline", rule_id = "manual_endline_meat_consumption", note = "Manual value correction from manual cleaner.")
-  set_constant("name_respondent", "115660", "Nure jannat", "endline", rule_id = "manual_endline_name_respondent_115660", note = "Manual value correction from manual cleaner.")
-  set_constant("name_respondent", "170934", "Tasmin", "endline", rule_id = "manual_endline_name_respondent_170934", note = "Manual value correction from manual cleaner.")
+  # Direct respondent-name corrections are omitted from the active cleaner.
   set_constant("sleep_fall_asleep_min", c("292314", "174188", "171478", " 186825"), 10, "endline", rule_id = "manual_endline_sleep_fall_asleep_min", note = "Manual value correction from manual cleaner.")
   set_constant("sleep_hours", "278797", 10, "endline", rule_id = "manual_endline_sleep_hours", note = "Manual value correction from manual cleaner.")
   set_constant("sleep_hours", "181279", 7, "endline", rule_id = "manual_endline_sleep_hours", note = "Manual value correction from manual cleaner.")
@@ -379,22 +418,8 @@ apply_refugee_manual_corrections <- function(data) {
   set_constant("veggies_adults_week", "152849", 3, "endline", rule_id = "manual_endline_veggies_adults_week", note = "Manual value correction from manual cleaner.")
   set_constant("veggies_source", "123571", "2 3", "endline", rule_id = "manual_endline_veggies_source", note = "Manual value correction from manual cleaner.")
 
-  # Enumerator labels and manual override.
-  if ("enumerator" %in% names(data)) {
-    enumerator_map <- c(
-      "1" = "Tunajjina Alam", "2" = "Rayhanul Jannat", "3" = "Shamima Akter",
-      "4" = "Morsida Akter", "5" = "Way May Marma", "6" = "Morselina Akter",
-      "7" = "Farhana Suma", "8" = "Nishat Farjana", "9" = "Arefa Khanam",
-      "10" = "Daliya Akter", "11" = "Md. Jamilur Rahman", "12" = "Md. Razu Ahmed",
-      "13" = "Mohammad Alamgir", "14" = "Nazrin Akter", "15" = "dummy",
-      "16" = "Fatema Akter", "17" = "Tanij Akter"
-    )
-    if (!"enumerator_name" %in% names(data)) data$enumerator_name <- NA_character_
-    enum_key <- as.character(suppressWarnings(as.integer(as.numeric(as.character(data$enumerator)))))
-    idx <- !is.na(enum_key) & enum_key %in% names(enumerator_map)
-    set_value("enumerator_name", idx, unname(enumerator_map[enum_key[idx]]), "manual_enumerator_name_map", "Map enumerator numeric IDs to names as in manual cleaner.")
-  }
-  set_constant("enumerator_name", c("105441", "111470", "600010"), "Shamima Akter", "midline", rule_id = "manual_midline_enumerator_name_override", note = "Manual enumerator-name correction from manual cleaner.")
+  # Enumerator names are not derived in the active cleaner; keep numeric
+  # enumerator codes only unless a separate restricted lookup is needed.
 
   # manual fill: add LPG timing fields to endline when they were not asked.
   fill_endline_from_midline <- function(col) {
@@ -422,6 +447,9 @@ apply_refugee_manual_corrections <- function(data) {
   ensure_parent_dir(audit_path)
   write.csv(audit, audit_path, row.names = FALSE, na = "")
 
+  if (".manual_source_row_number" %in% names(data)) {
+    data$.manual_source_row_number <- NULL
+  }
   data
 }
 
@@ -1399,16 +1427,8 @@ if ("study_arm_overall" %in% names(survey)) {
 }
 
 survey$refugee_cleaning_exclusion_reason <- NA_character_
-if ("hh_id" %in% names(survey)) {
-  # Drop this unresolved row: the correct hh_id and fcn_id could not be determined.
-  bad_hh_id_idx <- which(clean_refugee_exclusion_value(survey$hh_id) == "8WDI21X")
-  if (length(bad_hh_id_idx)) {
-    survey$refugee_cleaning_exclusion_reason[bad_hh_id_idx] <- append_refugee_exclusion_reason(
-      survey$refugee_cleaning_exclusion_reason[bad_hh_id_idx],
-      "drop_8wDI21x_correct_hh_id_and_fcn_id_could_not_be_determined"
-    )
-  }
-}
+# The baseline 8wDI21x row is resolved in apply_refugee_manual_corrections()
+# using geocene_data_but_no_survey_error_fix_fcn_id.xlsx.
 survey_before_endline_review_identity <- survey
 survey <- apply_refugee_household_correction_workbook(survey)
 survey <- apply_refugee_endline_review_corrections(survey, identity_data = survey_before_endline_review_identity)
@@ -1503,6 +1523,8 @@ survey <- move_columns_first(
 )
 
 output_path <- write_final_rds(survey, "4_data/clean_final/survey_refugee_household.rds")
+shareable <- make_shareable_dataset(survey, dataset_name)
+shareable_path <- write_shareable_rds(shareable$data, "survey_refugee_household.rds")
 
 entry <- make_inventory_entry(
   dataset_name = dataset_name,
@@ -1510,6 +1532,8 @@ entry <- make_inventory_entry(
   output_path = output_path,
   source_paths = clean_final_path(source_rel),
   removed_identifier_columns = deidentified$removed,
+  shareable_output_path = shareable_path,
+  shareable_removed_identifier_columns = shareable$removed,
   notes = paste(
     "Refugee household survey final dataset rebuilt from raw-first imports in 2_data_raw.",
     "Baseline household IDs were corrected using 2_data_raw/survey_baseline_survey and data review/Rohingya HH Data_Correction_Saeed_20210124.xlsx; embedded manual corrections in this file were applied using intervention/comparison study_arm names; structured endline review corrections were applied from 2_data_raw/survey_endline_survey and data review.",
@@ -1536,7 +1560,7 @@ entry <- make_inventory_entry(
       baseline_arm_result$audit_path,
       "."
     ),
-    paste0("Excluded refugee household rows with missing fcn_id, unresolved 8wDI21x hh_id, or duplicate endline fcn_id second surveys: ", excluded_refugee_count, ". Duplicate endline second surveys arbitrarily dropped: ", duplicate_endline_drop_count, ". Audit: ", refugee_exclusion_audit_path, ".")
+    paste0("Excluded refugee household rows with missing fcn_id or duplicate endline fcn_id second surveys: ", excluded_refugee_count, ". The baseline 8wDI21x row was resolved to fcn_id 101595 and hh_id 8WDI21101595 using geocene_data_but_no_survey_error_fix_fcn_id.xlsx. Duplicate endline second surveys arbitrarily dropped: ", duplicate_endline_drop_count, ". Audit: ", refugee_exclusion_audit_path, ".")
   )
 )
 update_inventory(entry)

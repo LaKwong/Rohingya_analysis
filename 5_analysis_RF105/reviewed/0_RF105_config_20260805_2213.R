@@ -21,7 +21,7 @@
 ################################################################################
 
 required_packages <- c(
-  "here", "tidyverse", "janitor", "lubridate", "broom", "scales"
+  "here", "tidyverse", "readxl", "janitor", "lubridate", "broom", "scales"
 )
 
 missing_packages <- required_packages[
@@ -112,8 +112,45 @@ file_stove_daily <- file.path(
   dir_clean_final, "stove_use_geocene_refugee_daily.rds"
 )
 
+file_stove_monitor_days <- file.path(
+  dir_clean_final, "stove_use_geocene_refugee_monitor_days.rds"
+)
 timepoint_levels <- c("baseline", "midline", "endline")
 arm_levels <- c("comparison", "intervention")
+
+as_ordered_timepoint <- function(x, extra_levels = character()) {
+  x_clean <- str_squish(str_to_lower(as.character(x)))
+  factor(
+    x_clean,
+    levels = c(timepoint_levels, extra_levels),
+    ordered = TRUE
+  )
+}
+
+timepoint_collection_years <- c(
+  baseline = 2019L,
+  midline = 2020L,
+  endline = 2022L
+)
+
+timepoint_collection_year <- function(x) {
+  tp <- as.character(as_ordered_timepoint(x))
+  years <- unname(timepoint_collection_years[tp])
+  as.integer(years)
+}
+
+timepoint_label_with_year <- function(x, title_case = TRUE) {
+  tp <- as.character(as_ordered_timepoint(x))
+  years <- timepoint_collection_year(tp)
+  label_tp <- if (isTRUE(title_case)) str_to_title(tp) else tp
+  ifelse(
+    is.na(tp),
+    NA_character_,
+    ifelse(is.na(years), label_tp, paste0(label_tp, " (", years, ")"))
+  )
+}
+
+timepoint_label_with_year_levels <- timepoint_label_with_year(timepoint_levels)
 
 exchange_bdt_per_usd <- c(
   baseline = 84.88,
@@ -155,7 +192,7 @@ clean_timepoint_arm <- function(df) {
     mutate(
       timepoint = str_squish(str_to_lower(as.character(timepoint))),
       study_arm_overall = str_squish(str_to_lower(as.character(study_arm_overall))),
-      timepoint = factor(timepoint, levels = timepoint_levels),
+      timepoint = as_ordered_timepoint(timepoint),
       study_arm_overall = factor(study_arm_overall, levels = arm_levels)
     )
 }
@@ -174,6 +211,56 @@ make_yn <- function(x) {
   )
 }
 
+
+# Severe asthma is defined as current child wheeze plus disturbed speech during
+# wheeze. Keep true missing severity responses distinct from structurally skipped
+# severity questions among children with no wheeze, then create an explicit
+# skip-as-no sensitivity variable.
+derive_child_severe_asthma_vars <- function(df,
+                                            wheeze_var = "target_child_wheezing_yn",
+                                            speech_var = "target_child_distrubed_speech_yn") {
+  if (!all(c(wheeze_var, speech_var) %in% names(df))) {
+    return(df)
+  }
+
+  wheeze <- as.integer(df[[wheeze_var]])
+  speech <- as.integer(df[[speech_var]])
+  speech_skip_as_no <- dplyr::case_when(
+    wheeze == 0 & is.na(speech) ~ 0L,
+    TRUE ~ speech
+  )
+
+  severe_na_preserving <- dplyr::case_when(
+    wheeze == 1 & speech == 1 ~ 1L,
+    wheeze == 1 & speech == 0 ~ 0L,
+    wheeze == 0 & !is.na(speech) ~ 0L,
+    TRUE ~ NA_integer_
+  )
+
+  severe_skip_as_no <- dplyr::case_when(
+    wheeze == 1 & speech_skip_as_no == 1 ~ 1L,
+    wheeze == 1 & speech_skip_as_no == 0 ~ 0L,
+    wheeze == 0 ~ 0L,
+    TRUE ~ NA_integer_
+  )
+
+  df$target_child_disturbed_speech_missing_type <- dplyr::case_when(
+    !is.na(speech) ~ "observed_disturbed_speech",
+    wheeze == 0 ~ "structural_skip_no_wheeze",
+    wheeze == 1 ~ "true_missing_among_wheeze",
+    is.na(wheeze) ~ "missing_wheeze_or_unknown",
+    TRUE ~ "unclassified"
+  )
+  df$target_child_distrubed_speech_yn_na_preserving <- speech
+  df$target_child_disturbed_speech_yn_na_preserving <- speech
+  df$target_child_distrubed_speech_yn_skip_as_no <- speech_skip_as_no
+  df$target_child_disturbed_speech_yn_skip_as_no <- speech_skip_as_no
+  df$target_child_severe_asthma_na_preserving <- severe_na_preserving
+  df$target_child_severe_asthma_skip_as_no <- severe_skip_as_no
+  df$target_child_severe_asthma <- severe_na_preserving
+
+  df
+}
 income_30_component_vars <- c(
   "income_cash_ngo",
   "income_own_business",
