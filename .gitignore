@@ -3,6 +3,7 @@
 .RData
 .Ruserdata
 *.rds
+*.rda
 *.xls
 *.xlsx
 *.csv
@@ -17,3 +18,14 @@
 7_tables/**
 Data_review_revisions/**
 
+.Renviron
+*.docx
+*.lock
+*.error
+.Rapp.history
+desktop.ini
+*.lnk
+-1_data_analysis_host/**
+*.pdf
+*.RData*
+archive/root_loose_files_20260805/**

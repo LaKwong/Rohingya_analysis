@@ -1,0 +1,2065 @@
+---
+title: "RF105A: Analysis"
+author: "Christopher LeBoa"
+date: "2025-01-15"
+output: html_document
+---
+
+# Rohingya Fuel Analysis
+
+This file is a part of the Rohungya fuel project. Which quantifies the impact of human and environmental impacts to switching to LPG in the Rohingya refugee camps in Bangladesh.
+
+## Load packages and datasets 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list = ls())
+#install.packages("here")
+#install.packages("zoo")
+# install.packages("broom.mixed") Why is this failing? 
+# install.packages("tableone")
+# install.packages("stargazer")
+# install.packages("kableExtra")
+# install.packages("estimatr")
+# install.packages("lme4")
+# install.packages("binom")
+
+source(here::here("0_config.R")) #Configuration file 
+source(here::here("3_data_cleaning/1.5_define_vector_columns.R")) #Cleans data 
+#source(here::here("5_analysis/Dif_in_dif_fxn.R")) #Conducts difference in difference analysis 
+#Using dif in dif directly in this file with Lm robust now 
+
+library(gridExtra)
+
+# Parameters
+file_in_hansen <- here::here("2_data_raw/deforestation/hansen_deforestation_21.csv")
+file_survey_data_base <- here::here("4_data/RohingyaFuel_survey_data_triple.rds")
+file_survey_data_all <- here::here("4_data/RohingyaFuelMaster_survey_data_tidy.rds")
+#===============================================================================
+
+# Load input files
+data_hansen <- read_csv(file_in_hansen)
+survey_data <- read_rds(file_survey_data_base)
+model_data <- survey_data %>% filter(timepoint %in% c("baseline", "endline"))
+
+file_stove_on_day <- here::here("4_data/RohingyaFuel_stove_on_day_250401.csv")
+df_events_stove_on_per_day <- read_csv(file_stove_on_day)
+
+
+```
+
+# Household demographics and comparison to loss to follow up
+## HH Table 1
+This is not printed in the paper but was useful for calculating household demographic data that is described in the paper.
+```{r}
+rm(list = ls())
+source(here::here("0_config.R")) # a config file that needs to be run to load neccesary packages 
+source(here::here("3_data_cleaning/1.5_define_vector_columns.R")) # a file that defines which columns are 
+## Chris
+# source(here::here("1_config.R"))
+
+
+# Parameters
+file_survey_data_all <- here::here("4_data/RohingyaFuelMaster_survey_data_tidy.rds")
+file_survey_data_base <- here::here("4_data/RohingyaFuel_survey_data_triple.rds")
+file_survey_data_baseline <- here::here("4_data/RohingyaFuelMaster_survey_data_intervention_baseline.rds")
+
+
+file_out_1 <- here::here("4_data/study_arm_camp_id_errors_220724.csv")
+file_out_2 <- here::here("4_data/camp_block_id_errors_220724.csv")
+camp_block_id_path <- here::here("4_data/camp_block_id.csv")
+camp_block_sublock_id_path <- here::here("4_data/camp_block_sublock_id.csv")
+camp_block_subblock_id_100_largest_path <- here::here("4_data/camp_block_subblock_id_100_largest.csv")
+
+
+# Load input files
+
+survey_data_all <- 
+  read_rds(file_survey_data_all) %>%
+  mutate(electricity = ifelse(electricity == 2, 1, 0)) ## Redefine the electricity variable 
+survey_data <- 
+  read_rds(file_survey_data_base)  %>%
+  mutate(electricity = ifelse(electricity == 2, 1, 0))
+
+
+survey_data_baseline <-  # select only baseline hh for table one 
+  survey_data %>%
+  filter(timepoint == "baseline")
+
+
+survey_data %>%
+  filter(timepoint == "baseline") %>%
+  count(study_arm_overall)
+# For each baseline, midline, endline there are 305 comparison hh and 486 intervention hh
+# 791 hh with triplicate measures
+
+survey_data_hh <-
+  survey_data_all %>%
+  mutate(
+    study_arm_overall = 
+      ordered(
+        study_arm_overall,
+        labels = c("comparison group", "intervention group")
+      )
+  ) %>%
+  tabyl(timepoint, study_arm_overall)
+
+survey_data_hh %>%
+  kable(
+    caption = "Number of households surveyed at each timepoint",
+    booktabs = TRUE,
+    digits = 1,
+    align = c("l", "c", "C"),
+    format = "latex"
+  ) %>%
+  kable_styling(latex_options = c("scale_down")) 
+
+
+
+################################################################################
+# Where are the hh located?
+################################################################################
+survey_data_all %>%
+  tabyl(timepoint, camp_id, study_arm_overall)
+
+survey_data %>%
+  tabyl(timepoint, camp_id, study_arm_overall)
+
+# study_arm_overall == intervention: camp_id %in% ("8w", "9", "10)
+# study_arm_overall == comparison: camp_id %in% ("8E", "18", "3", "4", "5") # 3,4,5 are UNCHR; others are IOM
+
+
+# There are a number of hh that appear to have the wrong study_arm assigned. 
+# E.g. there are hh labeled as intervention that are in camps 3, 4, 5, 8E, which are all comparison camps
+
+study_arm_error_all <-
+  survey_data_all %>%
+  mutate(
+    anomolous = 
+      case_when(
+        timepoint == "endline" & study_arm_overall == "intervention" & camp_id == "3" ~ 1,
+        timepoint == "endline" & study_arm_overall == "intervention" & camp_id == "4" ~ 1,
+        timepoint == "endline" & study_arm_overall == "intervention" & camp_id == "5" ~ 1,
+        timepoint == "endline" & study_arm_overall == "intervention" & camp_id == "8E" ~ 1,
+        timepoint == "endline" & study_arm_overall == "comparison" & camp_id == "8W" ~ 1,
+        timepoint == "endline" & study_arm_overall == "comparison" & camp_id == "9" ~ 1,
+        timepoint == "endline" & study_arm_overall == "comparison" & camp_id == "10" ~ 1,
+        TRUE ~ 0
+      )
+  ) %>%
+  select(study_arm_overall, timepoint, camp_id, block_id, subblock_id, fcn_id, name_mahji, name_respondent, name_hh_head, target_child_name, anomolous) %>%
+  filter(anomolous == 1) %>%
+  select(-anomolous)
+
+# write.csv(study_arm_error_all, file_out_1)
+
+################################################################################
+# Where are the hh located?
+################################################################################
+# Data Cleaning 
+
+# Check for errors by examining all the data
+camp_block_id_all <-
+  survey_data_all %>%
+  # tabyl(camp_id)
+  # tabyl(camp_id, lpg_depots) # lpg_depots = "What LPG distribution center do you go to?
+  tabyl(camp_id, block_id)
+# unite(block_sub_block_id, c("block_id", "subblock_id")) %>%
+# tabyl(camp_id, block_sub_block_id)
+
+camp_block_id_all_errors <-
+  survey_data_all %>%
+  mutate(
+    anomolous = 
+      case_when(
+        camp_id == "MOJIMULLAH" ~ 1,
+        camp_id == "L18" ~ 1,
+        camp_id == "G" ~ 1,
+        camp_id == "10" & block_id == "e" ~ 1,
+        camp_id == "4" & block_id == "b" ~ 1,
+        camp_id == "8W" & block_id == "c" ~ 1,
+        camp_id == "8W" & block_id == "g" ~ 1,
+        camp_id == "9" & block_id == "b" ~ 1,
+        camp_id == "9" & block_id == "c" ~ 1,
+        camp_id == "9" & block_id == "i" ~ 1,
+        camp_id == "9" & block_id == "c" ~ 1,
+        TRUE ~ 0
+      )
+  ) %>%
+  select(study_arm_overall, timepoint, camp_id, block_id, subblock_id, fcn_id, name_mahji, name_respondent, name_hh_head, target_child_name, anomolous) %>%
+  filter(anomolous == 1) %>%
+  select(-anomolous)
+
+
+
+### Now only the paired data
+
+camp_org <-
+  survey_data %>%
+  tabyl(timepoint, camp_id, org)
+
+survey_data_all %>%
+  tabyl(timepoint, camp_id, org)
+
+
+
+camp_block_id <-
+  survey_data %>%
+  # tabyl(camp_id)
+  # tabyl(camp_id, lpg_depots) # lpg_depots = "What LPG distribution center do you go to?
+  tabyl(camp_id, block_id)
+# unite(block_sub_block_id, c("block_id", "subblock_id")) %>%
+# tabyl(camp_id, block_sub_block_id)
+
+# write.csv(camp_block_id, camp_block_id_path)
+
+
+camp_block_subblock_id <-
+  survey_data %>%
+  group_by(camp_id, block_id, subblock_id) %>% 
+  count() %>%
+  ungroup() %>%
+  arrange(camp_id, block_id, subblock_id) 
+
+camp_block_subblock_id_100_largest <-
+  camp_block_subblock_id %>%
+  arrange(desc(n)) %>%
+  slice(1:100) %>%
+  arrange(camp_id, block_id, subblock_id)
+
+
+
+###############################################################################
+# # Create dataset of households missing endline data to check for differential missingness 
+###############################################################################
+missing_from_endline_data  <- survey_data_all %>% filter(!hh_id %in% survey_data$hh_id)
+
+
+###############################################################################
+# # Create Table 1 datasets 
+###############################################################################
+
+
+survey_data_tab1 <-
+  survey_data %>%
+  filter(timepoint == "baseline") %>%
+  select(
+    c(
+      "study_arm_overall",
+      "hh_size", "hh_size_2mo_u5", "hh_size_u2mo",
+      "hh_ppl_smoke",
+      "electricity",
+      "electric_fan_yn",
+      "smartphone_yn", "mobile_phone_yn", # "radio_yn",   
+      "portable_lamp_yn", "solar_lamp_yn", 
+      
+      "mattress_yn", "blanket_yn", "mosquito_net_yn",
+      "umbrella_yn",
+      "chair_bench_yn", "table_yn", # "almirah_wardrobe_show_case_yn",
+      "shovel_yn", "sickle_yn", "weaving_tool_yn",
+      "chicken_duck_pigeon_yn",
+      "income",
+      "spent_total_month",
+      "debt",
+      "target_child_sex",
+      "target_child_months"
+    )
+  ) %>%
+  # Convert to USD
+  mutate(
+    dropped_yn = "Participated in 3 surveys",
+    income_USD = income / BDT_USD_exchange_rate_baseline,
+    spent_total_month_USD = spent_total_month/ BDT_USD_exchange_rate_baseline,
+    debt_USD = debt / BDT_USD_exchange_rate_baseline
+  ) %>%
+  select(-c(income, spent_total_month, debt)) %>%
+  select(
+    dropped_yn, study_arm_overall, target_child_sex, target_child_months,
+    hh_size, hh_size_2mo_u5, hh_size_u2mo, hh_ppl_smoke,
+    income_USD, spent_total_month_USD, debt_USD,
+    everything()
+  )
+
+
+
+survey_data_tab1_IOM <- 
+  survey_data %>%
+  filter(camp_id %in% c("8E", "8W", "9", "10", "18"))	%>% 
+  filter(timepoint == "baseline") %>%
+  select(
+    c(
+      "study_arm_overall",
+      "hh_size", "hh_size_2mo_u5", "hh_size_u2mo",
+      "hh_ppl_smoke",
+      "electricity",
+      "electric_fan_yn",
+      "smartphone_yn", "mobile_phone_yn", # "radio_yn",   
+      "portable_lamp_yn", "solar_lamp_yn", 
+      
+      "mattress_yn", "blanket_yn", "mosquito_net_yn",
+      "umbrella_yn",
+      "chair_bench_yn", "table_yn", # "almirah_wardrobe_show_case_yn",
+      "shovel_yn", "sickle_yn", "weaving_tool_yn",
+      "chicken_duck_pigeon_yn",
+      "income",
+      "spent_total_month",
+      "debt",
+      "target_child_sex",
+      "target_child_months"
+    )
+  ) %>%
+  # Convert to USD
+  mutate(
+    dropped_yn = "Participated in 3 surveys",
+    income_USD = income / BDT_USD_exchange_rate_baseline,
+    spent_total_month_USD = spent_total_month/ BDT_USD_exchange_rate_baseline,
+    debt_USD = debt / BDT_USD_exchange_rate_baseline
+  ) %>%
+  select(-c(income, spent_total_month, debt)) %>%
+  select(
+    dropped_yn, study_arm_overall, target_child_sex, target_child_months,
+    hh_size, hh_size_2mo_u5, hh_size_u2mo, hh_ppl_smoke,
+    income_USD, spent_total_month_USD, debt_USD,
+    everything()
+  )
+
+## The following hh were missing from endline data collection -- we want to create separate table object to view their assets 
+# and compare wealth to see if they are fundementally different than those included in study
+
+missing_data_tab1 <-
+  missing_from_endline_data %>%
+  filter(timepoint == "baseline") %>%
+  select(
+    c(
+      "study_arm_overall",
+      "hh_size", "hh_size_2mo_u5", "hh_size_u2mo",
+      "hh_ppl_smoke",
+      "electricity",
+      "electric_fan_yn",
+      "smartphone_yn", "mobile_phone_yn", # "radio_yn",   
+      "portable_lamp_yn", "solar_lamp_yn", 
+      
+      "mattress_yn", "blanket_yn", "mosquito_net_yn",
+      "umbrella_yn",
+      "chair_bench_yn", "table_yn", # "almirah_wardrobe_show_case_yn",
+      "shovel_yn", "sickle_yn", "weaving_tool_yn",
+      "chicken_duck_pigeon_yn",
+      "income",
+      "spent_total_month",
+      "debt",
+      "target_child_sex",
+      "target_child_months"
+    )
+  ) %>%
+  # Convert to USD
+  mutate(
+    dropped_yn = "Lost to attrition",
+    income_USD = income/ BDT_USD_exchange_rate_baseline,
+    spent_total_month_USD = spent_total_month/ BDT_USD_exchange_rate_baseline,
+    debt_USD = debt / BDT_USD_exchange_rate_baseline
+  ) %>%
+  select(-c(income, spent_total_month, debt)) %>%
+  select(
+    dropped_yn, study_arm_overall, 
+    hh_size, hh_size_2mo_u5, hh_size_u2mo, hh_ppl_smoke,
+    income_USD, spent_total_month_USD, debt_USD,
+    everything()
+  )
+
+
+###############################################################################
+# # Define variables that will be used in the tables 
+###############################################################################
+
+
+### Define the vars for the table and specify which are factors
+table1Vars <-
+  c(
+    "dropped_yn",
+    "Study arm",
+    "Target child is female", 
+    "Age of target child (mo)",
+    "Number of household members", 
+    "Number of hh members 2-59 months",
+    "Number of household members 0 to < 2 months",
+    "Number of household members who smoke",
+    "Monthly income [USD]",
+    "Monthly expenditure [USD]",
+    "Total debt [USD]",
+    "House has solar electricity",
+    "Has 1+ electric fan", 
+    "Has 1+ smartphone", 
+    "Has 1+ mobile phone",
+    # "Has 1+ radio", # Note that no family had a radio so the table has radio_yn = 0
+    "Has 1+ portable lamp",
+    "Has 1+ solar lamp",
+    "Has 1+ mattress", 
+    "Has 1+ blanket",
+    "Has 1+ mosquito net",
+    "Has 1+ umbrella", 
+    "Has 1+ chair/bench", 
+    "Has 1+ table", 
+    # "Has 1+ wardrobe", 
+    "Has 1+ shovel", 
+    "Has 1+ sickle", 
+    "Has 1+ weaving tool", 
+    "Has 1+ poultry"
+    # "Has home garden",
+
+  )
+
+
+table1FactorVars <- 
+  c(
+    "House has solar electricity",
+    "Has 1+ electric fan", 
+    "Has 1+ smartphone", 
+    "Has 1+ mobile phone",
+    "Has 1+ radio",
+    "Has 1+ portable lamp",
+    "Has 1+ solar lamp",
+    "Has 1+ mattress", 
+    "Has 1+ blanket",
+    "Has 1+ mosquito net",
+    "Has 1+ umbrella", 
+    "Has 1+ chair/bench", 
+    "Has 1+ table", 
+    # "Has 1+ wardrobe", # remove because only 3 total people have a wardrobe
+    "Has 1+ shovel", 
+    "Has 1+ sickle", 
+    "Has 1+ weaving tool", 
+    "Has 1+ poultry",
+    "Target child is female"
+  )
+
+
+# Make full dataset
+survey_all_tab1 <- 
+  survey_data_tab1 %>% 
+  bind_rows(missing_data_tab1) %>%
+  mutate(dropped_yn = ordered(dropped_yn, levels = c("Participated in 3 surveys", "Lost to attrition")))
+
+# Name datasets
+names(survey_all_tab1) <- table1Vars
+
+names(survey_data_tab1) <- table1Vars
+
+names(survey_data_tab1_IOM) <- table1Vars
+
+names(missing_data_tab1) <-  table1Vars
+
+survey_all_tab1$`Monthly income [USD]`
+
+
+###############################################################################
+# # Create Table 1 Objects
+###############################################################################
+
+
+# Get average stats for all hh
+tab1_baseline_no_study_arm <- 
+  CreateTableOne(
+    data = survey_data_tab1, 
+    vars = table1Vars, factorVars = table1FactorVars
+  )
+
+tab1_baseline_no_study_arm
+
+
+## Table 1 that was used for paper 
+
+# Compare arms among hh used for analysis (participated in all three timepoints)
+tab1_baseline <- 
+  CreateTableOne(
+    data = survey_data_tab1, 
+    vars = table1Vars, factorVars = table1FactorVars, strata = "Study arm"
+  )
+
+tab1_baseline
+
+# Compare only the hh that were in the IOM camps
+tab1_baseline_IOM <- 
+  CreateTableOne(
+    data = survey_data_tab1_IOM, 
+    vars = table1Vars, factorVars = table1FactorVars, strata = "Study arm"
+  )
+
+tab1_baseline_IOM
+
+###############################################################################
+# # Create Supplement table 2 
+###############################################################################
+
+## Supplemental table 2 code.... Comparing hh that were included in study compared to those dropped from study.
+# Compare hh that dropped compared to those that did not
+#Used to calculate the data that were missing by endline 
+tab1_missing <-  
+  CreateTableOne(data = missing_data_tab1, 
+                 vars = table1Vars, factorVars = table1FactorVars, strata = "Study arm"
+  )
+
+tab1_comparison_dropped <-  
+  CreateTableOne(data = survey_all_tab1 %>% filter(`Study arm` == "comparison"), 
+                 vars = table1Vars, factorVars = table1FactorVars, strata = "dropped_yn"
+  )
+
+tab1_comparison_dropped
+
+tab1_intervention_dropped <-  
+  CreateTableOne(data = survey_all_tab1 %>% filter(`Study arm` == "intervention"), 
+                 vars = table1Vars, factorVars = table1FactorVars, strata = "dropped_yn"
+  )
+
+tab1_intervention_dropped
+
+
+
+
+###############################################################################
+# # Save Table 1 datasets as CSVs
+###############################################################################
+
+tab1_baseline_no_study_arm_csv <- print(tab1_baseline_no_study_arm)
+write.csv(tab1_baseline_no_study_arm_csv, "tab1_baseline_no_study_arm.csv")
+
+tab1_baseline_csv <- print(tab1_baseline)
+write.csv(tab1_baseline_csv, "tab1_baseline.csv")
+
+tab1_comparison_dropped_csv <- print(tab1_comparison_dropped)
+write.csv(tab1_comparison_dropped_csv, "tab1_comparison_dropped.csv")
+
+tab1_intervention_dropped_csv <- print(tab1_intervention_dropped)
+write.csv(tab1_intervention_dropped_csv, "tab1_intervention_dropped.csv")
+```
+
+# Deforestation Analysis and Figure 1
+We collected our annual deforestation measurements by conducting an analysis on Google Earth Engine. The code for that analysis is at this link https://code.earthengine.google.com/2a498b4aeda511b70e5a0c353adad077
+With the outputs of that analysis we created the following figure showing the deforestation in the camps over time.
+```{r}
+# Figure 1: Deforestation over time
+plot_defor <- 
+  data_hansen %>%
+  mutate(
+    forest_loss_km = round(forest_loss_m / 10^6, 1), 
+    color_grp = case_when(
+      year < 2017 ~ "pre-refugee", 
+      year == 2017 | year == 2018 ~ "pre-LPG", 
+      year >= 2019 ~ "after LPG"),
+      color_grp = factor(color_grp, levels = c("pre-refugee", "pre-LPG", "after LPG"))
+    ) %>% 
+  ggplot(aes(x = year, y = forest_loss_km, fill = color_grp)) +
+  geom_hline(aes(yintercept = 4.76), color = "darkgreen", linetype = "dashed") + 
+  geom_hline(aes(yintercept = 8.83), color = "red", linetype = "solid") + 
+  geom_hline(aes(yintercept = 5.4), color = "orange", linetype = "dotdash") + 
+  geom_bar(stat = 'identity') +
+  geom_text(aes(label = forest_loss_km), vjust = -0.5) + 
+  annotate("text", x = 2002, y = 5, label = "pre-influx pre-2017") + 
+  annotate("text", x = 2002, y = 9.2, label = "pre-LPG 2017-18") + 
+  annotate("text", x = 2002, y = 5.7, label = "after LPG 2019-23") + 
+  scale_fill_manual(values = c("pre-refugee" = "darkgreen", "pre-LPG" = "red", "after LPG" = "orange")) +
+  theme_bw() + 
+  labs(
+    x = "Year", 
+    y = "Forest Loss in Cox's Bazar Peninsula (in sq. km)",
+    fill = "Period"
+  ) +
+  theme(legend.position = "top")
+
+ggsave("/Users/christopherleboa/Downloads/fig1_defor.pdf", width = 10, height = 8)
+
+# Find averages 
+data_hansen %>%
+	mutate(forest_loss_km = round(forest_loss_m / 10^6, 1)) %>% 
+	mutate(
+		group = 
+				 	case_when(
+				 		year < 2005 ~ 1, 
+				 		year >=2005 & year < 2010 ~ 2,
+				 		year >= 2010 & year < 2015 ~ 3, 
+				 		year < 2017 & year > 2014 ~ 4, 
+				 		year == 2017 ~ 2017,
+				 		year == 2018 ~ 2018,
+				 		year == 2019 ~ 2019,
+				 		year >= 2019 ~ 5, 
+				 		TRUE ~ NA_real_
+				 	)) %>% 
+	group_by(group) %>% 
+	summarise(
+		n = n(),
+		mean = mean(forest_loss_km), 
+		sd = sd(forest_loss_km)
+		) %>% 
+	mutate(
+		margin = qt(0.975,df=n-1)*sd/sqrt(n), 
+		low = mean - margin, 
+		high = mean + margin
+	)
+```
+
+# Self-reported fuel use
+
+## Fuel usage by type Data Cleaning 
+This section cleans the fuel use data and preps for figure 2 (next chunk)
+```{r}
+fuel_used_ever_bl <- 
+	survey_data %>% 
+	filter(timepoint == "baseline") %>%
+	select(
+		fcn_id,
+		study_arm_overall,
+		timepoint,
+		fuel_ever_gather_scraps,
+		fuel_ever_collect_wood,
+		fuel_ever_receive_wood,
+		fuel_ever_buy_wood,
+		fuel_ever_receive_lpg,
+		fuel_ever_buy_lpg,
+		fuel_ever_receive_crh,
+		fuel_ever_buy_crh,
+		fuel_ever_other
+	) %>%
+	pivot_longer( 
+		cols = c(
+			fuel_ever_gather_scraps,
+			fuel_ever_collect_wood,
+			fuel_ever_receive_wood,
+			fuel_ever_buy_wood,
+			fuel_ever_receive_lpg,
+			fuel_ever_buy_lpg,
+			fuel_ever_receive_crh,
+			fuel_ever_buy_crh,
+			fuel_ever_other
+		),
+		names_to = "fuel"
+	) %>%
+	mutate(value = ifelse(is.na(value), 0, value)) %>%
+	mutate(fuel = str_remove(fuel, "^.{10}")) %>%
+	mutate(
+		study_arm_overall = 
+			ordered(
+				study_arm_overall,
+				levels = c("comparison", "intervention"),
+				labels = c("Comparison group", "Intervention group")
+			)
+	) %>%
+	mutate(
+		fuel = 
+			ordered(
+				fuel,
+				levels = c("gather_scraps", "collect_wood", "buy_wood", "receive_wood", "buy_crh", "receive_crh", "buy_lpg", "receive_lpg", "other"),
+				labels = c("Scraps, gathered", "Wood, collected", "Wood, purchased", "Wood, received", "Compressed rice husks, purchased", "Compressed rice husks, received", "LPG, purchased", "LPG, received", "Plastic, collected") # We know from the qualitative interviews that Other == Plastic
+			)
+	)
+
+fuel_used_ever_bl %>% 
+  group_by(fuel, study_arm_overall) %>% 
+  summarize(sum(value, na.rm = TRUE))
+
+fuel_used_ever <- 
+	survey_data %>% 
+	filter(timepoint == "endline") %>%
+	select(
+		fcn_id,
+		study_arm_overall,
+		timepoint,
+		fuel_ever_gather_scraps,
+		fuel_ever_collect_wood,
+		fuel_ever_receive_wood,
+		fuel_ever_buy_wood,
+		fuel_ever_receive_lpg,
+		fuel_ever_buy_lpg,
+		fuel_ever_receive_crh,
+		fuel_ever_buy_crh,
+		fuel_ever_other
+	) %>%
+	pivot_longer( 
+		cols = c(
+			fuel_ever_gather_scraps,
+			fuel_ever_collect_wood,
+			fuel_ever_receive_wood,
+			fuel_ever_buy_wood,
+			fuel_ever_receive_lpg,
+			fuel_ever_buy_lpg,
+			fuel_ever_receive_crh,
+			fuel_ever_buy_crh,
+			fuel_ever_other
+		),
+		names_to = "fuel"
+	) %>%
+	mutate(value = ifelse(is.na(value), 0, value)) %>%
+	mutate(fuel = str_remove(fuel, "^.{10}")) %>%
+	mutate(
+		study_arm_overall = 
+			ordered(
+				study_arm_overall,
+				levels = c("comparison", "intervention"),
+				labels = c("Comparison group", "Intervention group")
+			)
+	) %>%
+	mutate(
+		fuel = 
+			ordered(
+				fuel,
+				levels = c("gather_scraps", "collect_wood", "buy_wood", "receive_wood", "buy_crh", "receive_crh", "buy_lpg", "receive_lpg", "other"),
+				labels = c("Scraps, gathered", "Wood, collected", "Wood, purchased", "Wood, received", "Compressed rice husks, purchased", "Compressed rice husks, received", "LPG, purchased", "LPG, received", "Plastic, collected") # We know from the qualitative interviews that Other == Plastic
+			)
+	) 
+
+fuel_used_30_days <- 
+	survey_data %>% 
+	select(
+		fcn_id,
+		study_arm_overall,
+		timepoint,
+		fuel_30_gather_scraps,
+		fuel_30_collect_wood,
+		fuel_30_receive_wood,
+		fuel_30_buy_wood,
+		fuel_30_receive_lpg,
+		fuel_30_buy_lpg,
+		fuel_30_receive_crh,
+		fuel_30_buy_crh,
+		fuel_30_other, 
+		fuel_use_non_lpg_freq_cook
+	) %>%
+	pivot_longer( 
+		cols = c(
+			fuel_30_gather_scraps,
+			fuel_30_collect_wood,
+			fuel_30_receive_wood,
+			fuel_30_buy_wood,
+			fuel_30_receive_lpg,
+			fuel_30_buy_lpg,
+			fuel_30_receive_crh,
+			fuel_30_buy_crh,
+			fuel_30_other
+		),
+		names_to = "fuel"
+	) %>%
+	mutate(value = ifelse(is.na(value), 0, value)) %>%
+	mutate(fuel = str_remove(fuel, "^.{8}")) %>%
+	mutate(
+		study_arm_overall = 
+			ordered(
+				study_arm_overall,
+				levels = c("comparison", "intervention"),
+				labels = c("Comparison group", "Intervention group")
+			), 
+		 run_out = if_else(fuel_use_non_lpg_freq_cook > 0, 1, 0)
+	) %>%
+	mutate(
+		fuel = 
+			ordered(
+				fuel,
+				levels = c("gather_scraps", "collect_wood", "buy_wood", "receive_wood", "buy_crh", "receive_crh", "buy_lpg", "receive_lpg", "other"),
+				labels = c("Scraps, gathered", "Wood, collected", "Wood, purchased", "Wood, received", "Compressed rice husks, purchased", "Compressed rice husks, received", "LPG, purchased", "LPG, received", "Plastic, collected") # We know from the qualitative interviews that Other == Plastic
+			)
+	)
+
+## Get the cost of firewood in USD/Month 
+survey_data %>% 
+  filter(buy_wood_cost > 0) %>% 
+  group_by(timepoint) %>% 
+  summarise(mean(buy_wood_cost))
+
+1032/84.88
+```
+
+## Figure 2 of self reported fuel use type by timepoint 
+This figure represents the Fuel use reported by households at each time point
+
+```{r}
+#Create figure dataset 
+fig_fuel_used_30_days_fig <- 
+fuel_used_30_days %>%
+  group_by(fuel, study_arm_overall, timepoint) %>%
+  mutate(fuel = factor(fuel, levels = c(
+    "LPG, received", "Scraps, gathered", "Wood, purchased",
+    "LPG, purchased", "Compressed rice husks, purchased",
+    "Compressed rice husks, received", "Plastic, collected"
+  ))) %>%
+  drop_na(fuel) %>% 
+  summarise(
+    prop = mean(value, na.rm = TRUE),
+    sd = sd(value, na.rm = TRUE),
+    n = n(),
+    upperE = prop + 1.96 * (sqrt(prop * (1 - prop) / n)),
+    lowerE = prop - 1.96 * (sqrt(prop * (1 - prop) / n))
+  ) %>%
+  ungroup() %>%
+  mutate(
+    fuel_method = 
+      case_when(
+        str_detect(fuel, "purchased") == TRUE~ "purchased", 
+        str_detect(fuel, "received") == TRUE~ "received", 
+        TRUE ~ "collected"
+        ), 
+    fuel_type = 
+      case_when(
+        str_detect(fuel, "LPG") == TRUE~ "LPG", 
+        str_detect(fuel, "rice") == TRUE~ "Compressed rice husks", 
+        str_detect(fuel, "Wood") == TRUE~ "Wood", 
+        str_detect(fuel, "Scraps") == TRUE~ "Wood", 
+        TRUE ~ "Plastic"
+        ),
+  fuel_method = factor(fuel_method, levels = c("purchased", "received", "collected")),
+  fuel_type = factor(fuel_type, levels = c("LPG", "Wood","Compressed rice husks", "Plastic"))
+  ) %>% 
+  ungroup()
+
+survey_data %>% 
+	select(
+		fcn_id,
+		study_arm_overall,
+		timepoint,
+		fuel_30_gather_scraps,
+		fuel_30_collect_wood,
+		fuel_30_receive_wood,
+		fuel_30_buy_wood,
+		fuel_30_receive_lpg,
+		fuel_30_buy_lpg,
+		fuel_30_receive_crh,
+		fuel_30_buy_crh,
+		fuel_30_other, 
+		fuel_use_non_lpg_freq_cook, 
+	) %>%
+	  mutate(
+	    wood = if_else(fuel_30_gather_scraps == 1 | fuel_30_buy_wood == 1 | fuel_30_collect_wood == 1 | fuel_30_receive_wood == 1, 1, 0),
+	    lpg = if_else(fuel_30_buy_lpg == 1 | fuel_30_receive_lpg == 1, 1, 0),
+	    crh = if_else(fuel_30_receive_crh == 1 | fuel_30_buy_crh == 1, 1, 0),
+	    other = if_else(fuel_30_other == 1, 1, 0)) %>% 
+	group_by(timepoint) %>%
+	summarise(
+		prop_wood = mean(wood, na.rm = TRUE), 
+		n = n(),
+		n_wood = sum(wood, na.rm = TRUE),
+		prop_lpg = mean(lpg, na.rm = TRUE), 
+		prop_crh = mean(crh, na.rm = TRUE), 
+		prop_other = mean(other, na.rm = TRUE)
+	)
+  
+  
+#fig_fuel_used_30_days_fig
+
+#Create figure 2 
+fig_fuel_used_30_days_fig %>% 
+  ggplot() +
+  geom_point(aes(x = timepoint, y = prop, color = fuel_type)) +
+  geom_line(aes(x = timepoint, y = prop, color = fuel_type, linetype = fuel_method, group = fuel)) +
+  geom_errorbar(aes(x = timepoint, ymin = lowerE, ymax = upperE, color = fuel_type), width = 0.2) +
+  scale_y_continuous(labels = scales::percent_format(), breaks = seq(0, 1, by = 0.1)) +
+  labs(
+    title = "Types of Cooking Fuel Used in the Past 30 Days,\n By Study Arm and Timepoint",
+    color = "",
+    linetype = "",
+    x = "Timepoint",
+    y = "Proportion of Households (%)"
+  ) +
+  theme_bw() +
+  theme(legend.position = "bottom",
+        legend.box = "vertical") +
+  guides(
+    color = guide_legend(nrow = 1),
+    linetype = guide_legend(nrow = 1)
+  ) +
+  facet_wrap(vars(study_arm_overall))
+
+ggsave("/Users/christopherleboa/Downloads/fig2.pdf", width = 6, height = 6)
+```
+
+## Fuel Use Summary Table 
+The information above was requested as a summary table.We have included it as a table in the supplement (SI2). The code below creates that table and saves it as a word document.
+```{r}
+table_fuel_use <- fig_fuel_used_30_days_fig %>%
+  select(fuel_type, fuel_method, study_arm_overall, timepoint, prop, lowerE, upperE) %>%
+  mutate(
+    value = sprintf("%.3f (%.3f, %.3f)", prop, lowerE, upperE)
+  ) %>%
+  select(fuel_type, study_arm_overall, fuel_method, timepoint, value) %>%
+  pivot_wider(
+    names_from = timepoint,
+    values_from = value
+  #  values_fn = ~ first(.x)
+  ) %>% arrange(fuel_type, fuel_method, study_arm_overall)
+
+library(gt)
+
+df_gt <- table_fuel_use %>%
+  mutate(
+    study_arm_overall = str_replace_all(study_arm_overall, "_", " "),
+    fuel_method = str_replace_all(fuel_method, "_", " "),
+    fuel_method = str_replace_all(fuel_method, "_", " ")
+  )
+
+pub_table <- df_gt %>%
+  gt() %>%
+  cols_move_to_start(study_arm_overall) %>%
+  tab_header(
+    title = "Fuel Use Over Time",
+    subtitle = "Proportion (95% CI)"
+  ) %>%
+  cols_label(
+    study_arm_overall = "Study arm (overall)",
+    fuel_type = "Fuel type",
+    fuel_method = "Fuel method",
+    baseline = "Baseline",
+    midline  = "Midline",
+    endline  = "Endline"
+  ) %>%
+  tab_spanner(
+    label = "Timepoint",
+    columns = c(baseline, midline, endline)
+  ) %>%
+  opt_table_outline() %>%
+  opt_all_caps()
+
+gtsave(pub_table, "/Users/christopherleboa/Library/CloudStorage/GoogleDrive-cleboa@berkeley.edu/.shortcut-targets-by-id/1g4FGyxS0paoGycT8REXc9ZEXkWLVDMJr/Rohingya_analysis/supplement_fig_2_fuel_type_table.docx") 
+```
+
+## Run Out of LPG Analysis
+The following code provides information on the households that report running out of LPG in the last month 
+```{r}
+#The overall fuel useage by timepoint 
+  fuel_used_30_days %>% 
+  group_by(fuel, study_arm_overall, timepoint) %>%
+  summarise(
+    mean.mpg = mean(value),          
+    sd.mpg = sd(value, na.rm = TRUE),
+    n.mpg = n()) %>%
+  mutate(
+    se.mpg = sd.mpg / sqrt(n.mpg),
+    lower.ci.mpg = mean.mpg - qt(1 - (0.05 / 2), n.mpg - 1) * se.mpg,
+   upper.ci.mpg = mean.mpg + qt(1 - (0.05 / 2), n.mpg - 1) * se.mpg)
+
+#Fuel Use when Run Out of LPG given 
+  fuel_used_30_days %>% 
+  group_by(fuel, timepoint, run_out) %>%
+    filter(run_out == 1) %>%
+  summarise(
+    mean = mean(value),          
+    sd = sd(value, na.rm = TRUE),
+    n = n()) %>%
+  mutate(
+    se = sd / sqrt(n),
+    lower.ci = mean - qt(1 - (0.05 / 2), n - 1) * se,
+   upper.ci = mean + qt(1 - (0.05 / 2), n - 1) * se) 
+
+#Fuel Use when Run Out of LPG given disaggregated by study arm (used for RF105B analysis)
+fuel_used_30_days %>% 
+  group_by(fuel, timepoint, study_arm_overall, run_out) %>%
+  summarise(
+    mean_use = mean(value, na.rm = TRUE),
+    sd_use   = sd(value, na.rm = TRUE),
+    n_use    = n(),
+    se_use   = sd_use / sqrt(n_use),
+    t_crit   = qt(0.975, df = n_use - 1),
+    ci_lower = mean_use - t_crit * se_use,
+    ci_upper = mean_use + t_crit * se_use,
+    .groups = "drop"
+  ) 
+
+```
+
+##Self reported stove stacking 
+This takes the data of those that use fuel other than LPG in the last 30 days and 
+```{r}
+
+#Create dataset of fuel used other than lpg
+fuel_used_30_days_wood_lpg_other <-
+  survey_data %>%
+  select(study_arm_overall, timepoint, fcn_id, contains("fuel_30")) %>%
+  group_by(study_arm_overall, timepoint) %>%
+  mutate(
+    wood = 
+      case_when( 
+        fuel_30_buy_wood == 1 ~ 1, 
+        fuel_30_collect_wood == 1 ~ 1, 
+        fuel_30_receive_wood == 1 ~ 1,
+        TRUE ~ 0
+      ),
+    biomass = 
+      case_when(
+        fuel_30_gather_scraps == 1 ~ 1, 
+        fuel_30_buy_wood == 1 ~ 1, 
+        fuel_30_collect_wood == 1 ~ 1, 
+        fuel_30_receive_wood == 1 ~ 1, 
+        fuel_30_buy_crh == 1 ~ 1,
+        fuel_30_receive_crh == 1 ~ 1, 
+        TRUE ~ 0
+      ), 
+    lpg = 
+      case_when(
+        fuel_30_buy_lpg == 1 ~ 1, 
+        fuel_30_receive_lpg == 1 ~ 1, 
+        TRUE ~ 0
+      ),
+    other = 
+      case_when( 
+        fuel_30_other == 1 ~ 1,
+        TRUE ~ 0
+      ),
+  ) %>%
+  mutate(n = 1)
+
+# Creates summary of the number of households by timepoint that used wood, lpg, or other fuel in the last 30 days and the confidence intervals around those estimates.This gets the percentage of hh that use things other than LPG and LPG among those that use more than LPG in a month 
+fuel_used_30_days_wood_lpg <- 
+  fuel_used_30_days_wood_lpg_other %>% 
+  pivot_longer(cols = c(wood, lpg), names_to = "fuel_simple", values_to = "value") %>% 
+  group_by( timepoint, fuel_simple) %>% 
+  summarise(
+    prop = mean(value),
+    sd = sd(value),
+    binom.confint(x = sum(value, na.rm = TRUE), n = sum(n), methods = "wilson")
+  ) %>%
+  ungroup() 
+
+## Reasons for stove stacking
+survey_data %>% 
+  group_by(timepoint, study_arm_overall) %>% 
+  count(buy_wood_reason)
+  
+#Intervention results 
+271/(271+31+4)
+31/(271+31+4)
+4/(271+31+4)
+
+#Comparison results 
+96/(96+11+20)
+11/(96+11+20)
+20/(96+11+20)
+
+```
+
+## Percentage of households that could not afford fuel in prior 2 weeks 
+```{r }
+#Overall results 
+	survey_data %>% 
+		group_by(study_arm_overall, timepoint) %>% 
+		summarize(
+			hh = n(),
+			num_not_afford = sum(fuel_cant_afford_2wk, na.rm = TRUE), 
+			p = (sum(fuel_cant_afford_2wk, na.rm = TRUE)) / n(),
+			margin = qnorm(0.975)*sqrt(p*(1-p)/hh), 
+			low = p - margin, 
+			high = p + margin)
+
+#endline results only 
+survey_data %>% 
+  filter(timepoint=="endline") %>% 
+  group_by(timepoint, study_arm_overall) %>% 
+  summarize(
+    hh = n(),
+    p = (sum(fuel_cant_afford_2wk, na.rm = TRUE)) / n(),
+    margin = qnorm(0.975)*sqrt(p*(1-p)/hh), 
+    low = p - margin, 
+    high = p + margin)
+
+
+########################################################################
+#Calculating the number of days before refill the hh ran out of LPG
+#######################################################################
+
+# Creates dataset with number of hh that ran out of LPG as new column 
+freq_cook <- 
+  survey_data %>% 
+  filter(!fuel_use_non_lpg_freq_cook > 200 | is.na(fuel_use_non_lpg_freq_cook)) %>% 
+  group_by(study_arm_overall, timepoint) %>% 
+  mutate(
+    run_out = if_else(fuel_use_non_lpg_freq_cook > 0, 1, 0)
+  ) 
+
+
+#Presents overall results of # of hh that ran out of lpg 
+freq_cook %>% 
+  ungroup() %>% 
+  group_by(timepoint) %>% 
+  summarize(
+    mean = mean(fuel_use_non_lpg_freq_cook,  na.rm = TRUE),    
+    sd = sd(fuel_use_non_lpg_freq_cook, na.rm = TRUE),
+    n = n(), 
+    n_out = sum(run_out, na.rm = TRUE),
+    pct_out = sum(run_out, na.rm = TRUE)/n
+  ) %>%
+  mutate(
+    se = sd/ sqrt(n),
+    lower.ci = mean - qt(1 - (0.05 / 2), n - 1) * se,
+    upper.ci = mean + qt(1 - (0.05 / 2), n - 1) * se, 
+    lower.ci.prop = pct_out - 1.96 * sqrt((pct_out/(1-pct_out)/n)), 
+    upper.ci.prop = pct_out + 1.96 * sqrt((pct_out/(1-pct_out)/n)),
+  ) 
+
+#Breaks down results of # of hh that ran out by study arm
+freq_cook %>% 
+  ungroup() %>% 
+  group_by(timepoint, study_arm_overall) %>% 
+  summarize(
+    mean = mean(fuel_use_non_lpg_freq_cook,  na.rm = TRUE),    
+    sd = sd(fuel_use_non_lpg_freq_cook, na.rm = TRUE),
+    n = n(),
+    num_out = sum(run_out, na.rm = TRUE),
+    pct_out = sum(run_out, na.rm = TRUE)/n
+  ) %>%
+  mutate(
+    
+    se = sd/ sqrt(n),
+    lower.ci = mean - qt(1 - (0.05 / 2), n - 1) * se,
+    upper.ci = mean + qt(1 - (0.05 / 2), n - 1) * se, 
+    lower.ci.prop = pct_out - 1.96 * sqrt((pct_out/(1-pct_out)/n)), 
+    upper.ci.prop = pct_out + 1.96 * sqrt((pct_out/(1-pct_out)/n)),
+  ) 
+```
+## Effect estimate of fuel change 
+This information is included in table Supplement 1.2.1
+```{r}
+# Looking at impact of fuel changes using difference in difference model 
+library(estimatr)
+
+model_fuel <- survey_data %>% 
+  filter(timepoint != "midline")
+
+model_fuel$fuel_30_gather_scraps
+
+outcomes <- c(
+ "fuel_30_gather_scraps", "fuel_30_collect_wood", "fuel_30_receive_wood", "fuel_30_buy_wood","fuel_30_receive_lpg", "fuel_30_buy_lpg", "fuel_30_receive_crh", "fuel_30_buy_crh", "fuel_30_other"
+)
+
+models <- lapply(outcomes, function(outcome) {
+  formula <- as.formula(
+    paste(outcome, "~ timepoint_num * study_arm_overall_num")
+  )
+  
+  lm_robust(
+    formula,
+    data = model_fuel,
+    clusters = fcn_id
+  )
+})
+names(models) <- outcomes
+
+# Extract DiD coefficient and CI
+did_results <- do.call(rbind, lapply(names(models), function(outcome) {
+  m <- models[[outcome]]
+  
+  coef_val <- coef(m)["timepoint_num:study_arm_overall_num"]
+  ci <- confint(m)["timepoint_num:study_arm_overall_num", ]
+  
+  data.frame(
+    outcome = outcome,
+    did_coef = coef_val,
+    ci_lower = ci[1],
+    ci_upper = ci[2]
+  )
+}))
+
+did_results
+```
+
+
+
+## Burning of plastics 
+```{r}
+########################################################################
+## Percent of households that report fuel shortages use Plastics  
+#######################################################################
+
+# Of hh that report running out of fuel 
+freq_cook %>%
+  filter(fuel_cant_afford_2wk == 1) %>% 
+  group_by(timepoint, study_arm_overall) %>%
+  mutate(
+    burn_plastic_yn = if_else(burn_plastic_frequency > 0, 1, 0), #Burn plastic at all 
+    burn_plastic_gt2 = if_else(burn_plastic_frequency > 1, 1, 0), #Burns plastic at least 2x per week 
+  ) %>%
+  summarize(
+    n_total = n(),
+    n = sum(burn_plastic_yn, na.rm = TRUE),
+    n2x = sum(burn_plastic_gt2, na.rm = TRUE),
+    prop_plastic_any = mean(burn_plastic_yn, na.rm = TRUE),
+    prop_plastic_gt2x = mean(burn_plastic_gt2, na.rm = TRUE)
+  ) 
+
+#Of hh that do not report fuel insecurity 
+freq_cook %>%
+  #filter(fuel_cant_afford_2wk == 0) %>% 
+  group_by(timepoint, study_arm_overall) %>%
+  mutate(
+    burn_plastic_yn = if_else(burn_plastic_frequency > 0, 1, 0), #Burn plastic at all 
+    burn_plastic_gt2 = if_else(burn_plastic_frequency > 1, 1, 0), #Burns plastic at least 2x per week 
+  ) %>%
+  summarize(
+    n_total = n(),
+    n = sum(burn_plastic_yn, na.rm = TRUE),
+    n2x = sum(burn_plastic_gt2, na.rm = TRUE),
+    prop_plastic_any = mean(burn_plastic_yn, na.rm = TRUE),
+    prop_plastic_gt2x = mean(burn_plastic_gt2, na.rm = TRUE)
+  ) 
+
+fuel_used_30_days %>% 
+  group_by(fuel, timepoint, study_arm_overall) %>% 
+  summarise(
+    mean = mean(value),          
+    sd = sd(value, na.rm = TRUE),
+    n_total = sum(value, na.rm = TRUE),
+    n = n())
+
+
+```
+## The types of fuel households choose when they run out of LPG
+```{r}
+  fuel_used_30_days %>% 
+  mutate(run_out = if_else(fuel_use_non_lpg_freq_cook > 0, 1, 0)) %>%
+  filter(run_out == 1) %>%
+  group_by(fuel, timepoint) %>%
+  summarise(
+    mean = mean(value),          
+    sd = sd(value, na.rm = TRUE),
+    n_ftype = sum(value, na.rm = TRUE),
+    n = n()) %>%
+  mutate(
+    se = sd / sqrt(n),
+    lower.ci = mean - qt(1 - (0.05 / 2), n - 1) * se,
+   upper.ci = mean + qt(1 - (0.05 / 2), n - 1) * se) 
+```
+
+
+## Fuel Can't Afford Coping Mechanisms 
+```{r pressure, echo=FALSE}
+# Fuel cant afford 
+survey_data %>%
+  filter(
+    fuel_cant_afford_2wk == 1,
+    !is.na(fuel_cant_afford_action),
+    study_arm_overall == "intervention",
+    timepoint == "baseline"
+  ) %>%
+  count(fuel_cant_afford_action) %>%
+#  group_by(fuel_cant_afford_action) %>%
+  mutate(
+    p = n / sum(n),
+     sum(n),
+    margin = ifelse(n > 1, qnorm(0.975) * sqrt(p * (1 - p) / n), NA),
+    low = ifelse(!is.na(margin), p - margin, NA),
+    high = ifelse(!is.na(margin), p + margin, NA)
+  ) %>%
+  arrange(desc(p))
+
+# Looking at impact of fuel changes
+model_data_dif <- 
+  model_data %>% 
+  mutate(
+     # Convert factor to character first, then apply replace_na and convert to numeric if needed
+    fuel_cant_afford_action = as.numeric(replace_na(as.character(fuel_cant_afford_action), "0")),
+    borrow_fuel = if_else(fuel_cant_afford_action == 1, 1, 0), 
+    reduce_meals = if_else(fuel_cant_afford_action == 3, 1, 0), 
+    borrow_money = if_else(fuel_cant_afford_action == 8, 1, 0), 
+    work_extra = if_else(fuel_cant_afford_action == 11, 1, 0), 
+    purchase_credit = if_else(fuel_cant_afford_action == 7, 1, 0), 
+    sold_food = if_else(fuel_cant_afford_action == 13, 1, 0), 
+    burn_plastic = if_else(burn_plastic_frequency > 0, 1, 0)
+  )
+
+model_data_dif$work_extra
+
+
+# Looking at impact of fuel changes using difference in difference model 
+library(estimatr)
+
+outcomes <- c(
+  "borrow_fuel",
+  "reduce_meals",
+  "borrow_money",
+  "purchase_credit",
+  "work_extra",
+  "sold_food", 
+  "burn_plastic"
+)
+
+models <- lapply(outcomes, function(outcome) {
+  formula <- as.formula(
+    paste(outcome, "~ timepoint_num * study_arm_overall_num")
+  )
+  
+  lm_robust(
+    formula,
+    data = model_data_dif,
+    clusters = fcn_id
+  )
+})
+names(models) <- outcomes
+
+# Extract DiD coefficient and CI
+did_results <- do.call(rbind, lapply(names(models), function(outcome) {
+  m <- models[[outcome]]
+  
+  coef_val <- coef(m)["timepoint_num:study_arm_overall_num"]
+  ci <- confint(m)["timepoint_num:study_arm_overall_num", ]
+  
+  data.frame(
+    outcome = outcome,
+    did_coef = coef_val,
+    ci_lower = ci[1],
+    ci_upper = ci[2]
+  )
+}))
+
+did_results
+
+```
+
+# Stove Use Analysis 
+We analyze the stove use in an earlier data cleaning script. Here we create the data for figure 4 and the analysis of stove use over time after receiving LPG.
+
+
+##Summary statistics for stove use
+```{r}
+#Number of total days included == the number of rows in the dataset 
+  #7577
+total_days <- 6893+544+140
+
+#Exclusive LPG days 
+6884/total_days
+#exclusive biomass days 
+552/total_days
+#mixed days 
+153/total_days
+
+df_events_stove_on_per_day <- 
+  df_events_stove_on_per_day %>% 
+  filter(processor_name == "firefinder_100_80_5_20")
+
+### The number of events by type of exclusive use day
+df_events_stove_on_per_day %>% 
+  summarise(
+    b_use = sum(exclusive_biomass), lpg_use = sum(exclusive_lpg), mix_use = sum(mixed_use)
+  )
+  
+### Use time and number of uses for each type of exclusive use day 
+output1 <- df_events_stove_on_per_day %>%
+  filter(exclusive_lpg == TRUE) %>%
+  #dplyr::group_by(processor_name) %>% 
+  dplyr::summarise(across(starts_with(c("cooking_events", "stove_on")),
+                          .fns = list(
+                            mean = ~mean(.x, na.rm = TRUE), 
+                            sd = ~sd(.x, na.rm = TRUE), 
+                            se = ~sd(.x, na.rm = TRUE)/sqrt(length(.x)),
+                            n = ~n(),
+                            ci_l = ~mean(.x, na.rm = TRUE) - (1.96 * sd(.x, na.rm = TRUE)/sqrt(n())),
+                            ci_u = ~mean(.x, na.rm = TRUE) + (1.96 * sd(.x, na.rm = TRUE)/sqrt(n())))))
+
+output2 <- df_events_stove_on_per_day %>%
+  filter(exclusive_biomass == TRUE) %>%
+ # dplyr::group_by(processor_name) %>% 
+  dplyr::summarise(across(starts_with(c("cooking_events", "stove_on")),
+                          .fns = list(
+                            mean = ~mean(.x, na.rm = TRUE), 
+                            sd = ~sd(.x, na.rm = TRUE), 
+                            se = ~sd(.x, na.rm = TRUE)/sqrt(length(.x)),
+                            n = ~n(),
+                            ci_l = ~mean(.x, na.rm = TRUE) - (1.96 * sd(.x, na.rm = TRUE)/sqrt(n())),
+                            ci_u = ~mean(.x, na.rm = TRUE) + (1.96 * sd(.x, na.rm = TRUE)/sqrt(n())))))
+
+output3 <- df_events_stove_on_per_day %>%
+  filter(mixed_use == TRUE) %>%
+ # dplyr::group_by(processor_name) %>% 
+  dplyr::summarise(across(starts_with(c("cooking_events", "stove_on")),
+                          .fns = list(
+                            mean = ~mean(.x, na.rm = TRUE), 
+                            sd = ~sd(.x, na.rm = TRUE), 
+                            se = ~sd(.x, na.rm = TRUE)/sqrt(length(.x)),
+                            n = ~n(),
+                            ci_l = ~mean(.x, na.rm = TRUE) - (1.96 * sd(.x, na.rm = TRUE)/sqrt(n())),
+                            ci_u = ~mean(.x, na.rm = TRUE) + (1.96 * sd(.x, na.rm = TRUE)/sqrt(n())))))
+
+bind_rows(output1, output2, output3)
+
+```
+
+##Data cleaning for stove use over time after receiving LPG
+
+In other papers there are reports of decreasing intervention updake over time. We want to analyze that here be looking at stove use over time 
+```{r}
+#Create a variable for number of days since self reported first receiving lpg 
+df_days_receive <- 
+  df_events_stove_on_per_day %>% 
+  mutate(
+    days_after_first_receiving = date - first_receive_lpg_ymd,
+         before_after = if_else(days_after_first_receiving< 0, "Days Before Intervention", "Days After Receiving"), 
+         before_after = factor(before_after, levels = c( "Days Before Intervention", "Days After Receiving"))
+    
+    ) %>% 
+  filter(before_after == "Days After Receiving")
+
+df_stove_exclusive_use_by_month <-
+	df_events_stove_on_per_day %>%
+	group_by(fcn_id, months_after_first_receiving, lpg_enrolled_and_receiving) %>%
+	summarise(mean = mean(exclusive_lpg == TRUE, na.rm = TRUE)) %>%
+	arrange(months_after_first_receiving)
+
+```
+
+## Energy Use Calculations
+```{r}
+# Figure 4 energy conversions 
+## In this figure we convert stove usage to MJ of use for each stove type and total 
+## This means multiplying the Time use by the efficiency of each stove and creating a total column for each 
+
+# Stove efficiencies: % Thermal efficiency 
+lpg_efficiency <- .50 #These are standards for doing stove efficiency calculations for carbon credits 
+biomass_efficiency <-.15
+
+#Sensitivity analysis for paper supplement
+lpg_efficiency_2 <- .67 #This is taken from UNHCR stove specifications from safe+2
+biomass_efficiency_2 <-.128
+#This paper says 14% for three stone file https://pubs-acs-org.libproxy.berkeley.edu/doi/10.1021/es301693f
+#we used the value for trditional stove from here https://baec.portal.gov.bd/sites/default/files/files/baec.portal.gov.bd/page/1f00cd0e_737d_4e2e_ab9f_08183800b7a2/NSA-Vol%2024-Article%201.pdf
+#This article also has traditional wood fires as between 17 and 12% efficient 
+
+#Energy Reached the pot (MJ) == (Power (KW) * Time (min)) * Thermal efficiency (%)
+
+#Convert KWH to MJ
+# 1 KWH = 3.6 MJ
+conv_mJ <- 3.6
+
+power_wood <- 6.824/conv_mJ  #KW Power of wood stove mixed start from Islam, Khanam, Rouf, and Rahaman 2012
+power_lpg <- 3.4/conv_mJ #KW  Power of LPG stove taken from UNHCR specification\
+
+#The df days receive dataset has two separate processors in it. I will keep only data with the processor `firefinder_100_80_5_20`
+
+
+## Data on Energy use 
+data_fig3 <-  
+df_days_receive %>% 
+  group_by(hh_id, days_after_first_receiving) %>%
+  filter(processor_name == "firefinder_100_80_5_20") %>% 
+  mutate(
+    stove_on_min_sum_biomass = if_else(is.na(stove_on_min_sum_biomass), 0, stove_on_min_sum_biomass), 
+    stove_on_min_sum_lpg = if_else(is.na(stove_on_min_sum_lpg), 0, stove_on_min_sum_lpg)) %>% 
+  summarise(
+    biomass = sum(stove_on_min_sum_biomass),
+    lpg = sum(stove_on_min_sum_lpg), 
+    both = if_else(mixed_use == TRUE, biomass + lpg, NA),
+    biomass = (biomass/60* power_wood), 
+    lpg = (lpg/60 * power_lpg), 
+    both = if_else(mixed_use == TRUE, biomass + lpg, NA)
+  ) %>% 
+  pivot_longer(cols = c(biomass, lpg, both), names_to = "Energy", values_to = "Energy Use (MJ)") %>%
+  filter(`Energy Use (MJ)`>0) %>% 
+   mutate(Energy = recode(Energy, both = "mixed use")) 
+
+
+# Data on energy reaching the pot 
+data_fig3.2 <- 
+df_days_receive %>% 
+  group_by(hh_id, days_after_first_receiving) %>%
+  filter(processor_name == "firefinder_100_80_5_20") %>% 
+  mutate(
+    stove_on_min_sum_biomass = if_else(is.na(stove_on_min_sum_biomass), 0, stove_on_min_sum_biomass), 
+    stove_on_min_sum_lpg = if_else(is.na(stove_on_min_sum_lpg), 0, stove_on_min_sum_lpg)) %>% 
+  summarise(
+    biomass = sum(stove_on_min_sum_biomass),
+    lpg = sum(stove_on_min_sum_lpg), 
+    both = if_else(mixed_use == TRUE, biomass + lpg, NA),
+    biomass = (biomass/60* power_wood) * biomass_efficiency, 
+    lpg = (lpg/60 * power_lpg) * lpg_efficiency, 
+    both = if_else(mixed_use == TRUE, biomass + lpg, NA)
+  ) %>% 
+  pivot_longer(cols = c(biomass, lpg, both), names_to = "Energy", values_to = "Energy Use (MJ)") %>%
+  filter(`Energy Use (MJ)`>0) %>% 
+   mutate(Energy = recode(Energy, both = "mixed use")) #Request for changing both to mixed use 
+
+
+summary_stats <- data_fig3 %>%
+  group_by(Energy) %>%
+  summarise(
+    mean_energy = mean(`Energy Use (MJ)`, na.rm = TRUE),
+    sd_energy = sd(`Energy Use (MJ)`, na.rm = TRUE),
+    n = n(),
+    se_energy = sd_energy / sqrt(n), # Standard Error
+    ci_lower = mean_energy - qt(0.975, df = n - 1) * se_energy, # 95% CI lower
+    ci_upper = mean_energy + qt(0.975, df = n - 1) * se_energy  # 95% CI upper
+  )
+
+summary_stats_3.2 <- data_fig3.2 %>%
+  group_by(Energy) %>%
+  summarise(
+    mean_energy = mean(`Energy Use (MJ)`, na.rm = TRUE),
+    sd_energy = sd(`Energy Use (MJ)`, na.rm = TRUE),
+    n = n(),
+    se_energy = sd_energy / sqrt(n), # Standard Error
+    ci_lower = mean_energy - qt(0.975, df = n - 1) * se_energy, # 95% CI lower
+    ci_upper = mean_energy + qt(0.975, df = n - 1) * se_energy  # 95% CI upper
+  )
+
+summary_stats
+
+summary_stats_3.2
+```
+
+
+#Percentage of each energy used on mixed use days
+(In response to reviewer comments about)
+```{r}
+data_fig3 %>% 
+  pivot_wider(names_from = Energy, values_from = `Energy Use (MJ)`) %>%
+  group_by(hh_id, days_after_first_receiving) %>% 
+  filter(!is.na(lpg) & !is.na(biomass)) %>% 
+  mutate(percent_lpg_energy = lpg/`mixed use`) %>% 
+  ungroup() %>% 
+  summarise(
+    mean_percent = mean(percent_lpg_energy, na.rm = TRUE), 
+    sd_percent = sd(percent_lpg_energy, na.rm = TRUE))
+
+
+data_fig3.2 %>% 
+  pivot_wider(names_from = Energy, values_from = `Energy Use (MJ)`) %>%
+  group_by(hh_id, days_after_first_receiving) %>% 
+  filter(!is.na(lpg) & !is.na(biomass)) %>% 
+  mutate(percent_lpg_energy = lpg/`mixed use`) %>% 
+  ungroup() %>% 
+  summarise(
+    mean_percent = mean(percent_lpg_energy, na.rm = TRUE), 
+    sd_percent = sd(percent_lpg_energy, na.rm = TRUE))
+
+```
+
+##Stove Use Monitoring 
+
+Figure 3 
+```{r}
+
+# Top Row of Plot
+
+fig2.3 <- 
+  df_days_receive %>% 
+  filter(fcn_id != "280680") %>% 
+   mutate(
+     biomass = if_else(!is.na(stove_on_min_sum_biomass), 1,0), 
+     lpg = if_else(!is.na(stove_on_min_sum_lpg), 1, 0)
+   ) %>% 
+  pivot_longer(cols = c(biomass, lpg), names_to = "stove_monitored", values_to = "stove_count" ) %>% 
+  group_by(days_after_first_receiving, months_after_first_receiving, before_after, stove_monitored) %>%
+  summarise(`Number Stoves Monitored`= sum(stove_count)) %>% 
+ # pivot_longer(cols = c(biomass, lpg), names_to = "Stove", values_to = "Average Percent Use") %>% 
+  ggplot(aes(x = months_after_first_receiving, y = `Number Stoves Monitored`)) +
+  geom_jitter(aes(color = stove_monitored), alpha = .4) + 
+  #facet_grid(cols = vars(before_after), scales = "free_x") + 
+  scale_x_continuous(minor_breaks = seq(0,40,12), breaks = seq(0,40,12))  +
+  scale_color_manual(values = c("red3","steelblue")) + 
+  theme_bw() + 
+  theme(legend.position = "top") + 
+  labs(y = "Number of \n stoves monitored", color = "Fuel Type", title = "",x = "")
+# Second Row of the plot
+
+#For top two rows of the graph use the mean of hh that had at least least 1 minutes of use in a day  
+fig2.1 <- 
+  df_days_receive %>% 
+  filter(fcn_id != "280680") %>% 
+  group_by(days_after_first_receiving, before_after, months_after_first_receiving) %>%
+  summarise(biomass = mean(stove_on_min_sum_biomass, na.rm = TRUE), lpg = mean(stove_on_min_sum_lpg, na.rm = TRUE)) %>% 
+  pivot_longer(cols = c(biomass, lpg), names_to = "Stove", values_to = "Average minutes of use") %>%
+ # mutate("Average Minutes of Use" = replace_na("Average Minutes of Use", 0)) %>% 
+ # filter(`Average minutes of use`>0) %>% 
+  ggplot(aes(x = months_after_first_receiving, y = `Average minutes of use`)) +
+  geom_point(aes(color = Stove), alpha = .4) + 
+  scale_color_manual(values = c("red3","steelblue")) + 
+  #facet_grid(cols = vars(before_after), scales = "free_x") + 
+  theme_bw() + 
+   scale_x_continuous(minor_breaks = seq(0,40,12), breaks = seq(0,40,12)) +
+  theme(legend.position = "none") + 
+  labs(title = "", x = "", y = "Av. minutes \nstove use per day", color = "Fuel Type")
+
+
+#Third Row of the plot 
+
+#This group of code was used to get the max number of stoves data collected from in a month 
+fig_df_stove_exclusive_use_label_group <-
+  df_stove_exclusive_use_by_month %>%
+  filter(lpg_enrolled_and_receiving == "receiving LPG through distribution program") %>%
+  group_by(months_after_first_receiving) %>%
+  summarise(
+    n = n())
+
+
+fig_df_stove_exclusive_use <-
+  df_stove_exclusive_use_by_month %>%
+  #filter(fcn_id %notin% c(df_have_geocene_but_no_survey_data_fcn_id)) %>%
+  filter(lpg_enrolled_and_receiving == "receiving LPG through distribution program") %>%
+  ggplot(aes(x = months_after_first_receiving, y = mean, color = as.factor(months_after_first_receiving))) +
+  geom_jitter(alpha = 0.4, color = "steelblue") + 
+  stat_summary(aes(group = months_after_first_receiving), geom = "linerange", fun.data = "mean_cl_boot", colour = "black") +
+  stat_summary(aes(group = months_after_first_receiving), geom = "point", fun.data = "mean_cl_boot", colour = "black", shape = 17, size = 2) +
+  # scale_color_brewer(palette = "Paired") +
+  # scale_color_manual(values = mycolors) +
+  #scale_color_manual(values = getPalette(color_count)) +
+  
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(minor_breaks = seq(0,40,12), breaks = seq(0,40,12)) +
+  # geom_text(
+  #   inherit.aes = FALSE,
+  #   aes(
+  #     x = - .5, 
+  #     y = 1.05, 
+  #     label = "n ="
+  #   )
+  # ) +
+  # geom_text(
+  #   data = fig_df_stove_exclusive_use_label_group,
+  #   inherit.aes = FALSE,
+  #   aes(
+  #     x = months_after_first_receiving, 
+  #     y = 1.05, 
+  #     label = n
+  #     # label = paste("n = ", n)
+  #   )
+  # ) +
+  theme_bw() + 
+  theme(
+    legend.position = "none"
+  ) + 
+  labs(
+    title = "",
+    x = "Months after first receiving LPG through free distribution program",
+    y = "Days per month household \ncooked exclusively with LPG (%)"
+  ) +
+  coord_cartesian(clip = "off")
+
+fig_df_stove_exclusive_use
+
+# Plot each on top of one another in larger figure using the geomExtra package
+gC <- ggplotGrob(fig2.3)
+gA <- ggplotGrob(fig2.1)
+gB <- ggplotGrob(fig_df_stove_exclusive_use)
+
+
+maxWidth = grid::unit.pmax(gA$widths[2:5], gB$widths[2:5], gC$widths[2:5])
+gA$widths[2:5] <- as.list(maxWidth)
+gB$widths[2:5] <- as.list(maxWidth)
+gC$widths[2:5] <- as.list(maxWidth)
+
+
+fig3 <-
+grid.arrange(
+  gC,
+  gA,
+  gB,
+  heights=c(1.3, 1, 1.3),
+  nrow = 3,
+  layout_matrix = rbind(c(1), c(2), c(3))
+)
+
+print(fig3)
+
+ggsave("fig3_250329.png", plot = fig3, width = 9.5, height = 9, dpi = 300)
+
+
+
+
+
+fig3.1 <-
+  data_fig3 %>% 
+  ggplot(aes(x = Energy, y = `Energy Use (MJ)`)) +
+  geom_boxplot(aes(color = Energy), alpha = 0.5) + 
+  #facet_grid(cols = vars(before_after), scales = "free_x") + 
+    # Mean with error bars using stat_summary
+  # stat_summary(
+  #   aes(color = Energy),
+  #   fun = mean,
+  #   geom = "point",
+  #   size = 3
+  # ) +
+  # Error bars for the mean
+  # stat_summary(
+  #   aes(color = Energy),
+  #   fun.data = mean_cl_normal,  # Calculates mean and CI
+  #   geom = "errorbar",
+  #   width = 0.2,
+  # ) +
+  theme_bw()+
+  theme(legend.position = "none") + 
+  scale_y_continuous(limits=c(0,20)) +
+  scale_colour_manual(values = c( "red3","steelblue", "purple")) +
+  labs(y = "Daily energy consumed (MJ/hh/day)", x = "cooking method")
+
+fig3.2 <- 
+data_fig3.2 %>% 
+  ggplot(aes(x = Energy, y = `Energy Use (MJ)`)) +
+  geom_boxplot(aes(color = Energy), alpha = 0.5) + 
+  #facet_grid(cols = vars(before_after), scales = "free_x") + 
+  #   stat_summary(
+  #   aes(color = Energy),
+  #   fun = mean,
+  #   geom = "point",
+  #   size = 3
+  # ) +
+  # Error bars for the mean
+  # stat_summary(
+  #   aes(color = Energy),
+  #   fun.data = mean_cl_normal,  # Calculates mean and CI
+  #   geom = "errorbar",
+  #   width = 0.2,
+  # ) +
+  theme_bw()+
+  theme(legend.position = "none") + 
+  scale_y_continuous(limits=c(0,20)) +
+  scale_colour_manual(values = c( "red3","steelblue", "purple")) +
+  labs(y = "Daily energy that reached the pot (MJ/hh/day)", x= "cooking method")
+
+# Plot each on top of one another in larger figure using the geomExtra package
+gA <- ggplotGrob(fig3.1)
+gB <- ggplotGrob(fig3.2)
+
+
+maxWidth = grid::unit.pmax(gA$widths[2:5], gB$widths[2:5])
+gA$widths[2:5] <- as.list(maxWidth)
+gB$widths[2:5] <- as.list(maxWidth)
+
+max(df_events_stove_on_per_day$days_after_first_receiving)
+
+#Fnd Number of hh included in the stove use analysis 
+table(df_events_stove_on_per_day$hh_id)
+
+### Print out figure 4 
+fig4 <- 
+  grid.arrange(
+  ncol = 2,
+  gA,
+  gB
+)
+
+# Combine figures 3 and 4 
+final_combined_plot <- ggarrange(
+  fig3, fig4,
+  ncol = 1,  # stack vertically
+  heights = c(3, 2),  # adjust as needed
+  labels = c("A", "B"),  # optional labels
+  align = "v"
+)
+
+# Save combined figure
+ggsave(
+  filename = "/Users/christopherleboa/Downloads/fig3_and_4_combined_no_lpg.pdf",
+  plot = final_combined_plot,
+  width = 8,
+  height = 11,
+  units = "in",
+  dpi = 300
+)
+
+
+```
+
+
+
+```{r}
+
+#Create per capita/day assessments of stove use
+hh_size_est <- survey_data %>% 
+  select(fcn_id, hh_size) %>% 
+  mutate(fcn_id = as.numeric(fcn_id)) %>%
+  left_join(df_events_stove_on_per_day, by = "fcn_id") %>%
+  mutate(
+    cooking_events_with_lpg = cooking_events_with_lpg / hh_size,
+    cooking_events_with_biomass = cooking_events_with_biomass / hh_size,
+    stove_on_min_sum_lpg = stove_on_min_sum_lpg / hh_size,
+    stove_on_min_sum_biomass = stove_on_min_sum_biomass / hh_size
+  )
+
+summary_stats <- function(df) {
+  df %>%
+    group_by(processor_name) %>% 
+    summarise(across(
+      starts_with(c("cooking_events", "stove_on")),
+      .fns = list(
+        mean = ~mean(.x, na.rm = TRUE),
+        sd = ~sd(.x, na.rm = TRUE),
+        se = ~sd(.x, na.rm = TRUE) / sqrt(sum(!is.na(.x))),
+        n = ~sum(!is.na(.x)),
+        ci_l = ~mean(.x, na.rm = TRUE) - 1.96 * sd(.x, na.rm = TRUE) / sqrt(sum(!is.na(.x))),
+        ci_u = ~mean(.x, na.rm = TRUE) + 1.96 * sd(.x, na.rm = TRUE) / sqrt(sum(!is.na(.x)))
+      ),
+      .names = "{.col}_{.fn}"
+    ))
+}
+
+output1_hh <- hh_size_est %>% filter(exclusive_lpg == 1) %>% summary_stats()
+output2_hh <- hh_size_est %>% filter(exclusive_biomass == 1) %>% summary_stats()
+output3_hh <- hh_size_est %>% filter(mixed_use == 1) %>% summary_stats()
+
+bind_rows(output1_hh, output2_hh, output3_hh)
+
+
+### Energy use per capita by fuel type 
+## Data on Energy use 
+data_fig3 <-  
+hh_size_est %>% 
+  #filter(exclusive_lpg == 1) %>% #Not best practice but I commented out this for each of the different groupings 
+  #filter(exclusive_biomass == 1) %>%
+  filter(mixed_use == 1) %>% 
+  group_by(hh_id, days_after_first_receiving) %>%
+  mutate(
+    stove_on_min_sum_biomass = if_else(is.na(stove_on_min_sum_biomass), 0, stove_on_min_sum_biomass), 
+    stove_on_min_sum_lpg = if_else(is.na(stove_on_min_sum_lpg), 0, stove_on_min_sum_lpg)) %>% 
+  summarise(
+    biomass = sum(stove_on_min_sum_biomass),
+    lpg = sum(stove_on_min_sum_lpg), 
+    both = biomass + lpg, 
+    biomass = (biomass/60* power_wood)/hh_size, 
+    lpg = (lpg/60 * power_lpg)/hh_size, 
+    both = biomass + lpg
+  ) %>% 
+  pivot_longer(cols = c(biomass, lpg, both), names_to = "Energy", values_to = "Energy Use (MJ)") %>%
+  filter(`Energy Use (MJ)`>0) %>% 
+   mutate(Energy = recode(Energy, both = "mixed use")) 
+   
+
+
+# Data on energy reaching the pot 
+data_fig3.2 <- 
+hh_size_est %>% 
+  #filter(exclusive_lpg == 1) %>%
+  #filter(exclusive_biomass == 1) %>%
+  filter(mixed_use == 1) %>% 
+  group_by(hh_id, days_after_first_receiving) %>%
+  
+  mutate(
+    stove_on_min_sum_biomass = if_else(is.na(stove_on_min_sum_biomass), 0, stove_on_min_sum_biomass), 
+    stove_on_min_sum_lpg = if_else(is.na(stove_on_min_sum_lpg), 0, stove_on_min_sum_lpg)) %>% 
+  summarise(
+    biomass = sum(stove_on_min_sum_biomass),
+    lpg = sum(stove_on_min_sum_lpg), 
+    both = biomass + lpg, 
+    biomass = (biomass/60* power_wood)/hh_size * biomass_efficiency, 
+    lpg = (lpg/60 * power_lpg)/hh_size * lpg_efficiency, 
+    both = biomass + lpg
+  ) %>% 
+  pivot_longer(cols = c(biomass, lpg, both), names_to = "Energy", values_to = "Energy Use (MJ)") %>%
+  filter(`Energy Use (MJ)`>0) %>% 
+   mutate(Energy = recode(Energy, both = "mixed use")) #Request for changing both to mixed use 
+
+
+summary_stats_hh <- data_fig3 %>%
+  group_by(Energy) %>%
+  summarise(
+    mean_energy = mean(`Energy Use (MJ)`, na.rm = TRUE),
+    sd_energy = sd(`Energy Use (MJ)`, na.rm = TRUE),
+    n = n(),
+    se_energy = sd_energy / sqrt(n), # Standard Error
+    ci_lower = mean_energy - qt(0.975, df = n - 1) * se_energy, # 95% CI lower
+    ci_upper = mean_energy + qt(0.975, df = n - 1) * se_energy  # 95% CI upper
+  )
+
+summary_stats_3.2_hh <- data_fig3.2 %>%
+  group_by(Energy) %>%
+  summarise(
+    mean_energy = mean(`Energy Use (MJ)`, na.rm = TRUE),
+    sd_energy = sd(`Energy Use (MJ)`, na.rm = TRUE),
+    n = n(),
+    se_energy = sd_energy / sqrt(n), # Standard Error
+    ci_lower = mean_energy - qt(0.975, df = n - 1) * se_energy, # 95% CI lower
+    ci_upper = mean_energy + qt(0.975, df = n - 1) * se_energy  # 95% CI upper
+  )
+
+summary_stats_hh
+summary_stats_3.2_hh
+
+```
+
+
+## Cooking event per day 
+This analysis is not included in the article but we are leaving in the public code to show the breakdown of cooking events and minutes cooking by fuel type and household fuel use type per day instead of aggregated 
+```{r}
+df_stove_on_day_long <- 
+  df_events_stove_on_per_day %>%
+  pivot_longer(cols = c("exclusive_biomass", "exclusive_lpg", "mixed_use"), names_to = "hh_fuel_use_type", values_to = "hh_type_yn") %>% 
+  mutate(hh_fuel_use_type = str_replace(hh_fuel_use_type,"_", " ")) %>% 
+  filter(hh_type_yn == "TRUE") 
+
+cooking_event_hh_day <- 
+  df_stove_on_day_long %>% 
+  pivot_longer(
+    cols = starts_with("cooking_events_with_"),
+    names_to = c("fuel_type"),
+   names_pattern = "cooking_events_with_(.*)",
+    values_to = c("event_count")
+  )  
+
+stove_on_min_hh <- 
+  df_stove_on_day_long %>% 
+  pivot_longer(
+    cols = starts_with("stove_on_min_"),
+    names_to = c("fuel_type"),
+   names_pattern = "stove_on_min_(.*)",
+    values_to = c("minutes_cooking")
+  )  %>% 
+  filter(fuel_type != "pc_lpg", fuel_type != "pc_biomass")
+
+
+#Create figures of data calculated above
+
+cooking_event_hh_day %>% 
+  ggplot(aes(x = event_count)) + 
+  geom_histogram(aes(fill = fuel_type)) + 
+    theme_bw() + 
+  theme(legend.position = "none") +
+  scale_fill_manual(values = c("red", "purple")) +
+  labs(x = "Household Cooking Events (daily)", y = "Number of Daily Measurements") + 
+
+  facet_grid(vars(hh_fuel_use_type)) 
+
+stove_on_min_hh %>% 
+  ggplot(aes(x = minutes_cooking)) + 
+  geom_histogram(aes(fill = fuel_type)) + 
+ theme_bw() +
+  theme(legend.position = "none") +
+    scale_fill_manual(values = c("red", "purple")) +
+  labs(x = "Household Minutes Cooking (daily)", y = "Number of Daily Measurements") + 
+
+  facet_grid(vars(hh_fuel_use_type))
+```
+
+## Willingness to Pay
+```{r}
+###############################################################################
+#### Willingness-to-pay #####
+###############################################################################
+
+# lpg_willingness_to_pay
+# buy_lpg_cost
+
+survey_data %>%
+  mutate(income_high_low = ifelse(income <= 3000, "income <= 3000 BDT", "income > 3000 BDT")) %>%
+  group_by(income_high_low) %>%
+  summarise(mean = mean(lpg_willingness_to_pay, na.rm = TRUE), median = median(lpg_willingness_to_pay, na.rm = TRUE))
+
+survey_data %>%
+  select(total_expenditures_30) %>%
+  summary()
+
+survey_data %>%
+  select(income) %>%
+  summary()
+
+fig_lpg_willingness_to_pay <-
+  survey_data %>%
+  filter(timepoint ==  "endline") %>% #2021 dollars
+  ggplot() +
+  geom_boxplot(aes(y = lpg_willingness_to_pay / BDT_USD_exchange_rate_endline)) + 
+  geom_hline(yintercept = 12.24, lty = 3, color = "blue") + 
+  geom_hline(yintercept = 12.24 / 2, lty = 2, color = "blue") + 
+  # Cost of cylinder in 2021 was $12.24 (https://docs.google.com/spreadsheets/d/19J8pPY7irwiH68Eh0UCEUe7m0tfD4N87/edit#gid=486556930)
+  # Bangladesh LPG price as of 12 April 2021: https://www.dhakatribune.com/bangladesh/power-energy/2021/04/12/govt-lpg-price-reset-at-tk591-private-one-at-tk975
+  theme_bw() + 
+  labs(
+    title = "Willingnes to Pay for 12 kg tank of LPG (2021 currency)",
+    y  = "Willingness to pay (USD)"
+  )
+
+fig_lpg_willingness_to_pay_high_low_income <-
+  survey_data %>%
+  mutate(income_high_low = ifelse(income <= 3000, "income <= 3000 BDT", "income > 3000 BDT")) %>%
+  filter(timepoint ==  "endline") %>% #2021 dollars
+  ggplot() +
+  geom_boxplot(aes(y = lpg_willingness_to_pay / BDT_USD_exchange_rate_endline)) + 
+  geom_hline(yintercept = 12.24, lty = 3, color = "blue") + 
+  # Cost of cylinder in 2021 was $12.24 (https://docs.google.com/spreadsheets/d/19J8pPY7irwiH68Eh0UCEUe7m0tfD4N87/edit#gid=486556930)
+  # Bangladesh LPG price as of 12 April 2021: https://www.dhakatribune.com/bangladesh/power-energy/2021/04/12/govt-lpg-price-reset-at-tk591-private-one-at-tk975
+  theme_bw() + 
+  labs(
+    title = "Willingnes to Pay for 12 kg tank of LPG (2021 currency)",
+    y  = "Willingness to pay (USD)"
+  ) +
+  facet_grid( ~ income_high_low)
+
+fig_lpg_willingness_to_pay_high_low_income
+
+#average amount willing to pay for fuel
+survey_data %>% 
+  group_by(timepoint) %>% 
+  summarise(
+    median_wtp = median(lpg_willingness_to_pay, na.rm = TRUE),
+      mean_wtp = mean(lpg_willingness_to_pay, na.rm = TRUE), 
+    pc_income = mean(lpg_willingness_to_pay, na.rm = TRUE)/mean(income, na.rm = TRUE) * 100
+  )
+
+505/BDT_USD_exchange_rate_endline #Convert to USD
+
+# Cost of cylinder in 2021 was $12.24 (https://docs.google.com/spreadsheets/d/19J8pPY7irwiH68Eh0UCEUe7m0tfD4N87/edit#gid=486556930)
+# how many were willing to pay 50% of the cost?
+# 12.24/2 * BDT_USD_exchange_rate_endline = 571.91 BDT
+
+survey_data %>% 
+  group_by(timepoint, study_arm) %>%
+  count() 
+# 931 respondents
+
+survey_data %>%
+  group_by(timepoint) %>%
+  filter(lpg_willingness_to_pay > 571) %>%
+  count()
+# 388
+
+# 388 / 931 = 41.67%
+
+ggsave(
+  here::here("6_figures", "fig_lpg_willingness_to_pay_high_low_income.tiff"),
+  plot = last_plot(),
+  scale = 1,
+  height = 6,
+  width = 10,
+  units = "in",
+  device = "tiff"
+)
+```
+
+
+
+
+# Wages by Type 
+The following code breaks down the income by group and also provides analysis comparing households between IOM and UNHCR camps.
+We use the income data in the end of results and discussion section when describing 
+```{r}
+survey_data_study_arm_group <- 
+  survey_data %>%
+  filter(timepoint == "baseline") %>% 
+  mutate(
+    study_arm_group = case_when(
+      camp_id %in% c("8W", "9", "10") ~ "Intervention IOM", 
+      camp_id %in% c("8E", "18") ~ "Comparison IOM",
+      camp_id %in% c("3","4","5") ~ "Comparison UNHCR", 
+      .default = NA
+    )) 
+
+
+## Table if incomes by study arm group 
+survey_data_study_arm_group %>% 
+ # group_by(study_arm_overall) %>% 
+  summarise_at(
+    vars(income_wage_labor, income_cash_ngo, income_humanitarian_asst, income_selling_wood, income_skill_labor, income_own_business,income_abroad, income_farming), 
+    list(
+      mean = mean, 
+      sd = sd,
+      median = median),
+      na.rm = TRUE
+  ) 
+
+survey_data_income_type <- 
+survey_data_study_arm_group %>% 
+  mutate(income_wage_labor_yn = if_else(income_wage_labor>0, 1, 0),
+         income_cash_ngo_yn = if_else(income_cash_ngo>0, 1, 0),
+         income_farming_yn = if_else(income_farming>0,1,0)) %>% 
+  count(income_wage_labor_yn, income_cash_ngo_yn, income_farming_yn)
+
+#Income by type 
+
+#Farming
+(108+11+152+3)/(494+437)
+
+#Wage
+(532+152+8+3)/(494+437)
+
+#NGO
+(86+11+8+3)/(494+437)
+```
+
+
+

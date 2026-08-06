@@ -1,0 +1,371 @@
+---
+title: "PM2.5 weighted exposures"
+author: "Chris LeBoa"
+date: "7/3/2022"
+output: html_document
+---
+## Analysis Objective
+    This file is meant to summarize PM2.5 data collected from the PATS+ particulate monitors and find the amount of time people spend inside in order to create a time weighted analysis for the HAPIT shinyapp https://householdenergy.shinyapps.io/hapit3/ which outputs the number of DALYs and deaths averted due to a clean cookstove intervention. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+
+
+#Data Preparation
+    
+##Read in data 
+
+```{r}
+
+#pm2.5 data 
+pm_data_hour_csv <- here::here("4_data/pm_data_hour.csv") #this file is created in the 1_PM2.5_analysis_rohingya.rmd file in the scripts folder
+
+pm_data_hour <- read_csv(pm_data_hour_csv)
+
+pm_data_hour %>% 
+  count(timepoint)
+
+#paired survey data 
+
+file_survey_data_base <- here::here("4_data/RohingyaFuel_survey_data_triple.rds")
+#This file is the paired survey data containing survey responses on a hh level
+
+survey_data <- read_rds(file_survey_data_base)
+
+#individual level midline survey data (at basline asked for single response per household. At midline asked for a response per hh member)
+all_files <- 
+  list.files(path = here::here("2_data_raw"), pattern = ".csv", full.names = TRUE)
+#finds all files from raw folder with .csv pattern
+
+
+selected_files <- 
+  all_files[str_detect(all_files, "location")]
+#selects files with location in the name
+
+midline_location_repeat <- 
+  selected_files %>% 
+  map_dfr(read_csv, col_types = cols(.default = "c", hours_inside = "d", hours_outside = "d"))
+#reads in all selected files 
+
+ file_location_out <- here::here("4_data/weighted_pm2.5_av.csv")
+ 
+ 
+ all_files <- 
+  list.files(path = here::here("2_data_raw/survey_endline_with_review"), pattern = ".csv", full.names = TRUE)
+#finds all files from raw folder with .csv pattern
+
+
+selected_files <- 
+  all_files[str_detect(all_files, "hh_members")]
+#selects files with location in the name
+
+endline_location_repeat <- 
+  selected_files %>% 
+  map_dfr(read_csv, col_types = cols(.default = "c", hours_inside = "d", hours_outside = "d"))
+#reads in all selected files 
+
+
+
+ file_location_out <- here::here("4_data/weighted_pm2.5_av.csv")
+
+```
+
+##Clean data 
+```{r}
+#Midline 
+midline_location_clean <- 
+midline_location_repeat %>% 
+  mutate(
+       hours_inside = if_else(is.na(hours_inside) == TRUE, 24 - hours_outside, hours_inside), 
+       hours_outside = if_else(is.na(hours_outside) == TRUE, 24 - hours_inside, hours_outside)#, 
+  ) #Some versions had only hours inside and the endline had only hours outside so setting them all to have both with inside + outside == 24
+
+#Endline 
+endline_location_clean <- 
+endline_location_repeat %>% 
+  mutate(
+       hours_inside = 24 - hours_outside, 
+       hours_outside = hours_outside 
+  )
+
+table(survey_data$study_arm)
+
+survey_data_interest <- 
+  survey_data %>% 
+  select(KEY, name_respondent, target_child_name, hh_id, study_arm, timepoint, starttime)
+#from overall survey data find columns needed to specify hh members at midline  
+```
+
+## Join data 
+```{r}
+joined_data <- 
+  midline_location_clean %>%
+  right_join(survey_data_interest, (.by = c("PARENT_KEY"= "KEY")))
+
+joined_data_end <- 
+  endline_location_clean %>%
+  right_join(survey_data_interest, (.by = c("PARENT_KEY"= "KEY")))
+
+survey_data_interest %>% 
+  count(timepoint)
+
+
+joined_data %>% 
+  count(timepoint, hours_outside)
+#join survey responses with individual level data 
+```
+
+
+### baseline results 
+At baseline we asked about the respondent and target child time outside only 
+
+###respondent time outside
+```{r}
+respondent_baseline <- 
+survey_data %>% 
+  group_by(timepoint) %>% 
+  summarise(mean_hr_outside_hh = mean(hours_outside), sd_hr_inside = sd(hours_inside)) %>% 
+  filter(!is.na(mean_hr_outside_hh)) %>% 
+  mutate(individual = "respondent", study_arm = "intervention")
+  
+
+
+
+```
+
+
+### respondent mean time outside 
+```{r}
+respondent_midline <- 
+joined_data %>% 
+  filter(location_name_roster == name_respondent) %>% 
+  group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside, na.rm = TRUE)) %>% 
+  mutate(individual = "respondent")
+```
+
+
+#target child mean time outside
+```{r}
+target_child_midline <- 
+joined_data %>% 
+  filter(location_name_roster == target_child_name) %>% 
+  group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside)) %>% 
+  ungroup() %>% 
+	group_by(timepoint) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside), sd = sd(mean_hr_outside)) %>% 
+  mutate(individual = "target child")
+```
+
+#other adult time spent outside of hh
+```{r}
+other_member_midline <- 
+joined_data %>% 
+  filter(
+    location_name_roster != target_child_name, 
+    location_name_roster != name_respondent
+    ) %>% 
+  group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside)) %>% 
+   mutate(individual = "other member")
+
+
+
+
+```
+#Endline calculations 
+```{r}
+
+respondent_endline <-  
+  joined_data_end %>% 
+  filter(name == name_respondent) %>% 
+  group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside, na.rm = TRUE)) %>% 
+  mutate(individual = "respondent")
+
+target_child_endline <- 
+  joined_data_end %>% 
+  filter(name == target_child_name) %>% 
+  group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside)) %>% 
+  mutate(individual = "target child")
+  
+  
+other_member_endline <- 
+joined_data_end %>% 
+  filter(
+    name != target_child_name, 
+    name != name_respondent
+    ) %>% 
+  group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside)) %>% 
+   mutate(individual = "other member")
+  
+```
+
+
+
+```{r}
+data_hours_outside <- 
+  bind_rows(
+    respondent_baseline,
+    respondent_midline,
+    target_child_midline, 
+    other_member_midline, 
+    respondent_endline,
+    target_child_endline, 
+    other_member_endline
+    ) %>% 
+  mutate(
+    av_time_inside = 24 - mean_hr_outside_hh,
+    pct_time_inside = av_time_inside / 24 * 100, 
+    study_arm = case_when(
+      study_arm == "pre-intervention" ~ "intervention",
+      study_arm == "post-intervention" ~ "intervention",
+      #study_arm == "intervention" ~ "comparison",   
+      study_arm == "comparison rd3" ~ "comparison", 
+      study_arm == "post-intervention rd3" ~ "intervention",
+      study_arm == "intervention follow-up" ~ "comparison",  
+      .default = NA), 
+    arm_time = str_glue("{timepoint}_{study_arm}"))
+
+```
+
+
+# PM2.5 exposures 
+instead of doing hh specificn adjusted exposures we multiplied by study mean since not all hh had sensors in them. 
+```{r}
+#Create hh av pm 2.5 dataset
+hh_av_pm2.5 <- 
+  pm_data_hour %>% 
+	group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(
+		time_range = max(dateTime_hour) - min(dateTime_hour),
+		hh_mean = mean(PM_Estimate),
+		hh_sd = sd(PM_Estimate)
+	)
+
+#summarize by study arm
+arm_mean_pm2.5 <- 
+  hh_av_pm2.5 %>% 
+	group_by(timepoint, study_arm) %>% 
+	summarise(
+		sensor_on_time = mean(time_range),
+		mean_pm2.5_hh = mean(hh_mean), 
+		sd_pm2.5_hh = sd(hh_sd)
+	) %>% 
+  mutate(
+    arm_time = str_glue("{timepoint}_{study_arm}")
+  ) %>% 
+  select(-timepoint)
+
+outdoor_pm2.5 <- 
+  arm_mean_pm2.5 %>% 
+  filter(study_arm == "outdoor") %>% 
+  transmute(
+    timepoint,
+    mean_pm2.5_outdoor = mean_pm2.5_hh
+    )
+```
+### create weighted dataset of mean pm2.5 * percent time indoors for each group 
+```{r}
+combined_hr_outside_pm_weighted <- 
+  data_hours_outside %>% 
+  left_join(arm_mean_pm2.5, by = "arm_time") %>% 
+  mutate(timepoint = timepoint.x, study_arm = study_arm.x) %>% 
+  select(-c(timepoint.y, timepoint.x, study_arm.x, study_arm.y)) %>% 
+  left_join(outdoor_pm2.5, by = "timepoint") %>% 
+  mutate(
+    weighted_mean_pm2.5_hh = 
+      mean_pm2.5_hh * (pct_time_inside/100) + 
+      mean_pm2.5_outdoor * ((100 - pct_time_inside)/100)
+    )
+
+
+
+combined_hr_outside_pm_weighted %>% 
+  select(individual, timepoint, study_arm, pct_time_inside, mean_pm2.5_hh, weighted_mean_pm2.5_hh) %>% 
+  #filter(individual == "respondent") %>% 
+  write_csv(here::here("table_hapit_slide_endline.csv"))
+#%>% 
+  # pivot_wider(names_from = timepoint, values_from = c(pct_time_inside, mean_pm2.5_hh, weighted_mean_pm2.5_hh))
+```
+
+### Time comparisons between cooking member and other hh Members
+
+Took average between baseline and midline for these 
+```{r}
+#cooking person average time outside 
+respondent_indoor <- 
+  combined_hr_outside_pm_weighted %>% 
+  filter(individual == "respondent") %>% 
+  summarise(mean(pct_time_inside)) %>% 
+  pull()
+
+#child u5 time outside hh
+child_indoor <- 
+combined_hr_outside_pm_weighted %>% 
+  filter(individual == "target child") %>% 
+  summarise(mean(pct_time_inside)) %>% 
+  pull()
+
+#other adult time outside hh
+adult_indoor <- 
+combined_hr_outside_pm_weighted %>% 
+  filter(individual == "other member") %>% 
+  summarise(mean(pct_time_inside), sd(pct_time_inside)) %>% 
+  pull()
+
+```
+
+#Exposure ratios 
+
+####Mother-Child (< 5) Exposure Ratio
+ The scaling factor applied to user-input cook pre- and post-exposures to adjust under five children's exposures. The default value of 0.80 is based on smith 2014
+ 
+Child/ respondent pct indoor ratio
+```{r}
+child_indoor/respondent_indoor
+```
+
+ 
+#### Cook to Other Adult Exposure Ratio
+ The scaling factor applied to user-input cook pre- and post-exposures to adjust non-cook adults. The default value of 0.60 is based on the ratio of the men to women's exposures as described in Smith et al 2014.
+ Other / respondent time indoor 
+ 
+```{r}
+adult_indoor/respondent_indoor
+```
+
+```{r}
+survey_data$hh_size_2mo_u5
+
+survey_data %>% 
+  group_by(timepoint) %>% 
+  summarize(
+    mean(hh_size), 
+    mean((hh_size_u2mo + hh_size_2mo_u5), na.rm = TRUE))
+```
+
+### Total hh targeted is 200,000 
+Citation is here 
+https://openaid.se/en/activities/SE-0-SE-6-12515A0102-BGD-15190

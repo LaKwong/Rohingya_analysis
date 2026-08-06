@@ -1,0 +1,1037 @@
+################################################################################
+# @Project: Rohingya analysis
+# @Author: Laura H Kwong / Chris LeBoa 
+# @Description: Firewood collection, cost of wood in the market, reasons for using wood
+
+   #Look at line 92 adding in variable to demarkate LPG timing 
+# @Date: 221005
+################################################################################
+rm(list = ls())
+source(here::here("0_config.R"))
+
+lpg_receive_date <- read_csv(here::here("2_data_raw/list_first_enrolled_lpg.csv"))
+file_in_pm_data_clean_rds <- here::here("4_data/pm_data_clean.rds")
+# source(here::here("3_data_cleaning/1.5_define_vector_columns.R")) #Pulls in all variable group names
+
+## Chris
+# source(here::here("1_config.R"))
+#install.packages("geomtextpath")
+library(tidyquant)
+library(grid)
+library(geomtextpath)
+# library(R.utils)
+# library(googledrive)
+
+
+
+# https://cran.r-project.org/web/packages/MakefileR/vignettes/demo.html
+# 
+# Outdoor monitor placement 
+# All the Outdoor monitors at the same place and same school at Intervention but
+#Pre-Intervention At 2 Mosque(camp 8W and camp 10). All the Baseline outdoor monitor
+#and midline outdoor monitor setup as the same location.Note that no different 
+#location in school and Mosque. Always had collected one location PM 2.5 data.
+
+
+
+
+#Input Files
+
+
+
+### Output Files RDS 
+# all_pm_data_path_rds <- "C:/Users/admin/Google Drive (lakwong@stanford.edu)/Rohingya/Rohingya research - Fuel/Sensors/ALL DATA/PATS+_Data_20210114.rds"
+
+# # Did HAPEX at baseline and only 8 women at midline. Dropped HAPEX because some were damaged and it wasn't very accurate anyway
+# all_hapex_data_path_rds <- "C:/Users/admin/Google Drive (lakwong@stanford.edu)/Rohingya/Rohingya research - Fuel/Sensors/Hapex_Data_20220703.rds"
+# 
+# all_hapex_data_path_csv <- "C:/Users/admin/Google Drive (lakwong@stanford.edu)/Rohingya/Rohingya research - Fuel/Sensors/Hapex_Data_20220703.csv"
+
+
+pm_data_min_rds <- here::here("4_data/pm_data_min.rds")
+
+pm_data_nearest_min_rds <- here::here("4_data/pm_data_nearest_min.rds")
+
+pm_data_hour_rds <- here::here("4_data/pm_data_hour.rds")
+
+pm_data_nearest_hour_rds <- here::here("4_data/pm_data_nearest_hour.rds")
+
+pm_data_min_csv <- here::here("4_data/pm_data_min.csv")
+
+pm_data_nearest_min_csv <- here::here("4_data/pm_data_nearest_min.csv")
+
+pm_data_hour_csv <- here::here("4_data/pm_data_hour.csv")
+
+pm_data_nearest_hour_csv <- here::here("4_data/pm_data_nearest_hour.csv")
+
+
+# Manually move the compiled file into the raw folder of the project
+all_pm_data_path_rds_project <- here::here("2_data_raw/PATS+_Data_20220703.rds")
+
+file_pm_data_hour_av_by_hh <- here::here("4_data/pm_data_hour_av_by_hh.rds")
+# file_HAPEX_data_base <- here::here("2_data_raw", "HAPEX_Data_20220703.rds")
+
+
+##############################################################################
+# Read file
+##############################################################################
+
+pm_data_full <- 
+  read_rds(file_in_pm_data_clean_rds) %>% #Read in data file of all PM2.5 data 
+	mutate(date = as_date(date)) %>% 
+  
+
+
+
+#To create teh fcn_id from the hh id we pull the last digits of the hh id 
+
+pm_data_full <- pm_data_full %>% 	mutate(fcn_id = as.numeric(str_extract(hh_id, ".{6}$") ))
+
+pm_data_full <-  
+  pm_data_full %>% left_join(lpg_receive_date, by = "fcn_id") #bind data to when hh starteds receiving lpg
+
+
+###### Edit dataset to add in the variable for who was a recent receipt 
+pm_data_full <- 
+  pm_data_full %>%  
+  mutate(date = as.Date(dateTime)) %>% 
+  #filter(date < first_receive_lpg_ymd ).             #This adds in a variable to determine LPG receipt from
+  mutate(lpg_enrolled_and_receiving = case_when(
+    date < first_receive_lpg_ymd ~ "not yet receiving LPG through distribution program", 
+    date < "2020-04-15" & date > first_receive_lpg_ymd ~ "recent receipt lpg", 
+    date > "2020-04-15" & date < "2021-01-15" ~ "midline", 
+    date > "2022-01-15" ~ "endline", 
+    .default = NA
+    ))
+  
+table(pm_data_full$time_point)
+######################
+
+head(pm_data_full)
+
+################################################################################
+# Visual the data to assess which monitors have very high spikes and when
+################################################################################
+pm_data_full %>%
+	filter(timepoint == "baseline") %>%
+	filter(study_arm == "intervention") %>%
+	ggplot(aes(dateTime, PM_Estimate, color = hh_id_note)) + # aes(nearest_min, PM_Estimate, color = hh_id_note)
+	# geom_point(na.rm = TRUE) +
+	geom_line() + 
+	# 	geom_text(aes(label = hh_id, x = as_datetime(Inf), y = PM_Estimate), hjust = -.1) + # how do I do x = Inf for datetime
+	# 	scale_colour_discrete(guide = 'none')  +    
+	#   theme(plot.margin = unit(c(1,3,1,1), "lines")) +
+	scale_x_datetime(labels = scales::date_format("%Y-%m-%d")) + # "%Y-%m-%d %H:%M" # labels = scales::date_format("%H:%M")
+	theme(
+		legend.position = "none"
+	) + 		
+	labs(
+		title = "midline_intervention"
+	) +
+	facet_wrap(date ~ ., scales = "free")
+
+pm_data_high_monitors <-
+	pm_data_full %>%
+	filter(PM_Estimate > 3000) %>%
+	select(timepoint, study_arm, hh_id) %>%
+	unique()
+
+pm_data_very_high_monitors <-
+	pm_data_full %>%
+	filter(PM_Estimate > 10000) %>%
+	select(timepoint, study_arm, hh_id) %>%
+	unique()
+
+
+
+
+# At baseline, ~100 PM monitors had values > 3000, this was probably biomass. 	
+pm_data_full %>%
+	filter(
+		hh_id %in% 
+			c(
+				pm_data_high_monitors %>% filter(timepoint == "baseline", study_arm == "comparison") %>% pull(hh_id)
+			)
+	) %>%
+	filter(timepoint == "baseline") %>%
+	filter(study_arm == "comparison") %>%
+	ggplot(aes(dateTime, PM_Estimate, color = hh_id)) + # aes(nearest_min, PM_Estimate, color = hh_id_note)
+	# geom_point(na.rm = TRUE) +
+	geom_line() + 
+	# geom_textline(aes(
+	# 	x = dateTime, y = PM_Estimate, colour = hh_id, label = hh_id
+	# ),
+	# hjust = 1
+	# ) +
+	scale_x_datetime(labels = scales::date_format("%Y-%m-%d")) + # "%Y-%m-%d %H:%M" # labels = scales::date_format("%H:%M")
+	labs(
+		title = "baseline_comparison"
+	) +
+	facet_wrap(date ~ ., scales = "free")
+
+pm_data_full %>%
+	filter(
+		hh_id %in% 
+			c(
+				pm_data_high_monitors %>% filter(timepoint == "baseline", study_arm == "intervention") %>% pull(hh_id)
+			)
+	) %>%
+	filter(timepoint == "baseline") %>%
+	filter(study_arm == "intervention") %>%
+	ggplot(aes(dateTime, PM_Estimate, color = hh_id)) + # aes(nearest_min, PM_Estimate, color = hh_id_note)
+	# geom_point(na.rm = TRUE) +
+	geom_line() + 
+	# geom_textline(aes(
+	# 	x = dateTime, y = PM_Estimate, colour = hh_id, label = hh_id
+	# ),
+	# hjust = 1
+	# ) +
+	scale_x_datetime(labels = scales::date_format("%Y-%m-%d")) + # "%Y-%m-%d %H:%M" # labels = scales::date_format("%H:%M")
+	labs(
+		title = "baseline_intervention"
+	) +
+	facet_wrap(date ~ ., scales = "free")
+
+
+# midlline	
+pm_data_full %>%
+	filter(
+		hh_id %in% 
+			c(
+				pm_data_high_monitors %>% filter(timepoint == "midline", study_arm == "comparison") %>% pull(hh_id)
+			)
+	) %>%
+	filter(timepoint == "midline") %>%
+	filter(study_arm == "comparison") %>%
+	ggplot(aes(dateTime, PM_Estimate, color = hh_id)) + # aes(nearest_min, PM_Estimate, color = hh_id_note)
+	# geom_point(na.rm = TRUE) +
+	geom_line() + 
+	# geom_textline(aes(
+	# 	x = dateTime, y = PM_Estimate, colour = hh_id, label = hh_id
+	# ),
+	# hjust = 1
+	# ) +
+	scale_x_datetime(labels = scales::date_format("%Y-%m-%d")) + # "%Y-%m-%d %H:%M" # labels = scales::date_format("%H:%M")
+	labs(
+		title = "midline_comparison"
+	) + 
+	facet_wrap(date ~ ., scales = "free")
+
+pm_data_full %>%
+	filter(
+		hh_id %in% 
+			c(
+				pm_data_high_monitors %>% filter(timepoint == "midline", study_arm == "intervention") %>% pull(hh_id)
+			)
+	) %>%
+	filter(timepoint == "midline") %>%
+	filter(study_arm == "intervention") %>%
+	ggplot(aes(dateTime, PM_Estimate, color = hh_id)) + # aes(nearest_min, PM_Estimate, color = hh_id_note)
+	# geom_point(na.rm = TRUE) +
+	geom_line() + 
+	# geom_textline(aes(
+	# 	x = dateTime, y = PM_Estimate, colour = hh_id, label = hh_id
+	# ),
+	# hjust = 1
+	# ) +
+	scale_x_datetime(labels = scales::date_format("%Y-%m-%d")) + # "%Y-%m-%d %H:%M" # labels = scales::date_format("%H:%M")
+	labs(
+		title = "midline_intervention"
+	) +
+	facet_wrap(date ~ ., scales = "free")
+
+# endline
+pm_data_full %>%
+	filter(
+		hh_id %in% 
+			c(
+				pm_data_high_monitors %>% filter(timepoint == "endline", study_arm == "comparison") %>% pull(hh_id)
+			)
+	) %>%
+	filter(timepoint == "endline") %>%
+	filter(study_arm == "comparison") %>%
+	ggplot(aes(dateTime, PM_Estimate, color = hh_id)) + # aes(nearest_min, PM_Estimate, color = hh_id_note)
+	# geom_point(na.rm = TRUE) +
+	geom_line() + 
+	# geom_textline(aes(
+	# 	x = dateTime, y = PM_Estimate, colour = hh_id, label = hh_id
+	# ),
+	# hjust = 1
+	# ) +'
+	scale_x_datetime(labels = scales::date_format("%Y-%m-%d")) + # "%Y-%m-%d %H:%M" # labels = scales::date_format("%H:%M")
+	labs(
+		title = "endline_comparison"
+	) +
+	facet_wrap(date ~ ., scales = "free")
+
+pm_data_full %>%
+	filter(
+		hh_id %in% 
+			c(
+				pm_data_high_monitors %>% filter(timepoint == "endline", study_arm == "intervention") %>% pull(hh_id)
+			)
+	) %>%
+	filter(timepoint == "endline") %>%
+	filter(study_arm == "intervention") %>%
+	ggplot(aes(dateTime, PM_Estimate, color = hh_id)) + # aes(nearest_min, PM_Estimate, color = hh_id_note)
+	# geom_point(na.rm = TRUE) +
+	geom_line() + 
+	# geom_textline(aes(
+	# 	x = dateTime, y = PM_Estimate, colour = hh_id, label = hh_id
+	# ),
+	# hjust = 1
+	# ) +
+	scale_x_datetime(labels = scales::date_format("%Y-%m-%d")) + # "%Y-%m-%d %H:%M" # labels = scales::date_format("%H:%M")
+	labs(
+		title = "endline_intervention"
+	) +
+	facet_wrap(date ~ ., scales = "free")
+
+
+pm_data_full %>%
+	filter(
+		hh_id %in% 
+			c(
+				pm_data_very_high_monitors %>% filter(timepoint == "endline", study_arm == "intervention") %>% pull(hh_id)
+			)
+	) %>%
+	filter(timepoint == "endline") %>%
+	filter(study_arm == "intervention") %>%
+	ggplot(aes(dateTime, PM_Estimate, color = hh_id)) + # aes(nearest_min, PM_Estimate, color = hh_id_note)
+	# geom_point(na.rm = TRUE) +
+	geom_line() + 
+	# geom_textline(aes(
+	# 	x = dateTime, y = PM_Estimate, colour = hh_id, label = hh_id
+	# ),
+	# hjust = 1
+	# ) +
+	scale_x_datetime(labels = scales::date_format("%Y-%m-%d")) + # "%Y-%m-%d %H:%M" # labels = scales::date_format("%H:%M")
+	labs(
+		title = "endline_intervention"
+	) +
+	facet_wrap(date ~ ., scales = "free")
+
+
+
+# Very high PM (PM> 10,000)
+pm_data_full %>%
+	filter(
+		hh_id %in% 
+			c(
+				pm_data_very_high_monitors %>% filter(timepoint == "midline") %>% pull(hh_id)
+			)
+	) %>%
+	filter(timepoint == "midline") %>%
+	select(timepoint, study_arm, date, hh_id) %>%
+	distinct() %>% 
+	arrange(desc(date), hh_id) #%>%
+#	View()
+
+
+pm_data_full %>%
+	filter(
+		hh_id %in% 
+			c(
+				pm_data_very_high_monitors %>% filter(timepoint == "endline") %>% pull(hh_id)
+			)
+	) %>%
+	filter(timepoint == "endline") %>%
+	select(timepoint, study_arm, date, hh_id) %>%
+	distinct() %>% 
+	arrange(desc(date), hh_id) # %>%
+# 	View()
+
+
+# Temp
+# https://www.timeanddate.com/weather/@1337202/historic?month=2&year=2022
+pm_data_full %>%
+	filter(timepoint == "endline") %>%
+	filter(nearest_min == "2000-01-01 00:00:00") %>%
+	select(timepoint, hh_id, PM_Estimate, dateTime) 
+
+
+# 10H55286043 PM peak at 16:30 am which was preceeded by 1.5 hours of cooking with LPG
+# 10HH55285946 PM peak of 26277 at 7:19 am which was aligned with a BIOMASS cooking event
+# 8WDI18100999 PM low peaks of 500 for hours and 1750 pm peak at 6 am on 20220204
+
+
+pm_data_full %>%
+	filter(timepoint == "endline") %>%
+	filter(hh_id == "8WDI18100999") %>%
+	filter(PM_Estimate == max(PM_Estimate)) %>%
+	select(timepoint, hh_id, PM_Estimate, dateTime)
+
+pm_data_full %>%
+	filter(timepoint == "endline") %>%
+	filter(hh_id == "8WDI18100999") %>%
+	# filter(dateTime > as_datetime("2022-04-20"), dateTime < as_datetime("2022-04-21")) %>%
+	ggplot(aes(dateTime, PM_Estimate, color = hh_id)) +
+	geom_line() + 
+	scale_x_datetime(labels = scales::date_format("%y-%m-%d %Hh")) + 
+	theme(
+		legend.position = "none"
+	) # +
+
+
+pm_data_full %>%
+	# filter(study_arm == "pre-intervention") %>%
+	filter(
+		note %in% c("mosque", "school")
+	) %>% # PM07745L_20191115_1_4F180644and PM07776R_20191115_1_4F180644_QC; PM07781I_20191115_1_4F296441 and PM07782G_20191115_1_4F296441_QC
+	# filter(dateTime_min > "2019-09-25", dateTime_min < "2019-09-26") %>%
+	ggplot(aes(dateTime, PM_Estimate, color = hh_id_note)) + # aes(nearest_min, PM_Estimate, color = hh_id_note)
+	geom_point(na.rm = TRUE) +
+	# geom_hline(yintercept = 100, color = "grey", lty = 2) + 
+	# geom_hline(yintercept = 500, color = "black", lty = 2) +
+	scale_x_datetime(labels = scales::date_format("%Y-%m-%d")) + # "%Y-%m-%d %H:%M" # labels = scales::date_format("%H:%M")
+	# theme(
+	# 	legend.position = "none"
+	# ) 
+	# facet_grid(hh_id ~ ., scales = "free")
+	facet_wrap(hh_id_note ~ ., scales = "free")
+
+# pm_data_min$hh_id_note %>% unique()
+
+pm_data_full %>%
+	# filter(study_arm == "pre-intervention") %>%
+	filter(
+		note %in% c("mosque", "school")
+	) %>% 
+	group_by(hh_id_note) %>%
+	summarise(min = min(PM_Estimate, na.rm =  TRUE), max = max(PM_Estimate, na.rm = TRUE))
+
+
+# Do NOT use geom_line because it make it look like the monitor was on in between these testing days
+
+# # Check the dates, label for post-intervention (after baseline data was collected in Nov 2019)
+# 
+# https://docs.google.com/spreadsheets/d/1d32F3Tqwl1bEz-jz-UV9SZX8_nH4CEyWZ1nQjzJeZXI/edit#gid=0
+# 
+# timepoint	study_arm	date_start_sensor_installation	date_end_sensor_installation	Number_hh_indoor_monitoring	cold_during_timeperiod?	dengue_during_timeperiod?	fire_during_timeperiod?	other_notes
+# Baseline	Intervention		14 September 2019		28 October 2019			114	no	yes, April 2019 to September 2019		All the time in Bangladesh have the mosquito problem in any where
+# Baseline	Comparison			31 October 2019			15 November 2019		67	yes	yes, April 2019 to September 2019		
+# Midline	Intervention			01 October 2020			13 October 2020			52	no			
+# Midline	Comparison				13 October 2020			27 October 2020			53	no			
+# Endline	Intervention			03 February 2022		19 April 2022				128	yes in Feb, maybe in March if hh has old person; no April	Dengue outbreak so many people burning mosquito coils	8 March 400 hh burn in camp xxx
+# # 24 March, low was 25C high was 35C
+# Endline	Comparison				14 May 2022					5 June 2022					54	no	Dengue outbreak so many people burning mosquito coils		
+
+
+
+
+# drop the endline data that was during the cold season --> we'll analyze this separately
+pm_data <-
+	pm_data_full %>%
+	filter(!(date > as_date("2022-02-02") & date < as_date("2022-03-24")))
+
+
+# Sample size
+# Now that we know the quality of the files is fine, determine the size of the data analysis sets
+pm_data_hour_per_monitor <-
+	pm_data %>%
+	group_by(timepoint, study_arm, note, hh_id, hh_id_note, dateTime_hour) %>%
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	group_by(timepoint, study_arm, note, hh_id, hh_id_note) %>%
+	count() %>%
+	ungroup() %>%
+	rename(hours_recording = n)
+
+pm_data_hour_per_monitor %>%
+	filter(note %notin% c("qc", "insufficient data")) %>%
+	group_by(timepoint, study_arm) %>%
+	summarise_at(
+		vars(hours_recording),
+		list(total_hours = sum, mean_hours = mean, median_hours = median)
+	) %>%
+	left_join(
+		pm_data %>%
+			filter(note %notin% c("qc", "insufficient data")) %>%
+			distinct(timepoint, study_arm, hh_id) %>%
+			group_by(timepoint, study_arm) %>%
+			count(),
+		by = c("timepoint", "study_arm")
+	) %>%
+	select(timepoint, study_arm, n, everything())
+
+
+
+# Baseline
+# Intervention group: n = 109, hr = 5709, mean = 52 hr/hh
+# Comparison group: n = 63, hr = 3289, mean = 52 hr/hh
+# Outdoor group: n = 3, hr = 856, mean = 285 hr/location
+# 
+# midline
+# Intervention group: n = 48, hr = 2413, mean = 50.3 hr/hh
+# Comparison group: n = 39, hr = 2046, mean = 52.5 hr/hh
+# Outdoor group: n = 3, hr = 369, mean = 123 hr/location
+# 
+# endline if drop intervention between  > 2022-02-1 to < 2022-04-01 (last date collecte was 3-24)
+# Intervention group: n = 32, hr = 1723, mean = 52.0 hr/hh
+# Comparison group: n = 48, hr = 2541, mean = 52.9 hr/hh
+# Outdoor group: n = 2, hr = 488, mean = 244 hr/location # were some of the outdoor mislabeled? should still only have 3 locations
+
+#### vs ####
+
+# endline if drop intervention between  > 2022-02-1 to < 2022-03-15
+# Intervention group: n = 58, hr = 3100, mean = 54.3 hr/hh
+# Comparison group: n = 48, hr = 2541, mean = 52.9 hr/hh
+# Outdoor group: n = 3, hr = 649, mean = 216 hr/location # were some of the outdoor mislabeled? should still only have 3 locations
+
+# Create analysis datasets
+
+# uses the actual minute (always rounds down to the nearest min)
+pm_data_min <-
+	pm_data %>%
+	filter(note != "insufficient data") %>%
+	group_by(timepoint, study_arm, note, hh_id, hh_id_note, dateTime_min) %>%
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	ungroup()
+
+# rounds to the nearest min (up or down)
+pm_data_nearest_min <-
+	pm_data %>%
+	filter(note != "insufficient data") %>%
+	group_by(timepoint, study_arm, note, hh_id, hh_id_note, nearest_min) %>% # collapses all if they have the same date label, so I hope they don't!
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	ungroup()
+
+
+# uses the actual hour (always rounds down to the nearest hour)
+pm_data_hour <-
+	pm_data %>%
+	filter(note != "insufficient data") %>%
+	group_by(timepoint, study_arm, note, hh_id, hh_id_note, dateTime_hour) %>%
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	ungroup() %>%
+	mutate(
+		over_100 = if_else(PM_Estimate > 100, 1, 0),
+		over_500 = if_else(PM_Estimate > 500, 1, 0)
+	)
+
+# rounds to the nearest hour (up or down)
+pm_data_nearest_hour <-
+	pm_data %>%
+	filter(note != "insufficient data") %>%
+	group_by(timepoint, study_arm, note, hh_id, hh_id_note, nearest_hour) %>%
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	ungroup() %>%
+	mutate(
+		over_100 = if_else(PM_Estimate > 100, 1, 0),
+		over_500 = if_else(PM_Estimate > 500, 1, 0)
+	)
+
+###############################################################################
+## Save data
+###############################################################################
+
+pm_data_min %>%
+	saveRDS(pm_data_min_rds)
+
+pm_data_nearest_min %>%
+	saveRDS(pm_data_nearest_min_rds)
+
+pm_data_hour %>%
+	saveRDS(pm_data_hour_rds)
+
+pm_data_nearest_hour %>%
+	saveRDS(pm_data_nearest_hour_rds)
+
+write.csv(pm_data_min, pm_data_min_csv)
+
+write.csv(pm_data_nearest_min, pm_data_nearest_min_csv)
+
+write.csv(pm_data_hour, pm_data_hour_csv)
+
+write.csv(pm_data_nearest_hour, pm_data_nearest_hour_csv)
+
+
+
+
+
+
+
+
+
+# Plot min-by-min data
+pm_data_min %>%
+	filter(note %notin% c("qc", "insufficient data")) %>%
+	ggplot(aes(dateTime_min, PM_Estimate, color = hh_id)) +
+	geom_line(na.rm = TRUE) +
+	# geom_hline(yintercept = 100, color = "grey", lty = 2) + 
+	# geom_hline(yintercept = 500, color = "black", lty = 2) +
+	theme(
+		legend.position = "none"
+	) + 
+	facet_grid( ~ study_arm, scales = "free_y")
+
+pm_data_nearest_min %>%
+	filter(note %notin% c("qc", "insufficient data")) %>%
+	ggplot(aes(nearest_min, PM_Estimate, color = hh_id)) +
+	geom_line(na.rm = TRUE) +
+	# geom_hline(yintercept = 100, color = "grey", lty = 2) +
+	# geom_hline(yintercept = 500, color = "black", lty = 2) +
+	scale_x_datetime(labels = scales::date_format("%H:%M")) +
+	theme(
+		legend.position = "none"
+	) +
+	facet_grid( ~ study_arm, scales = "free_y")
+
+
+# Note that day 1 800 hr and day 2 800 hr are both plotted, so this graph has 2x as many points as study hh. 
+pm_data_hour %>%
+	filter(timepoint == "endline") %>%
+	filter(note %notin% c("qc", "insufficient data")) %>%
+	ggplot(aes(dateTime_hour, PM_Estimate, color = hh_id)) +
+	geom_line(na.rm = TRUE) +
+	
+	geom_point(aes(alpha = 0.1)) +
+	
+	geom_hline(yintercept = 100, color = "grey", lty = 2) + 
+	geom_hline(yintercept = 500, color = "black", lty = 2) +
+	theme(
+		legend.position = "none"
+	) + 
+	facet_grid( ~ study_arm, scales = "free")
+
+pm_data_nearest_hour %>%
+	filter(note %notin% c("qc", "insufficient data")) %>%
+	ggplot(aes(nearest_hour, PM_Estimate, color = hh_id)) +
+	geom_line(na.rm = TRUE) +
+	geom_hline(yintercept = 100, color = "grey", lty = 2) +
+	geom_hline(yintercept = 500, color = "black", lty = 2) +
+	scale_x_datetime(labels = scales::date_format("%H:%M")) +
+	theme(
+		legend.position = "none"
+	) +
+	facet_grid( ~ study_arm, scales = "free")
+
+pm_data_nearest_hour %>%
+	filter(note %notin% c("qc", "insufficient data")) %>%
+	group_by(study_arm, nearest_hour) %>%
+	summarise(PM_Estimate_mean = mean(PM_Estimate)) %>%
+	ggplot(aes(nearest_hour, PM_Estimate_mean, color = study_arm)) +
+	geom_line(na.rm = TRUE) +
+	geom_hline(yintercept = 100, color = "black", lty = 2) +
+	geom_hline(yintercept = 500, color = "black", lty = 2) +
+	scale_x_datetime(labels = scales::date_format("%H:%M")) +
+	viridis::scale_color_viridis(
+		discrete = TRUE,
+		name = "Study arm",
+		breaks = c("intervention", "comparison", "outdoor"),
+		labels = c("intervention", "comparison", "Outdoor")
+	) +
+	labs(
+		title = "PM 2.5 measurement by hour of the day",
+		x = "Time",
+		y = "PM 2.5 (ug/m3)"
+	) +
+	theme_classic()
+
+
+
+
+# pm_data_nearest_min %>%
+# 	filter(note != "qc") %>%
+# # replace 2000-01-02 with 2000-01-10 e.g. 2000-01-01 07:26:00      2000-01-02 07:26:00
+# 	mutate(nearest_min_correct = str_replace(nearest_min, pattern = "2000-01-02", replacement = "2000-01-01")) %>% # # study_arm = str_extract(str_extract(file_name, "^(?:[^_]*_){2}[0-9]{1}"), "[0-9]$")
+# 	arrange(desc(nearest_min))
+
+
+# day_time_lims <- as.POSIXct(strptime(c("2000-01-01 00:00", "2000-01-01 23:59"), format = "%Y-%m-%d %H:%M"))
+table(pm_data$time_point)
+
+fig_pm_day <-
+	pm_data_full %>% # 1,039,924 rows of data (each is every 10 seconds)
+	filter(note %notin% c("qc", "insufficient data")) %>% 
+	
+	# Each hh will get get only one observation, which is the average of the PM at that min for however many days they were measured
+	group_by(timepoint, study_arm, nearest_min) %>%
+	summarise(PM_Estimate_av = mean(PM_Estimate, na.rm = TRUE), sd_pm_estimate = sd(PM_Estimate, na.rm = TRUE)) %>% 
+# 
+# fig_pm_day$sd_pm_estimate 
+
+
+	
+	ungroup() %>%
+	# filter(study_arm == "outdoor") #Trying to see if i can split outdoor by intervention / non intervention
+	# view()
+	
+	#count(study_arm)
+	
+	# sample_n(100000) %>% # sampling only 10% of the data makes the CI appear, but I still don't see why they don't appear earlier! Are the se really so small they can't be seen?
+	
+	# slice(1:1000) %>%
+	# group_by(study_arm, nearest_min) %>% 
+	# arrange(desc(study_arm)) %>% 
+	
+	# arrange(timepoint, study_arm, note, hh_id, nearest_hour) %>% filter(note %in% c("school", "mosque")) %>% View()
+	
+# 	dateTime_min = round_date(dateTime, unit = "minute"),
+# dateTime_min = as.POSIXct(dateTime_min) + 6 * 60 * 60, # , tz = "Asia/Dhaka"
+# dateTime_hour = round_date(dateTime, unit = "hour"),
+# dateTime_hour = as.POSIXct(dateTime_hour) + 6 * 60 * 60, # , tz = "Asia/Dhaka"
+
+# # make a consistent day (KEEPING ALL THE DATA, NOT AVERAGING OVER Multiple same minutes of different day)
+# mutate(
+# 	nearest_min =  as.POSIXct(paste("2000-01-01", paste(hour(ymd_hms(dateTime_hour)), minute(ymd_hms(dateTime_min)), sep = ":"))),
+# 	nearest_hour = as.POSIXct(paste("2000-01-01", paste(hour(ymd_hms(dateTime_hour)), "00", sep = ":")))
+# ) %>%
+
+ggplot(aes(nearest_min, PM_Estimate_av, color = study_arm, group = study_arm)) + # , fill = study_arm
+	geom_point(alpha = 0.001) +
+	# geom_jitter(alpha = 0.1, width = 1500, height = 0) + # This width was trial and error
+  #geom_smooth(method = "lm_robust", span = 0.1, se = TRUE) + # default is loess for <1000 points, gam (?),  local polynomial regression fitting, # 	`geom_smooth()` using method = 'gam' and formula 'y ~ s(x, bs = "cs")'
+	#geom_smooth(span = 0.1, se = TRUE) +
+  geom_smooth(se = TRUE) +
+	# stat_smooth(level = 0.95, aes(fill = study_arm)) + 
+	# stat_summary(geom = "ribbon", fun.data = "mean_cl_boot", alpha = 0.1) + # this does not work
+	# stat_summary(geom = "line", fun = mean) +
+	# stat_summary(geom = "smooth", fun.data = mean_cl_boot) +
+	# geom_smooth(stat = 'summary', fun.data = mean_cl_boot) + 
+	# span = alpha controls the size of the neighborhood used for estimating the point in question
+	# geom_line(na.rm = TRUE) +
+	# 	geom_smooth(
+	#   	stat = 'summary', 
+	#   	# color = 'red', fill = 'red', 
+#   	alpha = 0.5, 
+#     fun.data = median_hilow, # Hmisc::smedian.hilow, computes the sample median and a selected pair of outer quantiles having equal tail areas
+#   	fun.args = list(conf.int = 0.5) # plots the 25th and 75th percentiles, for max and min use conf.int = 1
+#   	) +
+geom_hline(yintercept = 25, color = "red", lty = 2) +
+	# annotate("text", x = 0, y = 25, label = "25") +
+	geom_hline(yintercept = 100, color = "black", lty = 2) +
+	geom_hline(yintercept = 500, color = "black", lty = 2) +
+	scale_x_datetime(
+		labels = scales::date_format("%H:%M", tz = "Asia/Dhaka"), # tz = "Asia/Dhaka"
+		breaks = scales::date_breaks("4 hours"),
+		# limits = day_time_lims,
+		expand = c(0, 0)
+	) +
+	scale_y_log10(breaks = c(10, 25, 100, 300), labels = c(10, 25, 100, 300)) +
+	annotation_logticks() +
+	scale_color_manual(
+		name = "Monitor location",
+		breaks = c("intervention", "comparison", "outdoor"),
+	#	breaks = c("intervention", "comparison", "outdoor_intervention", "outdoor_control"),
+		labels = c("Intervention", "Comparison", "Outdoor"),
+	#	labels = c("\nInside \nintervention \nhouseholds \n", "\nInside \ncomparison \nhouseholds \n", "\nOutdoor \nintervention \n", "\nOutdoors \ncomparison \n"),
+		values = c("#138b87",  "#430154", "#1ccec8"),
+	#	values = c("#7570b3",  "#d95f02", "#1b9e77")
+	) +
+	
+	# purple: #430154   yellow: #fde725   teal: #138b87
+	
+	# purple: #7570b3, orange: #d95f02, teal: #1b9e77
+	
+	# viridis::scale_color_viridis(
+	# 	discrete = TRUE,
+	# 	name = "Study arm",
+	# 	breaks = c("pre-intervention", "intervention", "outdoor"),
+	# 	labels = c("Pre-intervention", "Intervention", "Outdoor"),
+	# 	option = "D",
+# 	# direction = -1#,
+# 	begin = 0,
+# 	end = 1
+# ) +
+labs(
+	title = "PM2.5 measurement by hour of the day",
+	x = "Time",
+	y = "PM2.5 (ug/m3)"
+) +
+	theme_classic() +
+	theme(
+		legend.background = element_blank(),
+		panel.spacing = unit(2, "lines")
+	) + 
+	facet_wrap( ~ timepoint)
+
+fig_pm_day ## This produces rthe graphs by time of day 
+
+ggsave(
+	here::here("6_figures", "PM_by_hour_of_day_log_smooth_span_0.3.png"),
+	plot = last_plot(),
+	scale = 1,
+	height = 6,
+	width = 10,
+	units = "in",
+	device = "png"
+)
+
+pm_data %>% 
+	filter(note %notin% c("qc", "insufficient data")) %>%
+	filter(study_arm == "intervention", timepoint == "baseline") %>%
+	select(nearest_min) %>% 
+	unique() %>% 
+	head()
+
+pm_data %>% 
+	filter(note %notin% c("qc", "insufficient data")) %>%
+	filter(study_arm == "intervention", timepoint == "baseline") %>%
+	# pull(nearest_min) %>% 
+	# unique() %>% 
+	# head()
+	filter(nearest_min == "2000-01-01 07:10:00 +06") %>%
+	# filter(nearest_min %in% c("2000-01-01 07:10:00 +06")) %>% # 269 rows "2000-01-01 07:15:00 +06" When I do 
+	group_by(hh_id, nearest_min) %>%
+	slice(1) %>%
+	ungroup() %>% # still has 111 rows, one for each hh 
+	ggplot(aes(x = nearest_min, y = PM_Estimate)) +
+	geom_point()
+stat_summary(geom = "linerange" , fun.data = mean_cl_normal())
+
+
+# "2000-01-01 07:10:00 +06" "2000-01-01 07:11:00 +06" "2000-01-01 07:12:00 +06" "2000-01-01 07:13:00 +06" "2000-01-01 07:14:00 +06" "2000-01-01 07:15:00 +06"
+
+
+
+# Hourly summary
+
+# I can't just look at how many hours the monitor was above 100 or 500, because the monitors were in place for different amounts of time. 
+
+# One way to summarize is to this would be to calculate the total number of hours it was operating, then determine the fraction of 24 hours that was over 100 or 500 ppm 
+
+
+pm_data_hour_summary_by_fraction_time_recorded <-
+	pm_data_hour %>%
+	filter(note != "qc") %>%
+	group_by(timepoint, study_arm, note, hh_id, hh_id_note) %>%
+	summarize_at(
+		vars(over_100, over_500),
+		list(sum)
+	) %>%
+	gather(-c(timepoint, study_arm, note, hh_id, hh_id_note), key = "indicator", value = "hr_above_threshold") %>%
+	left_join(pm_data_hour_per_monitor %>% select(hh_id_note, hours_recording), by = "hh_id_note") %>%
+	mutate(
+		pc_time_above_threshold = hr_above_threshold / hours_recording,
+		hr_day_above_threshold = pc_time_above_threshold * 24
+	)
+
+
+# Another way to summarize the data, which is what Allie has done for the ventilation project, it so normalize all test to 48 hours just cut off all data after 48 hours, and use this. The means that each time period of the day is measured twice and measurements are unaffected by what time of day they started. (If they started just before cooking breakfast and the monitor ran for 52 hours then cooking breakfast would be captured 3 times, rather than just twice with a 38 hour time period or if the recording has started just a bit later.)
+
+
+pm_data_hour_summary_by_48_hr <-
+	pm_data_hour %>%
+	filter(note != "qc") %>%
+	group_by(timepoint, hh_id_note) %>%
+	slice(1:48) %>% # took the first 48 hours, but some had less than 48 hours (I only tossed if less than 24)
+	ungroup() %>%
+	group_by(timepoint, study_arm, note, hh_id, hh_id_note) %>%
+	summarize_at(
+		vars(over_100, over_500),
+		list(sum)
+	) %>%
+	gather(-c(timepoint, study_arm, note, hh_id, hh_id_note), key = "indicator", value = "hr_above_threshold") %>%
+	mutate(
+		pc_time_above_threshold = hr_above_threshold / 48, # This isn't right - need to divide by actual recording time
+hr_day_above_threshold = pc_time_above_threshold * 24 
+)
+
+pm_data_hour_summary_by_48_hr %>%
+	group_by(timepoint, study_arm, indicator) %>%
+	summarise(median = median(hr_day_above_threshold), mean = mean(hr_day_above_threshold), sd = sd(hr_day_above_threshold)) %>%
+	arrange(indicator, timepoint, study_arm)
+
+
+
+
+## Plot data
+
+# Add pairwise p-value comparisons 
+# https://www.r-bloggers.com/add-p-values-and-significance-levels-to-ggplots/
+	
+pm_data_hour_summary_comparisons <- 
+	list(
+		c("Inside \nnew intervention \nhouseholds", "Inside \non-going intervention \nhouseholds"),
+		# c("Inside \nnew intervention \nhouseholds", "\nOutdoors \n"),
+		c("Inside \non-going intervention \nhouseholds", "\nOutdoors \n")
+	)
+
+indicator.labs <- 
+	c(
+		over_100 = "PM2.5 over 100 ug/m3",
+		over_500 = "PM2.5 over 500 ug/m3"
+	)
+
+pm_data_hour_summary_by_48_hr %>% 
+	mutate(
+		study_arm = 
+			ordered(
+				study_arm,
+				levels = c("pre-intervention", "intervention", "outdoor"),
+				labels = c("Inside \nnew intervention \nhouseholds", "Inside \non-going intervention \nhouseholds", "\nOutdoors \n")
+			)
+	) %>%
+	# for the method where the entire recording time is used, replace "pm_data_hour_summary_by_48_hr" with 
+	# "pm_data_hour_summary_by_fraction_time_recorded" and change the title to (Hours above threshold based on entire recording period)
+	ggplot(aes(x = study_arm, y = hr_day_above_threshold, color = study_arm)) +
+	geom_boxplot() +
+	geom_jitter(alpha = 0.2, width = 0.4, height = 0) +
+	# scale_color_discrete() + 
+	ggpubr::stat_compare_means(
+		comparisons = pm_data_hour_summary_comparisons,
+		label = "p.format", #"p.signif" 
+		method = "t.test",
+		
+		# label.y = c(17, 20, 23),
+		label.y = c(17, 20),
+		hide.ns = TRUE#,
+		# ref.group = ".all."
+	) +
+	viridis::scale_color_viridis(
+		discrete = TRUE,
+		# The following is to control the legend
+		name = "Monitor location",
+		labels = c("\nInside \nnew intervention \nhouseholds \n", "\nInside \non-going intervention \nhouseholds \n", "\nOutdoors \n")
+	) +
+	labs(
+		# title = "Hours per day exceeding PM2.5 threshold",
+		title = "Hours exceeding 100 ug/cm3 PM2.5 per day",
+		y = "Hours per day",
+		x = "Monitor location"
+	) +
+	theme_bw() +
+	theme(
+		legend.position = "none",
+		panel.grid.major.x = element_blank(),
+		panel.grid.minor.x = element_blank(),
+		# axis.title.x = element_blank(),
+		# axis.text.x = element_blank(),
+		axis.ticks.x = element_blank()
+	) +
+	coord_cartesian(ylim = c(0, 23)) +
+	facet_grid(
+		~ timepoint # , # 	indicator ~ timepoint,
+		# labeller = labeller(indicator = indicator.labs)
+	)
+
+ggsave(
+	here::here("docs", "pm_data_hour_summary_by_48_hr.png"),
+	plot = last_plot(),
+	scale = 1,
+	height = 6,
+	width = 10,
+	units = "in",
+	device = "png"
+)
+
+
+#################################################################################
+# Take average from across each hh
+#################################################################################
+
+pm_data_hour_av_by_hh <-
+	pm_data_hour %>% 
+	arrange(timepoint, study_arm, hh_id) %>%
+	group_by(timepoint, study_arm, hh_id) %>% 
+	# Take only the first 48 hours of data for each hh (so that we don't have some hours that are measured more than twice)
+	slice(n = 1:49) %>% 
+	summarise(
+		hours_monitored = as.numeric(max(dateTime_hour) - min(dateTime_hour)) * 24,
+		PM_Estimate_48_hr_mean = mean(PM_Estimate), 
+		PM_Estimate_48_hr_sd = sd(PM_Estimate)
+	) %>% 
+	ungroup() 
+# group_by(timepoint, study_arm) %>% 
+# summarise(
+# 	mean(time_range),
+# 	mean(hh_mean), 
+# 	sd(hh_sd)
+# ) %>% 
+
+
+write_rds(pm_data_hour_av_by_hh, file_pm_data_hour_av_by_hh)
+
+# pm_data_hour_av_by_hh <- read_rds("4_data/PM_hh_averages_20220717.rds")
+
+### Temperature analysis 
+
+temp_data_hour_av_by_hh <-
+	pm_data_full %>% 
+	arrange(timepoint) %>%
+#	group_by(timepoint) %>% 
+	# Take only the first 48 hours of data for each hh (so that we don't have some hours that are measured more than twice)
+	#slice(n = 1:49) %>% 
+	summarise(
+	#	hours_monitored = as.numeric(max(dateTime_hour) - min(dateTime_hour)) * 24,
+		Temp_Estimate_48_hr_mean = mean(degC_air), 
+		Temp_Estimate_48_hr_max = max(degC_air), 
+		Temp_Estimate_48_hr_sd = sd(degC_air)
+	) %>% 
+	ungroup() 
+
+pm_data_full %>% 
+	ggplot(aes(x = degC_air, fill = study_arm)) +
+	geom_vline(xintercept = 29.8, linetype = "dashed", color = "red") +
+	annotate( "text", x = 31, y = 10000, label = "29.8") +
+	geom_histogram() + 
+	labs(title = "Temp distribbution and mean", x = "Temp deg. C", y = "Number of observations")
+
+#################################################################################
+#Percentage of data points at different thresholds by study arm 
+  #Give the % of data points that fall below 75, 50, 35
+  #I need to use pm_data instead of pm_data_full to remove cold times because different season for some of data 
+
+pm_data %>% 
+  filter(note %notin% c("qc", "insufficient data")) %>%
+  mutate(
+    pm_u400 = if_else(PM_Estimate <400, 1, 0), 
+    pm_u150 = if_else(PM_Estimate <150, 1, 0), 
+    pm_u75 = if_else(PM_Estimate <75, 1, 0), 
+    pm_u50 = if_else(PM_Estimate <50, 1, 0), 
+    pm_u35 = if_else(PM_Estimate <35, 1, 0), 
+  ) %>% 
+  group_by(timepoint, study_arm) %>% 
+  summarise(
+    count_measure = n(), 
+    pct_u_400 = sum(pm_u400) / count_measure, 
+    pct_u_150 = sum(pm_u150) / count_measure, 
+    pct_u_75 = sum(pm_u75) / count_measure, 
+    pct_u_50 = sum(pm_u50) / count_measure,
+    pct_u_35 = sum(pm_u35) / count_measure,
+  )
+  
+pm_data %>% # 1,039,924 rows of data (each is every 10 seconds)
+  filter(note %notin% c("qc", "insufficient data")) %>% 
+  # Each hh will get get only one observation, which is the average of the PM at that min for however many days they were measured
+  group_by(timepoint, study_arm, hh_id, nearest_min) %>%
+  summarise(PM_Estimate_av = mean(PM_Estimate, na.rm = TRUE)) %>%
+  mutate(
+    pm_u400 = if_else(PM_Estimate_av <400, 1, 0), 
+    pm_u150 = if_else(PM_Estimate_av <150, 1, 0), 
+    pm_u75 = if_else(PM_Estimate_av <75, 1, 0), 
+    pm_u50 = if_else(PM_Estimate_av <50, 1, 0), 
+    pm_u35 = if_else(PM_Estimate_av <35, 1, 0), 
+  ) %>% 
+  ungroup() %>% 
+  group_by(timepoint, study_arm) %>% 
+  summarise(
+    count_measure = n(), 
+    pct_u_400 = sum(pm_u400) / count_measure, 
+    pct_u_150 = sum(pm_u150) / count_measure, 
+    pct_u_75 = sum(pm_u75) / count_measure, 
+    pct_u_50 = sum(pm_u50) / count_measure,
+    pct_u_35 = sum(pm_u35) / count_measure,
+  )
+
+

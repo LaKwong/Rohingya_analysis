@@ -1,0 +1,34 @@
+---
+title: 'PM2.5 Exposures'
+author: "Chris LeBoa"
+date: "7/16/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+
+hh_pm_data_location <-here::here("4_data/PM_hh_averages_20220717.rds")
+
+hh_survey_location <- here::here("4_data/RohingyaFuel_survey_data_clean.rds")
+
+```
+
+## Read in Datasets 
+
+Need the PM2.5 data (48 hr hh mean) from the pm2.5 data files 
+Need the household survey results from each of the surveys
+```{r}
+hh_pm <- read_rds(hh_pm_data_location)
+hh_survey <- read_rds(hh_survey_location)
+
+hh_survey %>% left_join()
+
+hh_survey %>% count(hh_id) %>% arrange(desc(n))
+
+```
+
+hh_pm %>% count(hh_id) %>% count(n)
+
+#filter surveys to only include hh in the pm data 

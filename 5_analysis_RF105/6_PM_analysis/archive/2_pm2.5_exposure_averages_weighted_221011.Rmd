@@ -1,0 +1,459 @@
+---
+title: "PM2.5 weighted exposures"
+author: "Chris LeBoa"
+date: "7/3/2022"
+output: html_document
+---
+## Analysis Objective
+    This file is meant to summarize PM2.5 data collected from the PATS+ particulate monitors and find the amount of time people spend inside in order to create a time weighted analysis for the HAPIT shinyapp https://householdenergy.shinyapps.io/hapit3/ which outputs the number of DALYs and deaths averted due to a clean cookstove intervention. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+
+
+#Data Preparation
+    
+##Read in data 
+
+```{r}
+
+#pm2.5 data 
+pm_data_hour_csv <- here::here("4_data/pm_data_hour.csv") #this file is created in the 1_PM2.5_analysis_rohingya.rmd file in the scripts folder
+
+pm_data_hour <- read_csv(pm_data_hour_csv)
+
+pm_data_hour %>% 
+  count(timepoint, study_arm, note)
+
+#paired survey data 
+
+file_survey_data_base <- here::here("4_data/RohingyaFuel_survey_data_triple.rds")
+#This file is the paired survey data containing baseline and midline survey responses on a hh level
+
+survey_data <- read_rds(file_survey_data_base)
+
+#individual level midline survey data (at basline asked for single response per household. At midline asked for a response per hh member)
+all_files <-
+  list.files(path = "/Volumes/GoogleDrive/.shortcut-targets-by-id/1g4FGyxS0paoGycT8REXc9ZEXkWLVDMJr/Rohingya_analysis/2_data_raw", pattern = ".csv", full.names = TRUE)
+#finds all files from raw folder with .csv pattern
+
+
+selected_files <-
+  all_files[str_detect(all_files, "location")]
+#selects files with location in the name
+
+midline_location_repeat <-
+  selected_files %>%
+  map_dfr(read_csv, col_types = cols(.default = "c", hours_inside = "d", hours_outside = "d"))
+#reads in all selected files
+
+## Individual level endline data 
+all_files_endline <-
+  list.files(path = "/Volumes/GoogleDrive/.shortcut-targets-by-id/1g4FGyxS0paoGycT8REXc9ZEXkWLVDMJr/Rohingya_analysis/2_data_raw/survey_endline_with_review", pattern = ".csv", full.names = TRUE)
+
+selected_files_endline <-
+  all_files_endline[str_detect(all_files_endline, "hh_members")]
+#selects files with hh_members in the name becuase that is where the hours outside variable is 
+
+endline_location_repeat <-
+  selected_files_endline %>%
+  map_dfr(
+    read_csv,  
+    col_types = cols(
+      mem_serial = "c", 
+      hhh_relation = "c",
+      hhh_reln_dmmy = "c", 
+      age_yrs = "d", 
+      sex = "d", 
+      .default = "c", 
+    #  hours_inside = "d",
+      hours_outside = "d"
+      ))
+
+
+#output file location 
+ file_location_out <- here::here("4_data/weighted_pm2.5_av.csv")
+
+```
+
+```{r}
+midline_location_clean <-
+midline_location_repeat %>%
+  mutate(
+       hours_inside_mid= if_else(is.na(hours_inside) == TRUE, 24 - hours_outside, hours_inside),
+       hours_outside_mid = if_else(is.na(hours_outside) == TRUE, 24 - hours_inside, hours_outside)
+  ) 
+  #select(KEY, PARENT_KEY, locatihours_inside, hours_outside_mid)
+#Some versions had only hours inside and the endline had only hours outside so setting them all to have both with inside + outside == 24
+
+endline_location_clean <-
+endline_location_repeat %>%
+  mutate(
+       hours_inside_end = 24 - hours_outside,
+       hours_outside_end = hours_outside
+  )
+
+ 
+  
+
+```
+
+
+##Clean data 
+```{r}
+
+joined_data <-
+  midline_location_clean%>%
+  full_join(survey_data, by = c("PARENT_KEY" = "KEY"))
+
+joined_data_endline <-
+  survey_data %>% 
+  filter(timepoint == "endline") %>% 
+  full_join(endline_location_clean, by = c("KEY" = "PARENT_KEY"))
+
+
+joined_data %>% 
+  count(hours_outside_mid, name_respondent)
+
+joined_data_endline %>% 
+  count(hours_outside_end, name_respondent, timepoint)
+
+
+#This was useful when using midline data
+#  survey_data <- 
+#   survey_data %>% 
+#    mutate(
+# #     #timepoint = if_else(timepoint == "endline", "midline", "baseline"), 
+#    study_arm = if_else(str_detect(study_arm, "pre-|post-") == TRUE, "intervention", "comparison")) 
+
+pm_group <- 
+pm_data_hour %>% 
+  group_by(timepoint, study_arm) %>% 
+  summarize(
+    pm_group = mean(PM_Estimate, na.rm = TRUE), 
+    sd_pm_group = sd(PM_Estimate, na.rm = TRUE),
+    )
+
+
+#survey_data$KEY
+#endline_location_clean$PARENT_KEY
+#from overall survey data find columns needed to specify hh members at midline  
+```
+## Check all timepoints in the data io make sure all accounted for 
+
+
+#Rough weighted mean assuming outside time was the same at all timepoints based on baseline time outsides 
+```{r}
+
+hours_baseline <- 
+survey_data %>% 
+  group_by(study_arm_overall, timepoint) %>% 
+  summarise(
+    mean_hr_inside_hh = mean(hours_inside, na.rm = TRUE), 
+    sd_resp = sd(hours_inside, na.rm = TRUE), 
+    child_mean_hour_inside = 24 - mean(target_child_hours_outside, na.rm = TRUE), 
+    sd_child_mean_hour_inside = sd(target_child_hours_outside, na.rm = TRUE)
+    ) %>% 
+  filter(!is.na(mean_hr_inside_hh))
+
+pm_outdoor <- 
+  pm_group %>% 
+  filter(study_arm == "outdoor") %>% 
+  mutate(outdoor_pm = pm_group) %>% 
+  select(-c(pm_group, study_arm))
+
+pm_group %>%
+  left_join(hours_baseline, by = c("study_arm" = "study_arm_overall")) %>% 
+  
+  left_join(pm_outdoor, by = c("timepoint.x" = "timepoint")) %>% 
+  mutate(
+    respondent_weighted_pm = 
+      pm_group * (mean_hr_inside_hh / 24) +
+      outdoor_pm *((24 - mean_hr_inside_hh) / 24) , 
+    child_weighted_pm = 
+       pm_group * (mean_hr_inside_hh / 24) +
+      outdoor_pm *((24 - mean_hr_inside_hh) / 24)
+  ) %>% 
+  filter(study_arm != "outdoor")
+```
+
+
+### baseline results 
+At baseline we asked about the respondent and target child time outside only 
+
+###respondent time outside
+```{r}
+respondent_baseline <- 
+survey_data %>% 
+  group_by(timepoint, study_arm_overall) %>% 
+  summarise(mean_hr_outside_hh = mean(hours_outside)) %>% 
+  filter(!is.na(mean_hr_outside_hh)) %>% 
+  mutate(individual = "respondent")
+
+target_child_baseline <- 
+survey_data %>% 
+  group_by(study_arm_overall, timepoint) %>% 
+  summarise(mean_hr_outside_hh = mean(target_child_hours_outside)) %>% 
+  filter(!is.na(mean_hr_outside_hh)) %>% 
+  mutate(individual = "target child")
+```
+
+#midline results 
+### respondent mean time outside 
+```{r}
+respondent_midline <- 
+joined_data %>% 
+  filter(location_name_roster == name_respondent) %>% 
+  group_by(timepoint, study_arm_overall, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside_mid)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm_overall) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside)) %>% 
+  mutate(individual = "respondent")
+```
+#target child mean time outside
+```{r}
+target_child_midline <- 
+joined_data %>% 
+  filter(location_name_roster == target_child_name) %>% 
+  group_by(timepoint, study_arm_overall, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside_mid)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm_overall) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside)) %>% 
+  mutate(individual = "target child")
+```
+
+#other adult time spent outside of hh
+```{r}
+other_member_midline <- 
+joined_data %>% 
+  filter(
+    location_name_roster != target_child_name, 
+    location_name_roster != name_respondent
+    ) %>% 
+  group_by(timepoint, study_arm_overall, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside_mid)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm_overall) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside)) %>% 
+   mutate(individual = "other member")
+
+```
+
+#Endline results 
+```{r}
+respondent_endline <-  #respondent 
+joined_data_endline %>% 
+  filter(name == name_respondent) %>% 
+  group_by(timepoint, study_arm_overall, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside_end)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm_overall) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside)) %>% 
+  mutate(individual = "respondent")
+
+target_child_endline <- #target child 
+joined_data_endline %>% 
+  filter(name == target_child_name) %>% 
+  group_by(timepoint, study_arm_overall, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside_end)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm_overall) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside)) %>% 
+  mutate(individual = "target child")
+
+other_member_endline <- 
+joined_data_endline %>% 
+  filter(
+    name != target_child_name, 
+    name != name_respondent
+    ) %>% 
+  group_by(timepoint, study_arm_overall, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside_end)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm_overall) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside)) %>% 
+   mutate(individual = "other member")
+
+```
+
+
+
+
+
+
+```{r}
+data_hours_outside <- 
+  bind_rows(
+    respondent_baseline,
+    target_child_baseline,
+    respondent_midline,
+    target_child_midline, 
+    other_member_midline, 
+    respondent_endline, 
+    target_child_endline, 
+    other_member_endline
+    ) %>% 
+  mutate(
+    av_time_inside = 24 - mean_hr_outside_hh,
+    pct_time_inside = av_time_inside / 24 * 100, 
+    arm_time = str_glue("{timepoint}_{study_arm_overall}"))
+
+```
+
+
+# PM2.5 exposures 
+instead of doing hh specific adjusted exposures we multiplied by study mean since not all hh had sensors in them. 
+```{r}
+#Create hh av pm 2.5 dataset
+hh_av_pm2.5 <- 
+  pm_data_hour %>% 
+	group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(
+		time_range = max(dateTime_hour) - min(dateTime_hour),
+		hh_mean = mean(PM_Estimate),
+		
+		hh_sd = sd(PM_Estimate)
+	) 
+#   mutate(
+#     timepoint = if_else(timepoint == "endline", "midline", "baseline")) %>% 
+# 	ungroup() 
+
+#summarize by study arm
+arm_mean_pm2.5 <- 
+  hh_av_pm2.5 %>% 
+	group_by(timepoint, study_arm) %>% 
+	summarise(
+		sensor_on_time = mean(time_range, na.rm = TRUE),
+		mean_pm2.5_hh = mean(hh_mean), 
+		sd_pm2.5_hh = sd(hh_sd), 
+		n = n()
+	) %>% 
+  mutate(
+    arm_time = str_glue("{timepoint}_{study_arm}")
+  ) %>% 
+  select(-timepoint)
+
+outdoor_pm2.5 <- 
+  arm_mean_pm2.5 %>% 
+  filter(study_arm == "outdoor") %>% 
+  transmute(
+    timepoint,
+    mean_pm2.5_outdoor = mean_pm2.5_hh
+    )
+
+
+
+pm_data_sum <-  
+  pm_data_hour %>% 
+  mutate(over_1000 = if_else(PM_Estimate >= 1000, 1, 0)) %>% 
+  group_by(hh_id, study_arm, timepoint) %>% 
+  summarize(time = max(dateTime_hour) - min(dateTime_hour), over_100_hours_24 = sum(over_100, na.rm = TRUE)/as.numeric(time), over_1000_hh = sum(over_1000, na.rm = TRUE)) 
+
+# Number of hh with PM values < 1000 
+pm_data_sum %>% 
+  ungroup() %>% 
+  count(over_1000_hh == 0)
+108/(108+241) #hh with pm values over 1000
+
+pm_data_sum %>% 
+  ungroup() %>% 
+  group_by(study_arm, timepoint) %>% 
+  summarise(mean(over_100_hours_24, na.rm = TRUE))
+```
+### create weighted dataset of mean pm2.5 * percent time indoors for each group 
+```{r}
+combined_hr_outside_pm_weighted <- 
+  data_hours_outside %>% 
+  left_join(arm_mean_pm2.5, by = c("arm_time", "timepoint", "study_arm_overall" = "study_arm")) %>% 
+  left_join(outdoor_pm2.5, by = "timepoint") %>% 
+  mutate(
+    weighted_mean_pm2.5_hh = 
+      mean_pm2.5_hh * (pct_time_inside/100) + 
+      mean_pm2.5_outdoor * ((100 - pct_time_inside)/100), 
+    lower_non_weighted = mean_pm2.5_hh - 1.96 * sd_pm2.5_hh / sqrt(n), 
+    upper_non_weighted = mean_pm2.5_hh + 1.96 * sd_pm2.5_hh / sqrt(n)
+    )
+
+#Outdoor 95% ci
+
+outdoor_pm2.5 %>% 
+mutate(
+    lower_non_weighted = mean_pm2.5_hh - 1.96 * sd_pm2.5_hh / sqrt(n), 
+    upper_non_weighted = mean_pm2.5_hh + 1.96 * sd_pm2.5_hh / sqrt(n))
+
+write_csv(combined_hr_outside_pm_weighted, file_location_out)
+
+combined_hr_outside_pm_weighted %>% 
+  select(individual, timepoint, study_arm_overall, pct_time_inside, mean_pm2.5_hh, weighted_mean_pm2.5_hh, sd_pm2.5_hh) %>% 
+  #filter(individual == "respondent") %>% 
+  write_csv("/Users/ChrisLeBoa/Desktop/table_hapit_slide_endline.csv")
+#%>% 
+  # pivot_wider(names_from = timepoint, values_from = c(pct_time_inside, mean_pm2.5_hh, weighted_mean_pm2.5_hh))
+```
+
+### Time comparisons between cooking member and other hh Members
+
+Took average between baseline and midline for these 
+```{r}
+#cooking person average time outside 
+respondent_indoor <- 
+  combined_hr_outside_pm_weighted %>% 
+  ungroup() %>% 
+  filter(individual == "respondent", timepoint == "baseline") %>% 
+  summarise(mean(pct_time_inside)) %>% 
+  pull()
+
+#child u5 time outside hh
+child_indoor <- 
+combined_hr_outside_pm_weighted %>% 
+  filter(individual == "target child",  timepoint == "baseline") %>% 
+  summarise(mean(pct_time_inside)) %>% 
+  pull()
+
+#other adult time outside hh
+adult_indoor <- 
+combined_hr_outside_pm_weighted %>% 
+  ungroup() %>% 
+  filter(individual == "other member", timepoint == "midline") %>% 
+  summarise(mean(pct_time_inside, na.rm = TRUE)) %>% 
+  pull()
+
+```
+
+#Exposure ratios 
+
+####Mother-Child (< 5) Exposure Ratio
+ The scaling factor applied to user-input cook pre- and post-exposures to adjust under five children's exposures. The default value of 0.80 is based on smith 2014
+ 
+Child/ respondent pct indoor ratio
+```{r}
+child_indoor/respondent_indoor
+```
+
+ 
+#### Cook to Other Adult Exposure Ratio
+ The scaling factor applied to user-input cook pre- and post-exposures to adjust non-cook adults. The default value of 0.60 is based on the ratio of the men to women's exposures as described in Smith et al 2014.
+ Other / respondent time indoor 
+ 
+```{r}
+adult_indoor/respondent_indoor
+```
+
+```{r}
+survey_data$hh_size_2mo_u5
+
+survey_data %>% 
+  group_by(timepoint) %>% 
+  summarize(
+    mean(hh_size), 
+    mean((hh_size_u2mo + hh_size_2mo_u5), na.rm = TRUE))
+```
+
+### Total hh targeted is 250,000 
+Citation is here 
+https://openaid.se/en/activities/SE-0-SE-6-12515A0102-BGD-15190

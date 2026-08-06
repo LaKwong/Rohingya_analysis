@@ -1,0 +1,212 @@
+---
+title: Rohingya endline individual data
+author: Laura Kwong
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+library(tableone)
+library(janitor) #tabyl() adorn_...()
+library(dplyr)
+library(readxl)
+library(lubridate)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+knitr::opts_chunk$set(echo = TRUE)
+
+`%notin%` <- Negate(`%in%`)
+```
+
+```{r message=FALSE, warning=FALSE}
+# Parameters
+
+data_hh_member_filename <- here::here("4_data/RohingyaFuel_data_hh_member.rds")
+
+data_hh_member_host_filename <- here::here("4_data/RohingyaFuel_data_hh_member_host.rds")
+
+file_survey_data_base <- here::here("4_data/RohingyaFuel_survey_data_paired.rds")
+#===============================================================================
+
+```
+
+# Load input files
+```{r}
+data_hh_member_base <- read_rds(data_hh_member_filename)
+
+data_hh_member_host_base <- read_rds(data_hh_member_host_filename)
+
+survey_data <- read_rds(file_survey_data_base)
+
+```
+
+
+
+[sex]	0	Male
+[sex]	1	Female
+
+
+[relation]	1	Household head
+[relation]	2	Spouse of household head
+[relation]	3	Daughter of HH head
+[relation]	4	Mother of HH head
+[relation]	5	Daughter-in-law of HH head
+[relation]	6	Sister of HH head
+[relation]	7	Sister-in-law of HH head
+[relation]	8	Aunt of HH
+[relation]	9	Son of HH head
+[relation]	10	Father of HH head
+[relation]	11	Son-in-law of HH head
+[relation]	12	Brother of HH head
+[relation]	13	Brother-in-law of HH head
+[relation]	14	Uncle of HH
+[relation]	15	Cousin of HH head
+[relation]	16	Niece/Nephew of HH head
+[relation]	17	Grandchildren of HH head
+[relation]	18	Grandparents HH head
+[relation]	19	In-laws of HH
+[relation]	66	Other
+
+
+
+
+[location_outside_house]	1	Mosque
+[location_outside_house]	2	School / temporary learning center
+[location_outside_house]	3	Madrassa
+[location_outside_house]	4	Women's center / safe space
+[location_outside_house]	5	Healthcare facility
+[location_outside_house]	6	Restaurant
+[location_outside_house]	7	Another person's home
+[location_outside_house]	8	Other location inside
+[location_outside_house]	9	Market
+[location_outside_house]	10	Tea stall
+[location_outside_house]	11	Play outside
+[location_outside_house]	12	Toilet
+[location_outside_house]	13	Collect water / wash clothes / wash dishes
+[location_outside_house]	14	Collect food/fuel
+[location_outside_house]	15	Islamic activities (Tabliq)
+[location_outside_house]	17	NGO volunteer
+[location_outside_house]	16	Shop
+[location_outside_house]	18	Office
+[location_outside_house]	19	Daily labor outside
+[location_outside_house]	88	Other
+
+```{r}
+data_hh_member <-
+	data_hh_member_base %>%
+	# keep only hh for which there is PAIRED parent survey data  (there are about 15 hh without parent survey data)
+	inner_join(survey_data %>% select(KEY, start_date, study_arm_overall), by = c("PARENT_KEY" = "KEY")) %>%
+	mutate(
+		hours_outside =
+			case_when(
+				is.na(hours_outside) ~ 24 - hours_inside,
+				TRUE ~ hours_outside 
+			),
+		age_yrs = 
+			as.period(interval(start = mdy(dob), end = mdy(start_date)))$year
+	) %>%
+	select(-hours_inside) %>%
+	mutate(sex = as.factor(sex)) 
+
+```
+
+```{r}
+survey_data %>%
+	count(study_arm_overall)
+
+data_hh_member %>%
+	count(study_arm_overall)
+```
+
+# Demographics
+```{r}
+
+data_hh_member %>%
+	group_by(study_arm_overall, age_yrs < 18, sex) %>%
+	summarise(n = n(), age_mean = mean(age_yrs), age_sd = sd(age_yrs), hours_outside_mean = mean(hours_outside), hours_outside_sd = sd(hours_outside))
+
+locations_visited <- 
+	data_hh_member %>% 
+	group_by(study_arm_overall, age_yrs < 18, sex) %>%
+	summarise(
+		n = n(), 
+		mosque = mean(`location_outside_house_1/1`, rm.na = TRUE), 
+		school = mean(`location_outside_house_1/2`, rm.na = TRUE),
+		madrassa = mean(`location_outside_house_1/3`, rm.na = TRUE), 
+		womens_center = mean(`location_outside_house_1/4`, rm.na = TRUE), 
+		healthcare_facility = mean(`location_outside_house_1/5`, rm.na = TRUE), 
+		restaurant = mean(`location_outside_house_1/6`, rm.na = TRUE), 
+		other_home = mean(`location_outside_house_1/7`, rm.na = TRUE), 
+		other_location_inside = mean(`location_outside_house_1/8`, rm.na = TRUE), 
+		market = mean(`location_outside_house_1/9`, rm.na = TRUE), 
+		tea_stall = mean(`location_outside_house_1/10`, rm.na = TRUE), 
+		play_outside = mean(`location_outside_house_1/11`, rm.na = TRUE),
+		toilet = mean(`location_outside_house_1/12`, rm.na = TRUE), 
+		outdoor_chores = mean(`location_outside_house_1/13`, rm.na = TRUE), 
+		collect_food_fuel = mean(`location_outside_house_1/14`, rm.na = TRUE), 
+		islamic_activities = mean(`location_outside_house_1/15`, rm.na = TRUE), 
+		ngo_volunteer = mean(`location_outside_house_1/16`, rm.na = TRUE), 
+		shop = mean(`location_outside_house_1/17`, rm.na = TRUE), 
+		office = mean(`location_outside_house_1/18`, rm.na = TRUE), 
+		labor_outside = mean(`location_outside_house_1/19`, rm.na = TRUE), 
+		other = mean(`location_outside_house_1/88`, rm.na = TRUE)
+	)
+
+View(locations_visited)
+
+# summarise_all(~mean(.) * 100) %>%
+# 	gather(key, value) %>%
+# 	separate(key, into = c("item", "column"), sep = "_") %>%
+# 	spread(column, value)
+
+```
+
+
+[symptoms]	1	Fever
+[symptoms]	2	Dry cough
+[symptoms]	3	Wet cough or sputum/mucus production
+[symptoms]	4	Shortness of breath or difficulty breathing
+[symptoms]	5	Sore throat
+[symptoms]	6	Headache
+[symptoms]	7	Diarrhea
+[symptoms]	8	Fatigue or malaise
+[symptoms]	9	Body aches (muscle or joint pain)
+[symptoms]	10	Runny nose or nasal congestion
+[symptoms]	11	Loss of taste or smell
+[symptoms]	12	Itchy/red eyes
+[symptoms]	13	Rash
+[symptoms]	14	Unexplained bruising
+[symptoms]	15	None of the above
+
+# COVID symptoms
+```{r}
+covid_symptoms <- 
+	data_hh_member %>% 
+	group_by(study_arm_overall, age_yrs < 18, sex) %>%
+	summarise(
+		n = n(), 
+		fever = mean(`symptoms_7/1`, rm.na = TRUE) * 100, 
+		dry_cough = mean(`symptoms_7/2`, rm.na = TRUE) * 100,
+		wet_cough = mean(`symptoms_7/3`, rm.na = TRUE) * 100,
+		short_of_breath = mean(`symptoms_7/4`, rm.na = TRUE) * 100,
+		sore_throat = mean(`symptoms_7/5`, rm.na = TRUE) * 100,
+		headache = mean(`symptoms_7/6`, rm.na = TRUE) * 100,
+		diarrhea = mean(`symptoms_7/7`, rm.na = TRUE) * 100,
+		fatigue = mean(`symptoms_7/8`, rm.na = TRUE) * 100,
+		body_aches = mean(`symptoms_7/9`, rm.na = TRUE) * 100,
+		runny_nose = mean(`symptoms_7/10`, rm.na = TRUE) * 100,
+		loss_of_taste_smell = mean(`symptoms_7/11`, rm.na = TRUE) * 100,
+		itchy_red_eyes = mean(`symptoms_7/12`, rm.na = TRUE) * 100,
+		rash = mean(`symptoms_7/13`, rm.na = TRUE) * 100,
+		unexplained_bruising = mean(`symptoms_7/14`, rm.na = TRUE) * 100,
+		none_of_above = mean(`symptoms_7/15`, rm.na = TRUE) * 100,
+	)
+
+View(covid_symptoms)
+
+```
+

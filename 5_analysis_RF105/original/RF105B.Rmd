@@ -1,0 +1,2608 @@
+---
+title: "RF105B"
+author: "Christopher LeBoa"
+date: "2025-01-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+source(here::here("0_config.R"))
+source(here::here("3_data_cleaning/1.5_define_vector_columns.R"))
+source(here::here("5_analysis/Dif_in_dif_fxn.R")) 
+
+#install.packages("geomtextpath")
+
+library(tidyquant)
+library(grid)
+library(geomtextpath)
+library(tidyverse)
+
+#Survey file 
+file_survey_data_base <- here::here("4_data/RohingyaFuel_survey_data_triple.rds")
+file_survey_data_all <- here::here("4_data/RohingyaFuelMaster_survey_data_tidy.rds")
+
+#PM Data file 
+lpg_receive_date <- read_csv(here::here("2_data_raw/list_first_enrolled_lpg.csv"))
+file_in_pm_data_clean_rds <- here::here("4_data/pm_data_clean.rds")
+
+
+# Load input files
+survey_data <- read_rds(file_survey_data_base)
+
+
+#view(survey_data)
+```
+
+## Tables 1 and 2 Household demographics and loss to follow up 
+The following code describes the household characteristics at baseline as well as prints out the differences of hh included and not included in the analysis (Tables 1 and 2 in the manuscript).
+
+```{r}
+rm(list = ls())
+source(here::here("0_config.R")) # a config file that needs to be run to load neccesary packages 
+source(here::here("3_data_cleaning/1.5_define_vector_columns.R")) # a file that defines which columns are 
+## Chris
+# source(here::here("1_config.R"))
+
+
+# Parameters
+file_survey_data_all <- here::here("4_data/RohingyaFuelMaster_survey_data_tidy.rds")
+file_survey_data_base <- here::here("4_data/RohingyaFuel_survey_data_triple.rds")
+file_survey_data_baseline <- here::here("4_data/RohingyaFuelMaster_survey_data_intervention_baseline.rds")
+
+
+file_out_1 <- here::here("4_data/study_arm_camp_id_errors_220724.csv")
+file_out_2 <- here::here("4_data/camp_block_id_errors_220724.csv")
+camp_block_id_path <- here::here("4_data/camp_block_id.csv")
+camp_block_sublock_id_path <- here::here("4_data/camp_block_sublock_id.csv")
+camp_block_subblock_id_100_largest_path <- here::here("4_data/camp_block_subblock_id_100_largest.csv")
+
+
+# Load input files
+
+survey_data_all <- 
+  read_rds(file_survey_data_all) %>%
+  mutate(electricity = ifelse(electricity == 2, 1, 0)) ## Redefine the electricity variable 
+survey_data <- 
+  read_rds(file_survey_data_base)  %>%
+  mutate(electricity = ifelse(electricity == 2, 1, 0))
+
+
+survey_data_baseline <-  # select only baseline hh for table one 
+  survey_data %>%
+  filter(timepoint == "baseline")
+
+
+survey_data %>%
+  filter(timepoint == "baseline") %>%
+  count(study_arm_overall)
+# For each baseline, midline, endline there are 305 comparison hh and 486 intervention hh
+# 791 hh with triplicate measures
+
+survey_data_hh <-
+  survey_data_all %>%
+  mutate(
+    study_arm_overall = 
+      ordered(
+        study_arm_overall,
+        labels = c("comparison group", "intervention group")
+      )
+  ) %>%
+  tabyl(timepoint, study_arm_overall)
+
+survey_data_hh %>%
+  kable(
+    caption = "Number of households surveyed at each timepoint",
+    booktabs = TRUE,
+    digits = 1,
+    align = c("l", "c", "C"),
+    format = "latex"
+  ) %>%
+  kable_styling(latex_options = c("scale_down")) 
+
+
+
+################################################################################
+# Where are the hh located?
+################################################################################
+survey_data_all %>%
+  tabyl(timepoint, camp_id, study_arm_overall)
+
+survey_data %>%
+  tabyl(timepoint, camp_id, study_arm_overall)
+
+# study_arm_overall == intervention: camp_id %in% ("8w", "9", "10)
+# study_arm_overall == comparison: camp_id %in% ("8E", "18", "3", "4", "5") # 3,4,5 are UNCHR; others are IOM
+
+
+# There are a number of hh that appear to have the wrong study_arm assigned. 
+# E.g. there are hh labeled as intervention that are in camps 3, 4, 5, 8E, which are all comparison camps
+
+study_arm_error_all <-
+  survey_data_all %>%
+  mutate(
+    anomolous = 
+      case_when(
+        timepoint == "endline" & study_arm_overall == "intervention" & camp_id == "3" ~ 1,
+        timepoint == "endline" & study_arm_overall == "intervention" & camp_id == "4" ~ 1,
+        timepoint == "endline" & study_arm_overall == "intervention" & camp_id == "5" ~ 1,
+        timepoint == "endline" & study_arm_overall == "intervention" & camp_id == "8E" ~ 1,
+        timepoint == "endline" & study_arm_overall == "comparison" & camp_id == "8W" ~ 1,
+        timepoint == "endline" & study_arm_overall == "comparison" & camp_id == "9" ~ 1,
+        timepoint == "endline" & study_arm_overall == "comparison" & camp_id == "10" ~ 1,
+        TRUE ~ 0
+      )
+  ) %>%
+  select(study_arm_overall, timepoint, camp_id, block_id, subblock_id, fcn_id, name_mahji, name_respondent, name_hh_head, target_child_name, anomolous) %>%
+  filter(anomolous == 1) %>%
+  select(-anomolous)
+
+# write.csv(study_arm_error_all, file_out_1)
+
+################################################################################
+# Where are the hh located?
+################################################################################
+# Data Cleaning 
+
+# Check for errors by examining all the data
+camp_block_id_all <-
+  survey_data_all %>%
+  # tabyl(camp_id)
+  # tabyl(camp_id, lpg_depots) # lpg_depots = "What LPG distribution center do you go to?
+  tabyl(camp_id, block_id)
+# unite(block_sub_block_id, c("block_id", "subblock_id")) %>%
+# tabyl(camp_id, block_sub_block_id)
+
+camp_block_id_all_errors <-
+  survey_data_all %>%
+  mutate(
+    anomolous = 
+      case_when(
+        camp_id == "MOJIMULLAH" ~ 1,
+        camp_id == "L18" ~ 1,
+        camp_id == "G" ~ 1,
+        camp_id == "10" & block_id == "e" ~ 1,
+        camp_id == "4" & block_id == "b" ~ 1,
+        camp_id == "8W" & block_id == "c" ~ 1,
+        camp_id == "8W" & block_id == "g" ~ 1,
+        camp_id == "9" & block_id == "b" ~ 1,
+        camp_id == "9" & block_id == "c" ~ 1,
+        camp_id == "9" & block_id == "i" ~ 1,
+        camp_id == "9" & block_id == "c" ~ 1,
+        TRUE ~ 0
+      )
+  ) %>%
+  select(study_arm_overall, timepoint, camp_id, block_id, subblock_id, fcn_id, name_mahji, name_respondent, name_hh_head, target_child_name, anomolous) %>%
+  filter(anomolous == 1) %>%
+  select(-anomolous)
+
+
+
+### Now only the paired data
+
+camp_org <-
+  survey_data %>%
+  tabyl(timepoint, camp_id, org)
+
+survey_data_all %>%
+  tabyl(timepoint, camp_id, org)
+
+
+
+camp_block_id <-
+  survey_data %>%
+  # tabyl(camp_id)
+  # tabyl(camp_id, lpg_depots) # lpg_depots = "What LPG distribution center do you go to?
+  tabyl(camp_id, block_id)
+# unite(block_sub_block_id, c("block_id", "subblock_id")) %>%
+# tabyl(camp_id, block_sub_block_id)
+
+# write.csv(camp_block_id, camp_block_id_path)
+
+
+camp_block_subblock_id <-
+  survey_data %>%
+  group_by(camp_id, block_id, subblock_id) %>% 
+  count() %>%
+  ungroup() %>%
+  arrange(camp_id, block_id, subblock_id) 
+
+camp_block_subblock_id_100_largest <-
+  camp_block_subblock_id %>%
+  arrange(desc(n)) %>%
+  slice(1:100) %>%
+  arrange(camp_id, block_id, subblock_id)
+
+
+
+###############################################################################
+# # Create dataset of households missing endline data to check for differential missingness 
+###############################################################################
+missing_from_endline_data  <- survey_data_all %>% filter(!hh_id %in% survey_data$hh_id)
+
+###############################################################################
+# # Create Table 2 datasets 
+###############################################################################
+
+
+survey_data_tab1 <-
+  survey_data %>%
+  filter(timepoint == "baseline") %>%
+  select(
+    c(
+      "study_arm_overall",
+      "hh_size", "hh_size_2mo_u5", "hh_size_u2mo",
+      "hh_ppl_smoke",
+      "electricity",
+      "electric_fan_yn",
+      "smartphone_yn", "mobile_phone_yn", # "radio_yn",   
+      "portable_lamp_yn", "solar_lamp_yn", 
+      
+      "mattress_yn", "blanket_yn", "mosquito_net_yn",
+      "umbrella_yn",
+      "chair_bench_yn", "table_yn", # "almirah_wardrobe_show_case_yn",
+      "shovel_yn", "sickle_yn", "weaving_tool_yn",
+      "chicken_duck_pigeon_yn",
+      "income",
+      "spent_total_month",
+      "debt",
+      "target_child_sex",
+      "target_child_months"
+    )
+  ) %>%
+  # Convert to USD
+  mutate(
+    dropped_yn = "Participated in 3 surveys",
+    income_USD = income / BDT_USD_exchange_rate_baseline,
+    spent_total_month_USD = spent_total_month/ BDT_USD_exchange_rate_baseline,
+    debt_USD = debt / BDT_USD_exchange_rate_baseline
+  ) %>%
+  select(-c(income, spent_total_month, debt)) %>%
+  select(
+    dropped_yn, study_arm_overall, target_child_sex, target_child_months,
+    hh_size, hh_size_2mo_u5, hh_size_u2mo, hh_ppl_smoke,
+    income_USD, spent_total_month_USD, debt_USD,
+    everything()
+  )
+
+
+
+survey_data_tab1_IOM <- 
+  survey_data %>%
+  filter(camp_id %in% c("8E", "8W", "9", "10", "18"))	%>% 
+  filter(timepoint == "baseline") %>%
+  select(
+    c(
+      "study_arm_overall",
+      "hh_size", "hh_size_2mo_u5", "hh_size_u2mo",
+      "hh_ppl_smoke",
+      "electricity",
+      "electric_fan_yn",
+      "smartphone_yn", "mobile_phone_yn", # "radio_yn",   
+      "portable_lamp_yn", "solar_lamp_yn", 
+      
+      "mattress_yn", "blanket_yn", "mosquito_net_yn",
+      "umbrella_yn",
+      "chair_bench_yn", "table_yn", # "almirah_wardrobe_show_case_yn",
+      "shovel_yn", "sickle_yn", "weaving_tool_yn",
+      "chicken_duck_pigeon_yn",
+      "income",
+      "spent_total_month",
+      "debt",
+      "target_child_sex",
+      "target_child_months"
+    )
+  ) %>%
+  # Convert to USD
+  mutate(
+    dropped_yn = "Participated in 3 surveys",
+    income_USD = income / BDT_USD_exchange_rate_baseline,
+    spent_total_month_USD = spent_total_month/ BDT_USD_exchange_rate_baseline,
+    debt_USD = debt / BDT_USD_exchange_rate_baseline
+  ) %>%
+  select(-c(income, spent_total_month, debt)) %>%
+  select(
+    dropped_yn, study_arm_overall, target_child_sex, target_child_months,
+    hh_size, hh_size_2mo_u5, hh_size_u2mo, hh_ppl_smoke,
+    income_USD, spent_total_month_USD, debt_USD,
+    everything()
+  )
+
+## The following hh were missing from endline data collection -- we want to create separate table object to view their assets 
+# and compare wealth to see if they are fundementally different than those included in study
+
+missing_data_tab1 <-
+  missing_from_endline_data %>%
+  filter(timepoint == "baseline") %>%
+  select(
+    c(
+      "study_arm_overall",
+      "hh_size", "hh_size_2mo_u5", "hh_size_u2mo",
+      "hh_ppl_smoke",
+      "electricity",
+      "electric_fan_yn",
+      "smartphone_yn", "mobile_phone_yn", # "radio_yn",   
+      "portable_lamp_yn", "solar_lamp_yn", 
+      
+      "mattress_yn", "blanket_yn", "mosquito_net_yn",
+      "umbrella_yn",
+      "chair_bench_yn", "table_yn", # "almirah_wardrobe_show_case_yn",
+      "shovel_yn", "sickle_yn", "weaving_tool_yn",
+      "chicken_duck_pigeon_yn",
+      "income",
+      "spent_total_month",
+      "debt",
+      "target_child_sex",
+      "target_child_months"
+    )
+  ) %>%
+  # Convert to USD
+  mutate(
+    dropped_yn = "Lost to attrition",
+    income_USD = income/ BDT_USD_exchange_rate_baseline,
+    spent_total_month_USD = spent_total_month/ BDT_USD_exchange_rate_baseline,
+    debt_USD = debt / BDT_USD_exchange_rate_baseline
+  ) %>%
+  select(-c(income, spent_total_month, debt)) %>%
+  select(
+    dropped_yn, study_arm_overall, 
+    hh_size, hh_size_2mo_u5, hh_size_u2mo, hh_ppl_smoke,
+    income_USD, spent_total_month_USD, debt_USD,
+    everything()
+  )
+
+
+###############################################################################
+# # Define variables that will be used in the tables 
+###############################################################################
+
+
+### Define the vars for the table and specify which are factors
+table1Vars <-
+  c(
+    "dropped_yn",
+    "Study arm",
+    "Target child is female", 
+    "Age of target child (mo)",
+    "Number of household members", 
+    "Number of hh members 2-59 months",
+    "Number of household members 0 to < 2 months",
+    "Number of household members who smoke",
+    "Monthly income [USD]",
+    "Monthly expenditure [USD]",
+    "Total debt [USD]",
+    "House has solar electricity",
+    "Has 1+ electric fan", 
+    "Has 1+ smartphone", 
+    "Has 1+ mobile phone",
+    # "Has 1+ radio", # Note that no family had a radio so the table has radio_yn = 0
+    "Has 1+ portable lamp",
+    "Has 1+ solar lamp",
+    "Has 1+ mattress", 
+    "Has 1+ blanket",
+    "Has 1+ mosquito net",
+    "Has 1+ umbrella", 
+    "Has 1+ chair/bench", 
+    "Has 1+ table", 
+    # "Has 1+ wardrobe", 
+    "Has 1+ shovel", 
+    "Has 1+ sickle", 
+    "Has 1+ weaving tool", 
+    "Has 1+ poultry"
+    # "Has home garden",
+
+  )
+
+
+table1FactorVars <- 
+  c(
+    "House has solar electricity",
+    "Has 1+ electric fan", 
+    "Has 1+ smartphone", 
+    "Has 1+ mobile phone",
+    "Has 1+ radio",
+    "Has 1+ portable lamp",
+    "Has 1+ solar lamp",
+    "Has 1+ mattress", 
+    "Has 1+ blanket",
+    "Has 1+ mosquito net",
+    "Has 1+ umbrella", 
+    "Has 1+ chair/bench", 
+    "Has 1+ table", 
+    # "Has 1+ wardrobe", # remove because only 3 total people have a wardrobe
+    "Has 1+ shovel", 
+    "Has 1+ sickle", 
+    "Has 1+ weaving tool", 
+    "Has 1+ poultry",
+    "Target child is female"
+  )
+
+
+# Make full dataset
+survey_all_tab1 <- 
+  survey_data_tab1 %>% 
+  bind_rows(missing_data_tab1) %>%
+  mutate(dropped_yn = ordered(dropped_yn, levels = c("Participated in 3 surveys", "Lost to attrition")))
+
+# Name datasets
+names(survey_all_tab1) <- table1Vars
+
+names(survey_data_tab1) <- table1Vars
+
+names(survey_data_tab1_IOM) <- table1Vars
+
+names(missing_data_tab1) <-  table1Vars
+
+survey_all_tab1$`Monthly income [USD]`
+
+
+###############################################################################
+# # Create Table 1 Objects
+###############################################################################
+
+
+# Get average stats for all hh
+tab1_baseline_no_study_arm <- 
+  CreateTableOne(
+    data = survey_data_tab1, 
+    vars = table1Vars, factorVars = table1FactorVars
+  )
+
+tab1_baseline_no_study_arm
+
+
+## Table 2 that was used for paper 
+
+# Compare arms among hh used for analysis (participated in all three timepoints)
+tab1_baseline <- 
+  CreateTableOne(
+    data = survey_data_tab1, 
+    vars = table1Vars, factorVars = table1FactorVars, strata = "Study arm"
+  )
+
+tab1_baseline
+
+# Compare only the hh that were in the IOM camps
+tab1_baseline_IOM <- 
+  CreateTableOne(
+    data = survey_data_tab1_IOM, 
+    vars = table1Vars, factorVars = table1FactorVars, strata = "Study arm"
+  )
+
+tab1_baseline_IOM
+
+###############################################################################
+# # Create table 1
+###############################################################################
+
+##table 1 code.... Comparing hh that were included in study compared to those dropped from study.
+# Compare hh that dropped compared to those that did not
+#Used to calculate the data that were missing by endline 
+tab1_missing <-  
+  CreateTableOne(data = missing_data_tab1, 
+                 vars = table1Vars, factorVars = table1FactorVars, strata = "Study arm"
+  )
+
+tab1_comparison_dropped <-  
+  CreateTableOne(data = survey_all_tab1 %>% filter(`Study arm` == "comparison"), 
+                 vars = table1Vars, factorVars = table1FactorVars, strata = "dropped_yn"
+  )
+
+tab1_comparison_dropped
+
+tab1_intervention_dropped <-  
+  CreateTableOne(data = survey_all_tab1 %>% filter(`Study arm` == "intervention"), 
+                 vars = table1Vars, factorVars = table1FactorVars, strata = "dropped_yn"
+  )
+
+tab1_intervention_dropped
+
+
+
+
+###############################################################################
+# # Save Table 1 datasets as CSVs
+###############################################################################
+
+tab1_baseline_no_study_arm_csv <- print(tab1_baseline_no_study_arm)
+write.csv(tab1_baseline_no_study_arm_csv, "tab1_baseline_no_study_arm.csv")
+
+tab1_baseline_csv <- print(tab1_baseline)
+write.csv(tab1_baseline_csv, "tab1_baseline.csv")
+
+tab1_comparison_dropped_csv <- print(tab1_comparison_dropped)
+write.csv(tab1_comparison_dropped_csv, "tab1_comparison_dropped.csv")
+
+tab1_intervention_dropped_csv <- print(tab1_intervention_dropped)
+write.csv(tab1_intervention_dropped_csv, "tab1_intervention_dropped.csv")
+```
+
+## Who Collected Fuel 
+```{r}
+# for fuel_collection_who, the denominator is hh that EVER collected type X fuel
+fuel_collection_who_baseline <- c()
+for (fuel in c("gather_scraps", "collect_wood", "receive_wood", "buy_wood", "receive_lpg", "buy_lpg", "receive_crh", "buy_crh")){
+  for (person in c("w", "g", "m", "b")){
+    fuel_collection_who_baseline <- c(fuel_collection_who_baseline, paste(fuel, person, sep = "_"))
+  }
+}
+
+
+## Intervention arm at baseline
+
+
+
+fuel_procurement_who_baseline_intervention <-
+  survey_data %>% 
+  filter(timepoint == "baseline") %>%
+  filter(study_arm_overall == "intervention") %>%
+  select(
+    fcn_id,
+    study_arm_overall, timepoint, all_of(fuel_collection_who_baseline)
+  ) %>%
+  pivot_longer( 
+    cols = c(
+      all_of(fuel_collection_who_baseline)
+    ),
+    names_to = "vars",
+    values_to = "collected_yn"
+  ) %>%
+  mutate(collected_yn = ifelse(collected_yn == 0, NA, collected_yn)) %>%
+  separate(vars, into = c("procurement", "fuel", "demographic"), sep = "_") %>%
+  unite("fuel_type", c("procurement", "fuel"), sep = "_") %>%
+  mutate(counter = 1) %>%
+  select(-study_arm_overall, -timepoint) %>%
+  group_by(fuel_type, demographic) %>%
+  summarise(
+    n = sum(collected_yn, na.rm = TRUE),
+    pc = n / sum(counter) * 100
+  ) 
+
+
+
+print(fuel_procurement_who_baseline_intervention)  
+```
+
+## Expenditures Plot 
+
+```{r expenditures plot}
+
+fcn_id_purchased_fuel_30_endline <-
+  survey_data %>%
+  filter(
+    (fuel_30_buy_wood == 1 | fuel_30_buy_lpg == 1 | fuel_30_buy_crh == 1) & timepoint == "endline"
+  ) %>%
+  pull(fcn_id) %>% unique() # had to use pull to get a vector instead of select, which kept a tibble
+
+fcn_id_lpg_sufficiency_endline <-
+  survey_data %>%
+  filter(
+    (lpg_sufficiency == "LPG sufficent") & timepoint == "endline"
+  ) %>%
+  pull(fcn_id) %>% unique() # had to use pull to get a vector instead of select, which kept a tibble
+
+
+monthly_expenditures_base <- 
+  survey_data %>%
+  select(timepoint, study_arm_overall, fcn_id, fuel_30_buy_wood, fuel_30_buy_lpg, fuel_30_buy_crh, spent_total_month, all_of(spent_monthly_vars)) %>%
+  select(-c(fuel_30_buy_wood, fuel_30_buy_lpg, fuel_30_buy_crh)) %>% #
+  mutate(
+    # fuel_30_purchased_fuel = ifelse(fuel_30_buy_wood == 1 | fuel_30_buy_lpg == 1 | fuel_30_buy_crh == 1, 1, 0),
+    # labels all the hh that purchased fuel at endline, regardless of whether the purchased at baseline or not (arm is still captured in study_group_overall color)
+    fuel_30_purchased_fuel_endline = ifelse(fcn_id %in% fcn_id_purchased_fuel_30_endline, 1, 0),
+    lpg_sufficiency_endline = ifelse(fcn_id %in% fcn_id_lpg_sufficiency_endline, "lpg_sufficient_endline", "lpg_insufficient_endline")
+  ) %>%
+  gather(-timepoint, -study_arm_overall, -fcn_id, -fuel_30_purchased_fuel_endline, -lpg_sufficiency_endline, key = "category", value = "expenditure") %>% # fuel_30_purchased_fuel
+  # filter(category %notin% 
+  # 			 	c(
+  # 			 		"spent_total_month_with_6mo_monthly",
+  # 			 		"buy_lpg_cost", 
+  # 			 		"spent_tobacco_pan", 
+  # 			 		"spent_clothing_month", 
+  # 			 		"spent_medical_month", 
+  # 			 		"spent_debt_month",
+  # 			 		
+  # 			 		"spent_transport", "spent_shelter_month", 
+  # 			 		"spent_celebrations_month",   "spent_education_month", 
+# 			 		"spent_phone",  "spent_hygiene",
+# 			 		"spent_hh_items", "spent_other", "spent_other_month"
+# 			 	)
+# ) %>%
+mutate(
+  category = as.factor(category)
+) %>%
+  ungroup()
+
+monthly_expenditures_summary <-
+  monthly_expenditures_base %>%
+  group_by(timepoint, study_arm_overall,category) %>% #  lpg_sufficiency_endline
+  summarise(
+    n = n(),
+    income_mean = mean(expenditure, na.rm = TRUE),
+    sd = sd(expenditure, na.rm = TRUE),
+    se_expenditure = sd(expenditure, na.rm = TRUE) / sqrt(n())
+    ) %>% 
+    mutate(
+    lower_ci =  income_mean - 1.96 * se_expenditure,
+    upper_ci = income_mean + 1.96 * se_expenditure
+  )
+  
+
+monthly_expenditures_summary
+
+supp.labs <- c("Firewood spending (per month)", "Food spending (per month)")
+names(supp.labs) <- c("buy_wood_cost", "spent_food")
+
+fig_monthly_expenditures <-	
+  monthly_expenditures_base %>%
+  mutate(
+    lpg_sufficiency_endline = ordered(lpg_sufficiency_endline, levels = c("lpg_sufficient_endline", "lpg_insufficient_endline"), labels = c("LPG sufficient \nat endline", "LPG insufficient \nat endline")),
+    fuel_30_purchased_fuel_endline = 
+      # factor(fuel_30_purchased_fuel, levels = c(0, 1), labels = c("Did NOT \n buy fuel \nin past 30 days", "Bought fuel \nin past 30 days ")),
+      factor(fuel_30_purchased_fuel_endline, levels = c(0, 1), labels = c("Did NOT \nbuy fuel \nin 30 days before endline", "Bought fuel \nin 30 days before endline")),
+    category_label = 
+      ordered(
+        category,
+        levels = c(
+          "spent_total_month_with_6mo_monthly",
+          "spent_food",
+          "buy_wood_cost",
+          "buy_lpg_cost",
+          "spent_tobacco_pan",
+          "spent_clothing_month",
+          "spent_debt_month", # There is one value of 50,000 (intervention, midline) that is pulling up the average a lot
+          "spent_medical_month",
+          "spent_transport", "spent_shelter_month",
+          "spent_celebrations_month",   "spent_education_month",
+          "spent_phone",  "spent_hygiene",
+          "spent_hh_items", "spent_other_month"
+        ),
+        # labels = 
+        # 	c(
+        # 		"total", # all expenditures
+        # 		"  wood  ", 
+        # 		"  food  "#,  
+        # 		"other", #"   lpg   ",
+        # 		"other", #"pan/\ntobacco",
+        # 		"other", #"clothing",
+        # 		"other", #"medical",
+        # 		"other", # "paying \ndebt",
+        # 
+        # 		"other", "other",
+        # 		"other", "other",
+        # 		"other", "other",
+        # 		"other", "other"
+        # 	)
+        labels =
+          c(
+            "total", # all expenditures
+            "  food  ",
+            "  wood  ",
+            "   lpg   ",
+            "pan/\ntobacco",
+            "clothing",
+            "paying \ndebt",
+            "other", # "medical",
+            "other", "other", # "transport", "shelter",
+            "other", "other",
+            "other", "other",
+            "other", "other"
+          )
+      )
+  ) %>%
+  ungroup() %>%
+  group_by(timepoint, study_arm_overall, category_label) %>% #  lpg_sufficiency_endline
+  drop_na(category_label) %>% 
+  ggplot(aes(x = timepoint, y = expenditure / BDT_USD_exchange_rate_endline, color = study_arm_overall, shape = timepoint, group = study_arm_overall)) +
+  # geom_boxplot() +
+  # geom_point(size = 3) + # position = position_dodge(width = 0.2),
+  stat_summary(fun = "mean", geom = "line", size = 1) +
+  stat_summary(fun = "mean", geom = "point", size = 2) +
+  stat_summary(
+    fun.data = "mean_cl_boot",
+    geom = "linerange" #,
+    # position = position_dodge(width = 0.2
+  ) +
+  
+  # ggpubr::stat_compare_means(
+  # 	# aes(group = timepoint),
+  # 	label = "p.signif", #"p.signif" # symnum.args <- list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1), symbols = c("****", "***", "**", "*", "ns"))
+  # 	# label = "p.format",
+  # 	method = "wilcox.test",
+  # 	paired = FALSE, # not paired because this is endline only
+  # 	# label.y = 18,
+  # 	hide.ns = TRUE#,
+  # 	# ref.group = ".all."
+  # 	# show.legend = TRUE # doesn't show the legend of stas?
+# ) +
+scale_y_continuous(breaks = seq(0, 70, 2), minor_breaks = seq(0, 70, 1), labels = scales::label_dollar()) +
+  scale_color_manual(
+    name = "Study_arm",
+    breaks = c("intervention", "comparison"),
+    # labels = c("Pre-intervention", "Intervention", "Outdoor"),
+    labels = c("Intervention", "Comparison"),
+    values = c("#138b87",  "#430154"),
+    # values = c("#7570b3",  "#d95f02", "#1b9e77")
+  ) +
+  # viridis::scale_fill_viridis(
+  # 	discrete = TRUE,
+  # 	end = 2/3
+  # ) +
+  
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 1, ),
+    #axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) + 
+  guides(
+    color = guide_legend(title = "Study arm"),
+    shape = guide_legend(title = "Timepoint")
+  ) +
+  labs(
+    title = "Monthly household expenditure",
+    x = "Expenditure category",
+    y = "Monthly expenditure (USD)"
+  ) + 
+  # facet_wrap(~ category_label, ncol = 3) #, scales = "free_y"
+  facet_grid(. ~ category_label, scales = "free_y") 
+# facet_grid( ~ category, labeller = labeller(category = supp.labs)) # + # these only work with facet_wrap: , strip.position = "bottom", scales = "free_y"
+# facet_grid(lpg_sufficiency_endline ~ category) + # fuel_30_purchased_fuel_endline
+# coord_cartesian(ylim = c(0, 40))
+
+
+fig_monthly_expenditures
+
+ggsave(
+  fig_monthly_expenditures,
+  filename = here::here("/Users/christopherleboa/Library/CloudStorage/GoogleDrive-cleboa@berkeley.edu/.shortcut-targets-by-id/1HGzyHFSinRs5Jh4j7SZsJyb2KPXJ8mh8/Rohingya/Rohingya research - Fuel/Manuscripts/RF105_Indoor air pollution and non-health impacts/RF105B/fig2_monthly_expenditures.png"),
+  width = 10,
+  height = 6
+)
+
+
+model_data <- survey_data %>% filter(timepoint %in% c("baseline", "endline"))
+model_data <- survey_data %>% filter(timepoint %in% c("baseline", "midline"))
+
+dind_fxn(c("spent_food", "buy_wood_cost"), model_data)
+```
+
+
+
+## Food Security Results 
+
+In this section we analyze the FCS scores and the HDSS scores reported by households 
+
+```{r}
+food_dataset <-
+	survey_data %>%
+	select(
+		study_arm_overall,
+		timepoint,
+		fcn_id, 
+		camp_id,
+		block_id,
+		subblock_id,
+		hh_size,
+		contains("food"), 
+		contains("rice"),
+		contains("bread"),
+		contains("corn"),
+		contains("potatoes"),
+		contains("lentils"),
+		contains("dairy"),
+		contains("veggies"),
+		contains("fruit"),
+		contains("eggs"),
+		contains("fish"),
+		contains("poultry"),
+		contains("goat_sheep"),
+		contains("beef"),
+		contains("oil"),
+		contains("sugar")
+	) %>%
+	select(
+		-c(
+			contains("corner"),
+			contains("boil")
+		)
+	)
+
+FCS_HDDS_data <-
+	survey_data %>%
+	select(
+		study_arm_overall, timepoint, fcn_id, camp_id, block_id, subblock_id, SubmissionDate,timepoint_num, study_arm_overall_num,
+		all_of(food_types_consumed_vars), contains("food_consump_adult_day")
+	) %>%
+	rowwise() %>%
+	mutate(
+		staple = 
+			ifelse(
+				sum(rice_adults_week, bread_adults_week, corn_adults_week, potatoes_adults_week, na.rm = TRUE) >= 7, 
+				7, 
+				sum(rice_adults_week, bread_adults_week, corn_adults_week, potatoes_adults_week, na.rm = TRUE)
+			),
+		pulses = 
+			ifelse(
+				lentils_adults_week >= 7, 
+				7, 
+				lentils_adults_week
+			),
+		veggies = 
+			ifelse(
+				veggies_adults_week >= 7, 
+				7, 
+				veggies_adults_week
+			),
+		fruit = 
+			ifelse(
+				fruit_adults_week >= 7, 
+				7, 
+				fruit_adults_week
+			),
+		meat_fish = 
+			ifelse(
+				sum(eggs_adults_week, fish_adults_week, poultry_adults_week, goat_sheep_adults_week, beef_adults_week, na.rm = TRUE) >= 7, 
+				7, 
+				sum(eggs_adults_week, fish_adults_week, poultry_adults_week, goat_sheep_adults_week, beef_adults_week, na.rm = TRUE)
+			),
+		dairy = 
+			ifelse(
+				dairy_adults_week >= 7, 
+				7, 
+				dairy_adults_week
+			),
+		sugar = 
+			ifelse(
+				sugar_adults_week >= 7, 
+				7, 
+				sugar_adults_week
+			),
+		oil = 
+			ifelse(
+				oil_adults_week >= 7, 
+				7, 
+				oil_adults_week
+			),
+		# [food_groups]	1	rice
+		# [food_groups]	2	bread
+		# [food_groups]	3	corn
+		# [food_groups]	4	potatoes
+		# [food_groups]	5	lentils
+		# [food_groups]	6	eggs
+		# [food_groups]	7	dairy
+		# [food_groups]	8	vegetables
+		# [food_groups]	9	fruit
+		# [food_groups]	10	fish
+		# [food_groups]	11	poultry
+		# [food_groups]	12	goat
+		# [food_groups]	13	beef
+		# [food_groups]	14	oil
+		# [food_groups]	15	sugar
+		cereals_yn = ifelse(sum(food_consump_adult_day.1, food_consump_adult_day.2, food_consump_adult_day.3, na.rm = TRUE) > 0, 1, 0),
+		tubers_yn = ifelse(food_consump_adult_day.4 > 0, 1, 0),
+		veggies_yn = ifelse(food_consump_adult_day.8 > 0, 1, 0),
+		fruit_yn = ifelse(food_consump_adult_day.9 > 0, 1, 0),
+		meat_yn = ifelse(sum(food_consump_adult_day.11, food_consump_adult_day.12, food_consump_adult_day.13, na.rm = TRUE) > 0, 1, 0),
+		eggs_yn = ifelse(food_consump_adult_day.6 > 0, 1, 0),
+		fish_yn = ifelse(food_consump_adult_day.10 > 0, 1, 0),
+		pulses_yn = ifelse(food_consump_adult_day.5 > 0, 1, 0),
+		milk_yn = ifelse(food_consump_adult_day.7 > 0, 1, 0),
+		oil_yn = ifelse(food_consump_adult_day.14 > 0, 1, 0),
+		sugar_yn = ifelse(food_consump_adult_day.15 > 0, 1, 0),
+		# did not ask about miscellaneous
+		hdds_no_misc = sum(cereals_yn, tubers_yn, veggies_yn, fruit_yn, meat_yn, eggs_yn, fish_yn, pulses_yn, milk_yn, oil_yn, sugar_yn),
+		hdds_assume_misc_1 = hdds_no_misc + 1,
+		staple_weight = staple * 2,
+		pulses_weight = pulses * 3,
+		veggies_weight = veggies * 1,
+		fruit_weight = fruit * 1, 
+		meat_fish_weight = meat_fish * 4,
+		milk_weight = dairy * 4,
+		sugar_weight = sugar * 0.5, 
+		oil_weight = oil * 0.5,
+		# did not ask about condiments
+		fcs = sum(staple_weight, pulses_weight, veggies_weight, fruit_weight, meat_fish_weight, milk_weight, sugar_weight, oil_weight),
+		fcs_category = 
+			case_when(
+				fcs <= 21 ~ "poor",
+				fcs >= 21.5 & fcs <= 35 ~ "borderline",
+				fcs > 35 ~ "acceptable"
+			),
+		fcs_binary = if_else(fcs<=35, 1, 0),
+		fcs_category = ordered(fcs_category, levels = c("poor", "borderline", "acceptable"))
+	) %>%
+	ungroup()
+
+## We did not have the HDDS scores at baseline -- added them later
+FCS_HDDS_data %>% 
+  group_by(timepoint, study_arm_overall) %>% 
+  summarise(
+    mean_hdds = mean(hdds_no_misc, na.rm = TRUE), 
+    se_hdds = sd(hdds_no_misc, na.rm = TRUE) / sqrt(n())
+    ) %>% 
+    mutate(
+    lower_ci = mean_hdds- 1.96 * se_hdds,
+    upper_ci = mean_hdds + 1.96 * se_hdds
+  )
+  
+FCS_HDDS_data %>% 
+  group_by(timepoint, study_arm_overall) %>% 
+  summarise(
+    mean_fcs = mean(fcs, na.rm = TRUE),
+    mean_fcs_binary = sum(fcs_binary, na.rm = TRUE) / n() * 100)
+
+
+#Output dataset to analyze using XGBOOST) 
+fcs_output <- FCS_HDDS_data %>% 
+  select(fcn_id, timepoint, fcs_binary, study_arm_overall, fcs) %>% 
+  write_rds(here::here("4_data/RohingyaFuel_survey_data_fcs.rds"))
+
+
+plastics <- 
+	FCS_HDDS_data %>% 
+	filter(timepoint %in% c("baseline", "endline"))
+
+plastics <- 
+	FCS_HDDS_data %>% 
+	filter(timepoint %in% c("baseline", "midline"))
+	
+dind_fxn(data = plastics, "fcs")
+
+dind_fxn(data = plastics, "fcs_binary")
+
+
+
+```
+
+## PM Results 
+```{r}
+
+# https://cran.r-project.org/web/packages/MakefileR/vignettes/demo.html
+# 
+# Outdoor monitor placement 
+# All the Outdoor monitors at the same place and same school at Intervention but
+#Pre-Intervention At 2 Mosque(camp 8W and camp 10). All the Baseline outdoor monitor
+#and midline outdoor monitor setup as the same location.Note that no different 
+#location in school and Mosque. Always had collected one location PM 2.5 data.
+
+
+
+
+#Input Files
+
+
+
+### Output Files RDS 
+
+
+
+pm_data_min_rds <- here::here("4_data/pm_data_min.rds")
+
+pm_data_nearest_min_rds <- here::here("4_data/pm_data_nearest_min.rds")
+
+pm_data_hour_rds <- here::here("4_data/pm_data_hour.rds")
+
+pm_data_nearest_hour_rds <- here::here("4_data/pm_data_nearest_hour.rds")
+
+pm_data_min_csv <- here::here("4_data/pm_data_min.csv")
+
+pm_data_nearest_min_csv <- here::here("4_data/pm_data_nearest_min.csv")
+
+pm_data_hour_csv <- here::here("4_data/pm_data_hour.csv")
+
+pm_data_nearest_hour_csv <- here::here("4_data/pm_data_nearest_hour.csv")
+
+
+# Manually move the compiled file into the raw folder of the project
+all_pm_data_path_rds_project <- here::here("2_data_raw/PATS+_Data_20220703.rds")
+
+file_pm_data_hour_av_by_hh <- here::here("4_data/pm_data_hour_av_by_hh.rds")
+# file_HAPEX_data_base <- here::here("2_data_raw", "HAPEX_Data_20220703.rds")
+
+
+##############################################################################
+# Read file
+##############################################################################
+
+pm_data_full <- 
+  read_rds(file_in_pm_data_clean_rds) %>% #Read in data file of all PM2.5 data 
+	mutate(date = as_date(date)) 
+
+#To create teh fcn_id from the hh id we pull the last digits of the hh id 
+
+pm_data_full <- pm_data_full %>% 	mutate(fcn_id = as.numeric(str_extract(hh_id, ".{6}$") ))
+
+pm_data_full <-  
+  pm_data_full %>% left_join(lpg_receive_date, by = "fcn_id") #bind data to when hh starteds receiving lpg
+
+
+###### Edit dataset to add in the variable for who was a recent receipt 
+pm_data_full <- 
+  pm_data_full %>%  
+  mutate(date = as.Date(dateTime)) %>% 
+  #filter(date < first_receive_lpg_ymd ).             #This adds in a variable to determine LPG receipt from
+  mutate(
+    lpg_enrolled_and_receiving = case_when(
+    date < first_receive_lpg_ymd ~ "not yet receiving LPG through distribution program", 
+    date < "2020-04-15" & date > first_receive_lpg_ymd ~ "recent receipt lpg", 
+    date > "2020-04-15" & date < "2021-01-15" ~ "midline", 
+    date > "2022-01-15" ~ "endline", 
+    .default = NA, 
+    ), 
+    study_arm_update = case_when(
+      study_arm == "intervention" & lpg_enrolled_and_receiving == "not yet receiving LPG through distribution program" ~ "pre-receipt lpg", 
+      study_arm == "intervention" & lpg_enrolled_and_receiving == "recent receipt lpg" ~ "recent receipt lpg", 
+      study_arm == "intervention" & is.na(lpg_enrolled_and_receiving)  ~ "unknown receipt lpg", 
+      .default = study_arm
+    ))
+
+################################################################################
+## QC:  Detection of high monitor values
+################################################################################
+pm_data_full %>%
+	filter(timepoint == "baseline") %>%
+	filter(study_arm == "intervention") %>%
+	ggplot(aes(dateTime, PM_Estimate, color = hh_id_note)) + # aes(nearest_min, PM_Estimate, color = hh_id_note)
+	# geom_point(na.rm = TRUE) +
+	geom_line() + 
+	# 	geom_text(aes(label = hh_id, x = as_datetime(Inf), y = PM_Estimate), hjust = -.1) + # how do I do x = Inf for datetime
+	# 	scale_colour_discrete(guide = 'none')  +    
+	#   theme(plot.margin = unit(c(1,3,1,1), "lines")) +
+	scale_x_datetime(labels = scales::date_format("%Y-%m-%d")) + # "%Y-%m-%d %H:%M" # labels = scales::date_format("%H:%M")
+	theme(
+		legend.position = "none"
+	) + 		
+	labs(
+		title = "midline_intervention"
+	) +
+	facet_wrap(date ~ ., scales = "free")
+
+pm_data_high_monitors <-
+	pm_data_full %>%
+	filter(PM_Estimate > 3000) %>%
+	select(timepoint, study_arm, hh_id) %>%
+	unique()
+
+pm_data_very_high_monitors <-
+	pm_data_full %>%
+	filter(PM_Estimate > 10000) %>%
+	select(timepoint, study_arm, hh_id) %>%
+	unique()
+
+
+###############################################################
+## Create overall analysis dataset 
+#############################################################
+
+# drop the endline data that was during the cold season --> we'll analyze this separately
+pm_data <-
+	pm_data_full %>%
+	filter(
+	  !(date > as_date("2022-02-02") & date < as_date("2022-03-24")),
+	  note %notin% c("qc", "insufficient data")
+	  ) %>% 
+  mutate(PM_Estimate = if_else(PM_Estimate < 10, 10, PM_Estimate )) #Replacing all # below the lower detection limit with 10 
+
+
+
+# uses the actual minute (always rounds down to the nearest min)
+pm_data_min <-
+	pm_data %>%
+	filter(note != "insufficient data") %>%
+	group_by(timepoint, study_arm, note, hh_id, hh_id_note, dateTime_min) %>%
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	ungroup()
+
+# rounds to the nearest min (up or down)
+pm_data_nearest_min <-
+	pm_data %>%
+	filter(note != "insufficient data") %>%
+	group_by(timepoint, study_arm, note, hh_id, hh_id_note, nearest_min) %>% # collapses all if they have the same date label, so I hope they don't!
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	ungroup()
+
+
+# uses the actual hour (always rounds down to the nearest hour)
+pm_data_hour <-
+	pm_data %>%
+	filter(note != "insufficient data") %>%
+	group_by(timepoint, study_arm, note, hh_id, hh_id_note, dateTime_hour) %>%
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	ungroup() %>%
+	mutate(
+		over_100 = if_else(PM_Estimate > 100, 1, 0),
+		over_500 = if_else(PM_Estimate > 500, 1, 0)
+	)
+
+# rounds to the nearest hour (up or down)
+pm_data_nearest_hour <-
+	pm_data %>%
+	filter(note != "insufficient data") %>%
+	group_by(timepoint, study_arm, note, hh_id, hh_id_note, nearest_hour) %>%
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	ungroup() %>%
+	mutate(
+		over_100 = if_else(PM_Estimate > 100, 1, 0),
+		over_500 = if_else(PM_Estimate > 500, 1, 0)
+	)
+
+
+# Create variable of average weighted PM data per hh 
+pm_data_household <- 
+  	pm_data %>%
+	filter(note != "insufficient data") %>%
+	group_by(timepoint, study_arm, note, hh_id) %>%
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	ungroup() %>%
+	mutate(
+	  child_av_bl = 20.1/24 *PM_Estimate + 3.9/24 * 31,
+	  child_av_el = 20.1/24 *PM_Estimate + 3.9/24 * 13, 
+	  resp_av_bl = 22.7/24 *PM_Estimate + 1.3/24* 31, 
+	  resp_av_el = 22.7/24 *PM_Estimate + 1.3/24* 31, 
+	  ch_gt_65_bl = ifelse(child_av_bl >65, 1, 0), 
+	  ch_gt_35_bl = ifelse(child_av_bl >35, 1, 0), 
+	  ch_gt_65_el = ifelse(child_av_el >65, 1, 0), 
+	  ch_gt_35_el = ifelse(child_av_el >35, 1, 0), 
+	  resp_gt_65_bl = ifelse(resp_av_bl >65, 1, 0), 
+	  resp_gt_35_bl = ifelse(resp_av_bl >35, 1, 0), 
+	   resp_gt_65_el = ifelse(resp_av_el >65, 1, 0), 
+	  resp_gt_35_el = ifelse(resp_av_el >35, 1, 0)
+	) %>% 
+  group_by(timepoint, study_arm) %>% 
+  summarise(
+    sum(ch_gt_65_bl) / n(), 
+    sum(ch_gt_35_bl) / n(), 
+    sum(ch_gt_65_el) / n(), 
+    sum(ch_gt_35_el) / n(), 
+    sum(resp_gt_65_bl) / n(), 
+    sum(resp_gt_35_bl) / n(), 
+    sum(resp_gt_65_el) / n(), 
+    sum(resp_gt_35_el) / n())
+    
+  
+
+###############################################################################
+## Save data
+###############################################################################
+# 
+# pm_data_min %>%
+# 	saveRDS(pm_data_min_rds)
+# 
+# pm_data_nearest_min %>%
+# 	saveRDS(pm_data_nearest_min_rds)
+# 
+# pm_data_hour %>%
+# 	saveRDS(pm_data_hour_rds)
+
+# pm_data_nearest_hour %>%
+# 	saveRDS(pm_data_nearest_hour_rds)
+
+# write.csv(pm_data_min, pm_data_min_csv)
+# 
+# write.csv(pm_data_nearest_min, pm_data_nearest_min_csv)
+# 
+# write.csv(pm_data_hour, pm_data_hour_csv)
+# 
+# write.csv(pm_data_nearest_hour, pm_data_nearest_hour_csv)
+
+
+#############################################
+#Figure of PM data 
+##############################################
+
+# Step 1: Aggregate data by 60-minute intervals and calculate means and standard errors
+pm_summary <- 
+  pm_data %>%
+  mutate(nearest_min_60 = floor_date(nearest_min, "60 minutes")) %>%  # Round to nearest 10-minute interval
+  group_by(timepoint, study_arm, nearest_min_60) %>%
+  summarise(
+    PM_Estimate_av = mean(PM_Estimate, na.rm = TRUE),
+    count = n_distinct(hh_id),
+    se_pm_estimate = sd(PM_Estimate, na.rm = TRUE) / sqrt(n()),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    lower_ci = PM_Estimate_av - 1.96 * se_pm_estimate,
+    upper_ci = PM_Estimate_av + 1.96 * se_pm_estimate
+  )
+
+pm_data %>% 
+  filter(timepoint != "baseline" & study_arm != "intervention") %>% 
+  mutate(nearest_min_60 = floor_date(nearest_min, "60 minutes")) %>%  # Round to nearest 10-minute interval
+  summarise(
+    PM_Estimate_av = mean(PM_Estimate, na.rm = TRUE),
+    count = n_distinct(hh_id),
+    se_pm_estimate = sd(PM_Estimate, na.rm = TRUE) / sqrt(n()),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    lower_ci = PM_Estimate_av - 1.96 * se_pm_estimate,
+    upper_ci = PM_Estimate_av + 1.96 * se_pm_estimate
+  )
+  
+
+# Step 2: Create the plot with geom_smooth and error bars
+fig_pm_day <- 
+  ggplot(pm_summary, aes(x = nearest_min_60, y = PM_Estimate_av, group = study_arm)) +
+  geom_line(aes(color = study_arm), linewidth = 1) +  # Smooth the line without showing its own confidence interval
+  # geom_point(alpha = 0.5) + # Optional: Uncomment if you'd like points on the graph
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci, fill = study_arm), alpha = 0.4) +
+  
+  # Horizontal reference lines
+  geom_hline(yintercept = 35, color = "red", linetype = 2) + #WHO interim goal #3
+  geom_hline(yintercept = 65, color = "black", linetype = 4) + #BD air pollution goal 
+ # geom_hline(yintercept = 500, color = "black", linetype = 6) +
+  
+  # Improved x-axis readability
+  scale_x_datetime(
+    labels = scales::date_format("%H:%M", tz = "Asia/Dhaka"),  # Format to show hour and minute
+    breaks = scales::date_breaks("6 hours"),                   # Increase interval between labels
+    expand = c(0, 0)
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate labels for readability
+  
+  # Y-axis scaling
+  scale_y_log10(breaks = c(10, 25, 100, 300, 500, 1000), labels = c(10, 25, 100, 300, 500, 1000)) +
+  annotation_logticks() +
+  
+  # Labels and theme
+  labs(
+    title = "PM2.5 measurement by hour of the day",
+    x = "Time",
+    y = "PM2.5 (ug/m3)"
+  ) +
+  theme_classic() +
+  theme(
+    legend.background = element_blank(),
+    panel.spacing = unit(2, "lines"),
+    panel.border = element_rect(color = "black", fill = NA),  # Adds a black border to each facet panel
+    strip.background = element_blank()   
+  ) +
+  theme(
+  axis.text.x = element_text(size = 9, angle = 45, hjust = 1),
+  axis.title.x = element_text(size = 11),
+  axis.title.y = element_text(size = 10),
+  axis.text.y = element_text(size = 10),
+  legend.text = element_text(size = 11),
+  legend.title = element_text(size = 12),
+  plot.margin = margin(10, 10, 10, 10)
+) +
+ 
+  
+  # Faceting by timepoint
+  facet_wrap(~ timepoint)
+
+fig_pm_day 
+# Export the plot with increased resolution and size
+ggexport(
+  plot = fig_pm_day,
+  filename = here::here("6_figures", "fig_pm_time_of_day.png"),
+  width = 2100, height = 2100, res = 300
+)
+
+ggsave(
+  fig_pm_day,
+  filename = here::here("6_figures", "fig_pm_time_of_day.png"),
+  width = 7,
+  height = 7,
+  dpi = 300
+)
+
+
+## Compare distributions at endline 
+pm_data %>% 
+  filter(timepoint == "endline", study_arm != "outdoor") %>% 
+  wilcox.test(PM_Estimate ~ as_factor(study_arm), data = ., exact = FALSE)
+
+
+```
+
+
+
+## PM 2.5 Weighted Results
+```{r}
+#pm2.5 data 
+pm_data <- here::here("4_data/pm_data_clean.rds")
+
+
+
+pm_data_hour %>% 
+  count(timepoint)
+
+#paired survey data 
+
+file_survey_data_base <- here::here("4_data/RohingyaFuel_survey_data_triple.rds")
+#This file is the paired survey data containing survey responses on a hh level
+
+survey_data <- read_rds(file_survey_data_base)
+
+#individual level midline survey data (at basline asked for single response per household. At midline asked for a response per hh member)
+all_files <- 
+  list.files(path = here::here("2_data_raw"), pattern = ".csv", full.names = TRUE)
+#finds all files from raw folder with .csv pattern
+
+
+selected_files <- 
+  all_files[str_detect(all_files, "location")]
+#selects files with location in the name
+
+midline_location_repeat <- 
+  selected_files %>% 
+  map_dfr(read_csv, col_types = cols(.default = "c", hours_inside = "d", hours_outside = "d"))
+#reads in all selected files 
+
+ file_location_out <- here::here("4_data/weighted_pm2.5_av.csv")
+ 
+ 
+ all_files <- 
+  list.files(path = here::here("2_data_raw/survey_endline_with_review"), pattern = ".csv", full.names = TRUE)
+#finds all files from raw folder with .csv pattern
+
+
+selected_files <- 
+  all_files[str_detect(all_files, "hh_members")]
+#selects files with location in the name
+
+endline_location_repeat <- 
+  selected_files %>% 
+  map_dfr(read_csv, col_types = cols(.default = "c", hours_inside = "d", hours_outside = "d"))
+#reads in all selected files 
+
+
+
+ file_location_out <- here::here("4_data/weighted_pm2.5_av.csv")
+
+```
+
+##Clean data 
+```{r}
+#Midline 
+midline_location_clean <- 
+midline_location_repeat %>% 
+  mutate(
+       hours_inside = if_else(is.na(hours_inside) == TRUE, 24 - hours_outside, hours_inside), 
+       hours_outside = if_else(is.na(hours_outside) == TRUE, 24 - hours_inside, hours_outside)#, 
+  ) #Some versions had only hours inside and the endline had only hours outside so setting them all to have both with inside + outside == 24
+
+#Endline 
+endline_location_clean <- 
+endline_location_repeat %>% 
+  mutate(
+       hours_inside = 24 - hours_outside, 
+       hours_outside = hours_outside 
+  )
+
+table(survey_data$study_arm)
+
+survey_data_interest <- 
+  survey_data %>% 
+  select(KEY, name_respondent, target_child_name, hh_id, study_arm, timepoint, starttime)
+#from overall survey data find columns needed to specify hh members at midline  
+```
+
+## Join data 
+```{r}
+joined_data <- 
+  midline_location_clean %>%
+  right_join(survey_data_interest, (.by = c("PARENT_KEY"= "KEY")))
+
+joined_data_end <- 
+  endline_location_clean %>%
+  right_join(survey_data_interest, (.by = c("PARENT_KEY"= "KEY")))
+
+survey_data_interest %>% 
+  count(timepoint)
+
+
+joined_data %>% 
+  count(timepoint, hours_outside)
+#join survey responses with individual level data 
+```
+
+
+### baseline results 
+At baseline we asked about the respondent and target child time outside only 
+
+###respondent time outside
+```{r}
+respondent_baseline <- 
+survey_data %>% 
+  group_by(timepoint, study_arm) %>% 
+  summarise(mean_hr_outside_hh = mean(hours_outside), sd_hr_inside = sd(hours_inside)) %>% 
+  filter(!is.na(mean_hr_outside_hh)) %>% 
+  mutate(individual = "respondent")
+  
+
+
+
+```
+
+
+### respondent mean time outside 
+```{r}
+respondent_midline <- 
+joined_data %>% 
+  filter(location_name_roster == name_respondent) %>% 
+  group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside, na.rm = TRUE)) %>% 
+  mutate(individual = "respondent")
+```
+
+
+#target child mean time outside
+```{r}
+target_child_midline <- 
+joined_data %>% 
+  filter(location_name_roster == target_child_name) %>% 
+  group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside)) %>% 
+  ungroup() %>% 
+	group_by(timepoint) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside), sd = sd(mean_hr_outside)) %>% 
+  mutate(individual = "target child")
+```
+
+#other adult time spent outside of hh
+```{r}
+other_member_midline <- 
+joined_data %>% 
+  filter(
+    location_name_roster != target_child_name, 
+    location_name_roster != name_respondent
+    ) %>% 
+  group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside)) %>% 
+   mutate(individual = "other member")
+
+
+
+
+```
+#Endline calculations 
+```{r}
+
+respondent_endline <-  
+  joined_data_end %>% 
+  filter(name == name_respondent) %>% 
+  group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside, na.rm = TRUE)) %>% 
+  mutate(individual = "respondent")
+
+target_child_endline <- 
+  joined_data_end %>% 
+  filter(name == target_child_name) %>% 
+  group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside)) %>% 
+  mutate(individual = "target child")
+  
+  
+other_member_endline <- 
+joined_data_end %>% 
+  filter(
+    name != target_child_name, 
+    name != name_respondent
+    ) %>% 
+  group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(mean_hr_outside = mean(hours_outside)) %>% 
+  ungroup() %>% 
+	group_by(timepoint, study_arm) %>% 
+	summarise(mean_hr_outside_hh = mean(mean_hr_outside)) %>% 
+   mutate(individual = "other member")
+  
+```
+
+```{r}
+data_hours_outside <- 
+  bind_rows(
+    respondent_baseline,
+    respondent_midline,
+    target_child_midline, 
+    other_member_midline, 
+    respondent_endline,
+    target_child_endline, 
+    other_member_endline
+    ) %>% 
+  mutate(
+    av_time_inside = 24 - mean_hr_outside_hh,
+    pct_time_inside = av_time_inside / 24 * 100, 
+    study_arm = case_when(
+      study_arm == "pre-intervention" ~ "intervention",
+      study_arm == "post-intervention" ~ "intervention",
+      study_arm == "intervention" ~ "comparison",   
+      study_arm == "comparison rd3" ~ "comparison", 
+      study_arm == "post-intervention rd3" ~ "intervention",
+      study_arm == "intervention follow-up" ~ "comparison",  
+      .default = NA), 
+    arm_time = str_glue("{timepoint}_{study_arm}"))
+
+
+# pm_data %>% 
+#   #filter(note %notin% c("qc", "insufficient data")) %>%
+#   mutate(
+#     pm_u400 = if_else(PM_Estimate <400, 1, 0), 
+#     pm_u150 = if_else(PM_Estimate <150, 1, 0), 
+#     pm_u75 = if_else(PM_Estimate <65, 1, 0), 
+#     pm_u50 = if_else(PM_Estimate <50, 1, 0), 
+#     pm_u35 = if_else(PM_Estimate <35, 1, 0), 
+#   ) %>% 
+#   group_by(timepoint, study_arm) %>% 
+#   summarise(
+#     count_measure = n(), 
+#     pct_u_400 = sum(pm_u400) / count_measure, 
+#     pct_u_150 = sum(pm_u150) / count_measure, 
+#     pct_u_65 = sum(pm_u75) / count_measure, 
+#     pct_u_50 = sum(pm_u50) / count_measure,
+#     pct_u_35 = sum(pm_u35) / count_measure,
+#   )
+  
+```
+
+
+# PM2.5 exposures 
+instead of doing hh specificn adjusted exposures we multiplied by study mean since not all hh had sensors in them. 
+```{r}
+pm_data_full <- 
+  read_rds(file_in_pm_data_clean_rds) %>% #Read in data file of all PM2.5 data 
+	mutate(date = as_date(date)) 
+
+pm_data <-
+	pm_data_full %>%
+	filter(
+	  !(date > as_date("2022-02-02") & date < as_date("2022-03-24")),
+	  note %notin% c("qc", "insufficient data")
+	  ) %>% 
+  mutate(PM_Estimate = if_else(PM_Estimate < 10, 10, PM_Estimate )) #Replacing all # below the lower detection limit with 10 
+
+
+pm_data_hour <-
+	pm_data %>%
+	filter(note != "insufficient data") %>%
+	group_by(timepoint, study_arm, note, hh_id, hh_id_note, dateTime_hour) %>%
+	summarise_at(
+		vars(PM_Estimate),
+		list(mean),
+		na.rm = TRUE
+	) %>%
+	ungroup() %>%
+	mutate(
+		over_100 = if_else(PM_Estimate > 100, 1, 0),
+		over_500 = if_else(PM_Estimate > 500, 1, 0)
+	)
+
+#Create hh av pm 2.5 dataset
+hh_av_pm2.5 <- 
+  pm_data_hour %>% 
+	group_by(timepoint, study_arm, hh_id) %>% 
+	summarise(
+		time_range = max(dateTime_hour) - min(dateTime_hour),
+		hh_mean = mean(PM_Estimate),
+		hh_sd = sd(PM_Estimate)
+	)
+
+#summarize by study arm
+arm_mean_pm2.5 <- 
+  hh_av_pm2.5 %>% 
+	group_by(timepoint, study_arm) %>% 
+	summarise(
+		sensor_on_time = mean(time_range),
+		mean_pm2.5_hh = mean(hh_mean), 
+		sd_pm2.5_hh = sd(hh_sd)
+	) %>% 
+  mutate(
+    arm_time = str_glue("{timepoint}_{study_arm}")
+  ) %>% 
+  select(-timepoint)
+
+outdoor_pm2.5 <- 
+  arm_mean_pm2.5 %>% 
+  filter(study_arm == "outdoor") %>% 
+  transmute(
+    timepoint,
+    mean_pm2.5_outdoor = mean_pm2.5_hh
+    )
+```
+### create weighted dataset of mean pm2.5 * percent time indoors for each group 
+```{r}
+## Arm level weighted dataset 
+combined_hr_outside_pm_weighted <- 
+  data_hours_outside %>% 
+  left_join(arm_mean_pm2.5, by = "arm_time") %>% 
+  mutate(timepoint = timepoint.x, study_arm = study_arm.x) %>% 
+  select(-c(timepoint.y, timepoint.x, study_arm.x, study_arm.y)) %>% 
+  left_join(outdoor_pm2.5, by = "timepoint") %>% 
+  mutate(
+    weighted_mean_pm2.5_hh = 
+      mean_pm2.5_hh * (pct_time_inside/100) + 
+      mean_pm2.5_outdoor * ((100 - pct_time_inside)/100)
+    )
+
+combined_hr_outside_pm_weighted %>% 
+  select(individual, timepoint, study_arm, pct_time_inside, mean_pm2.5_hh, weighted_mean_pm2.5_hh) %>% 
+  #filter(individual == "respondent") %>% 
+  write_csv(here::here("table_abode_slide_endline.csv"))
+
+## For target child baseline measure we need to calc separately bc data wasnt recorded in same way at all time points 
+20.1/24*296+3.9/24*31
+
+20.1/24*51.2+3.9/24*31
+
+
+
+## Create household level analysis of time weighted exposures 
+```
+
+Wih the results of this we use the ABODE Model to estimate the health effects of the intervention https://householdenergy.shinyapps.io/abode/
+
+## Physical Health 
+```{r}
+source(here::here("0_config.R"))
+source(here::here("3_data_cleaning/1.5_define_vector_columns.R")) #Pulls in all variable group names
+source(here::here("5_analysis/Dif_in_dif_fxn.R")) 
+#this is a function that conducts a difference in difference analysis and reports the interaction term of timepoint*study arm as the dif in dif result 
+
+
+file_in_1 <- here::here("4_data/RohingyaFuel_survey_data_triple.rds") #Overall survey dataset
+file_in_2 <- here::here("4_data/pm_data_nearest_min.rds") #Particulate matter sar saved to the nearest minute 
+file_in_3 <- here::here("4_data/PM_hh_averages_20220717.rds") #PM data that takes hh averages at each timepoint
+
+# Load input files
+survey_data <- read_rds(file_in_1)
+pm_data_nearest_min <- read_rds(file_in_2) # PM_Estimate
+hh_pm_average_location <- read_rds(file_in_3)
+
+
+###################
+# Add in an accute lower respiratory illness variable to the survey by combining the fever and cough in last 6 months with the questions 
+
+#target_child_cough: In the past 6 months, has ${target_child_name} coughed continuously coughed for more than 2 weeks?
+#target_child_fever: In the past 6 months, has ${target_child_name} had a fever for longer than 1 week or a fever >38°C with no explanation?
+
+
+survey_data <- 
+  survey_data %>% 
+  mutate(
+    target_child_alri = if_else(target_child_clinic_resp_yn == 1 | target_child_resp_rate_yn == 1, 1, 0), 
+    target_child_asthma = if_else(target_child_wheezing_yn == 1, 1, 0), 
+    target_child_severe_asthma = if_else(target_child_wheezing_yn == 1 & target_child_distrubed_speech_yn == 1, 1, 0)
+    )
+
+
+################################################################################
+## Time inside
+################################################################################
+
+# At baseline we asked about time inside the main survey
+# At midline and endline, we asked about time inside as part of the individual hh member survey
+
+survey_data %>%
+	group_by(study_arm_overall) %>%
+	summarise_at(
+		vars(
+			hours_inside, #hours_outside, 
+			target_child_hours_inside # target_child_hours_outside, 
+		), 
+		list(mean), 
+		na.rm = TRUE
+	) 
+
+## Vector of variables to summarize
+table3Vars <- c("hours_inside", "target_child_hours_inside")
+
+# ## Vector of categorical variables that need transformation
+# table3FactorVars <- c()
+
+## Create a TableOne object
+# tab3 <- CreateTableOne(data = survey_data, vars = table3Vars, factorVars = table3FactorVars, strata = "study_arm")
+tab3 <- CreateTableOne(data = survey_data, vars = table3Vars, strata = "study_arm_overall")
+
+
+kable(print(tab3))
+# women in the comparison group spent more time inside, which could be viewed as a good thing by the community
+
+##############################################################################
+### Respiratory health 
+##############################################################################
+
+
+respiratory_data <-  #Creates a dataset of health variables 
+	survey_data %>%
+	select(
+		fcn_id, study_arm, camp_id, block_id, subblock_id, 
+		all_of(respiratory_vars), all_of(generalhealth_vars)
+	)
+
+saveRDS(respiratory_data, here::here("4_data/respiratory_data.rds"))
+
+
+## Vector of variables to summarize in respiratory health variable 
+table2_yn_Vars <- 
+	c(
+	  
+		respiratory_vars_yn,
+		breathing_vars,
+		nonrespiratory_vars_yn, 
+		generalhealth_vars_yn, 
+		
+		# mental_health_vars_yn,
+		MUAC_vars
+	)
+
+## Vector of categorical variables that need transformation
+table2_yn_FactorVars <- 
+	c(
+		respiratory_vars_yn, 
+		generalhealth_vars_yn,
+
+		nonrespiratory_vars_yn,
+			 "target_child_severe_asthma"
+		# mental_health_vars_yn
+	)
+
+## Create a TableOne object
+tab2_yn_bl <- 
+	CreateTableOne(
+		data = survey_data %>% filter(timepoint %in% c("baseline")), 
+		vars = table2_yn_Vars, 
+		factorVars = table2_yn_FactorVars, 
+		strata = "study_arm_overall"
+	)
+
+## Create a TableOne object
+tab2_yn_ml <- 
+	CreateTableOne(
+		data = survey_data %>% filter(timepoint %in% c("midline")), 
+		vars = table2_yn_Vars, 
+		factorVars = table2_yn_FactorVars, 
+		strata = "study_arm_overall"
+	)
+
+## Create a TableOne object
+tab2_yn_el <- 
+	CreateTableOne(
+		data = survey_data %>% filter(timepoint %in% c("endline")), 
+		vars = table2_yn_Vars, 
+		factorVars = table2_yn_FactorVars, 
+		strata = "study_arm_overall"
+	)
+
+## Print out a table object at each timepoint to compare the two graoups 
+tab2_yn_bl
+tab2_yn_ml
+tab2_yn_el
+
+## Proportion difference Conf Interval listed in paper 
+
+#clinic visit 
+prop.test(x = c(176, 255), n=c(437,494), correct = FALSE)
+
+#wheezing 
+prop.test(x = c(56, 80), n=c(437,494), correct = FALSE)
+
+#Wheezing with distubed speech 
+prop.test(x = c(14, 35), n=c(48,60), correct = FALSE)
+
+#Eye redness
+prop.test(x = c(66, 117), n=c(437,494), correct = FALSE)
+
+#Eye itch
+prop.test(x = c(41, 86), n=c(437,494), correct = FALSE)
+
+#fever
+prop.test(x = c(263, 322), n=c(437,494), correct = FALSE)
+
+#resp redness
+prop.test(x = c(38, 98), n=c(437,494), correct = FALSE)
+
+#resp redness
+prop.test(x = c(42, 93), n=c(437,494), correct = FALSE)
+
+#resp redness
+prop.test(x = c(41, 86), n=c(437,494), correct = FALSE)
+
+#Respondet speech disturb breathlessness 
+prop.test(x = c(14, 35), n=c(48,60), correct = FALSE)
+
+
+#child wheez
+prop.test(x = c(165, 251), n=c(437,494), correct = FALSE)
+
+#severe asthma 
+prop.test(x = c(98, 153), n=c(437,494), correct = FALSE)
+
+
+
+### Based on variables that were diffferent at baseline we selected variables for reporting possible health 
+# # Vars diff at baseline: 
+# target_child_clinic_resp_yn, target_child_wheezing_yn, target_child_distrubed_speech_yn,
+# respondent_disturbed_speech_yn , 
+# target_child_eye_red_yn, target_child_eye_itch_yn, 
+# respondent_eye_red_yn, respondent_eye_itch_yn, respondent_eye_sore_yn, 
+
+
+resp_vars_impacted <-
+	c(
+		"target_child_clinic_resp_yn", 
+		"target_child_wheezing_yn",
+		"target_child_distrubed_speech_yn",
+		"respondent_disturbed_speech_yn", 
+		"target_child_eye_red_yn",
+		"target_child_eye_itch_yn", 
+		"respondent_wheezing_yn", 
+		"target_child_resp_rate", 
+		"respondent_eye_red_yn",
+		"respondent_eye_itch_yn", 
+		"respondent_eye_sore_yn",
+		#"target_child_alri", 
+		#"target_child_asthma", 
+		#"target_child_severe_asthma",
+		"target_child_cough",
+		"target_child_fever",
+		"target_child_resp_rate"
+	)
+
+model_data <- survey_data %>% filter(timepoint %in% c("baseline", "endline"))
+model_data_midline <- survey_data %>% filter(timepoint %in% c("baseline","midline"))
+
+model_data <- survey_data %>% filter(timepoint %in% c("baseline", "endline")) %>%  
+  mutate(
+    respondent_disturbed_speech_yn = if_else(is.na(respondent_disturbed_speech), 0, respondent_disturbed_speech),
+    target_child_distrubed_speech_yn = if_else(is.na(target_child_distrubed_speech), 0, target_child_distrubed_speech)
+  )
+model_data_midline <- survey_data %>% filter(timepoint %in% c("baseline","midline")) %>% 
+    mutate(
+    respondent_disturbed_speech_yn = if_else(is.na(respondent_disturbed_speech), 0, respondent_disturbed_speech),
+    target_child_distrubed_speech_yn = if_else(is.na(target_child_distrubed_speech), 0, target_child_distrubed_speech)
+  )
+
+dind_fxn(resp_vars_impacted, model_data_midline)
+dind_fxn(resp_vars_impacted, model_data)
+dind_camp_fxn(resp_vars_impacted, model_data)
+
+
+
+survey_data %>%
+	filter(timepoint %in% c("baseline", "endline")) %>%
+	group_by(study_arm_overall, timepoint) %>%
+  summarise_at(resp_vars_impacted, list(mean = ~ mean(.x, na.rm = TRUE), sd = ~ sd(.x, na.rm = TRUE))) 
+
+
+```
+## Physical Health Figure 
+```{r}
+
+
+fig_physical_health_child <- 
+	survey_data %>%
+	select(timepoint, study_arm_overall, fcn_id, all_of(respiratory_vars_yn), all_of(nonrespiratory_vars_yn), all_of(generalhealth_vars_yn)) %>%
+	select(-contains("respondent_")) %>%
+	gather(-timepoint, -study_arm_overall, -fcn_id, key = "category", value = "present") %>% # fuel_30_purchased_fuel
+	filter(category %notin% c("target_child_disturbed_sleep_yn", "target_child_distrubed_speech_yn")) %>%
+	
+	group_by(timepoint, study_arm_overall, category) %>% 
+	# fuel_30_purchased_fuel_endline
+	# summarise(prevalence = mean(present, na.rm = TRUE)) %>% #  sd = sd(expenditure, na.rm = TRUE)
+	mutate(
+		child_resp_group = 
+			case_when(
+				category %in% c(
+					"target_child_cough_yn", "target_child_resp_rate_yn", "target_child_weight_loss_yn", "target_child_wheezing_yn", 
+					#"target_child_disturbed_sleep_yn", "target_child_distrubed_speech_yn",
+					"target_child_eye_red_yn", "target_child_eye_itch_yn", "target_child_lethargy_yn", "target_child_fever_yn", "target_child_clinic_resp_yn"
+				) ~ "child"
+			),
+		category = 
+			ordered(
+				category,
+				levels = 
+					c(					
+						"target_child_cough_yn", "target_child_resp_rate_yn", "target_child_wheezing_yn", 
+						#"target_child_disturbed_sleep_yn", "target_child_distrubed_speech_yn",
+						"target_child_eye_red_yn", "target_child_eye_itch_yn", "target_child_lethargy_yn", "target_child_weight_loss_yn", "target_child_fever_yn", "target_child_clinic_resp_yn"), 
+				labels = 
+					c(
+						"persistant \ncough", "increased \nrespiratory rate \ntoday",  "current \nwheeze", 
+						# "sleep disturbed \nby wheeze", "speech disturbed \nby wheeze", 
+						"eyes red", "eyes itchy", "lethargic", "unexplained \nweight loss \nin 3 mo.", "fever", "went to clinic \nfor respiratory \ncomplaint"
+					)
+			)
+	) %>% 
+	# mutate(expenditure_LCI = expenditure_mean - sd, expenditure_UCI = expenditure_mean + sd) %>%
+	ggplot(aes(x = timepoint, y = present, color = study_arm_overall, group = study_arm_overall, shape = timepoint)) + #  y = prevalence, 
+	stat_summary(fun = "mean", geom = "line", size = 1) + # , position = position_dodge(width = 0.2)
+	stat_summary(fun = "mean", geom = "point", size = 2) + 
+	stat_summary(fun.data = "mean_cl_boot", geom = "linerange") +
+	# ggpubr::stat_compare_means(
+	# 	label = "p.signif", #"p.signif" # symnum.args <- list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1), symbols = c("****", "***", "**", "*", "ns"))
+	# 	# method = "wilcox.test",
+	# 	paired = FALSE, # baseline and endline are paired but the change is not, and on-going and intervention are not
+	# 	hide.ns = TRUE
+	# ) +
+	viridis::scale_fill_viridis(
+		discrete = TRUE,
+		end = 2/3
+	) +
+	scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+	scale_color_manual(
+		name = "Study arm",
+		breaks = c("intervention", "comparison"),
+		# labels = c("Pre-intervention", "Intervention", "Outdoor"),
+		labels = c("Intervention", "Comparison"),
+		values = c("#138b87",  "#430154"),
+		# values = c("#7570b3",  "#d95f02", "#1b9e77")
+	) +
+	theme_bw() +
+	theme(
+		# axis.text.x = element_text(angle = 0, hjust = 1)
+		axis.text.x = element_blank(),
+		axis.ticks.x  = element_blank(),
+		# axis.line.x = element_blank(),
+		legend.position = "none"
+	) + 
+	labs(
+		# title = "Health status over time",
+		x =  "", # "Health category",
+		y = "Prevalence \namong children <2 years old at baseline",
+		shape = "Timepoint",
+		color = "Study arm"
+	) + 
+	facet_grid( ~ category) # fuel_30_purchased_fuel_endline
+
+# fig_physical_health_child
+
+survey_data %>% 
+	group_by(timepoint, study_arm_overall) %>% 
+	summarise(mean(respondent_resp_rate, na.rm =TRUE), 
+						mean(respondent_weight_loss, na.rm = TRUE))
+
+#Figure out where the graph is > 100 
+survey_data %>% filter(timepoint == "baseline") %>% select(weight_loss_reported_respondant) %>% #count(weight_loss_reported_respondant)
+
+#At baseline the resp rate variable is 
+## resp_rate_reported_respondant
+## weight_loss_reported_respondant
+
+
+fig_physical_health_respondent <- 
+	survey_data %>%
+  mutate(
+    respondent_resp_rate_yn = if_else(is.na(respondent_resp_rate_yn), resp_rate_reported_respondant, respondent_resp_rate_yn), 
+    respondent_weight_loss_yn = if_else(is.na(respondent_weight_loss_yn), weight_loss_reported_respondant, respondent_weight_loss_yn)) %>% 
+  filter(respondent_weight_loss_yn != 99) %>% 
+	select(timepoint, study_arm_overall, fcn_id, all_of(respiratory_vars_yn), all_of(nonrespiratory_vars_yn), all_of(generalhealth_vars_yn), respondent_weight_loss, respondent_resp_rate) %>%
+	select(-contains("child_")) %>%
+	gather(-timepoint, -study_arm_overall, -fcn_id, key = "category", value = "present") %>% # fuel_30_purchased_fuel
+	# pull(category) %>% unique()
+	filter(category %notin% c("respondent_disturbed_sleep_yn", "respondent_disturbed_speech_yn")) %>%
+	group_by(timepoint, study_arm_overall, category) %>% # fuel_30_purchased_fuel_endline
+	mutate(
+		# 		 "respondent_cough_yn"            "respondent_resp_rate_yn"        "respondent_weight_loss_yn"      "respondent_wheezing_yn"        
+		#  [5] "respondent_disturbed_sleep_yn"  "respondent_disturbed_speech_yn" "respondent_eye_red_yn"          "respondent_eye_itch_yn"        
+		#  [9] "respondent_eye_sore_yn"         "respondent_headache_yn"         "respondent_backache_yn"        
+		child_resp_group = 
+			case_when(
+				category %in% c(
+					"respondent_cough_yn", "respondent_resp_rate_yn", "respondent_weight_loss_yn", "respondent_wheezing_yn", 
+					#"respondent_disturbed_sleep_yn", "respondent_disturbed_speech_yn", 
+					"respondent_eye_red_yn", "respondent_eye_itch_yn", "respondent_eye_sore_yn", "respondent_headache_yn", "respondent_backache_yn"
+				) ~ "respondent"
+			)
+	) %>%
+	mutate(
+		category = 
+			ordered(
+				category,
+				levels = 
+					c(					
+						"respondent_cough_yn", "respondent_resp_rate_yn", "respondent_wheezing_yn", 
+						#"respondent_disturbed_sleep_yn", "respondent_disturbed_speech_yn", 
+						"respondent_eye_red_yn", "respondent_eye_itch_yn", "respondent_eye_sore_yn", "respondent_weight_loss_yn", "respondent_headache_yn", "respondent_backache_yn"
+					), 
+				labels = 
+					c(
+						"persistant \ncough", "increased \nrespiratory rate \ntoday",  "current \nwheeze", 
+						# "sleep disturbed \nby wheeze", "speech disturbed \nby wheeze",
+						"eyes red", "eyes itchy", "eyes sore", "unexplained \nweight loss \nin 3 mo.", "headache", "backache"
+					)
+			)
+	) %>%
+	filter(!is.na(category)) %>% 
+	# mutate(expenditure_LCI = expenditure_mean - sd, expenditure_UCI = expenditure_mean + sd) %>%
+	ggplot(aes(x = timepoint, y = present, color = study_arm_overall, group = study_arm_overall, shape = timepoint)) + # y = prevalence
+	stat_summary(fun = "mean", geom = "line", size = 1) + # , position = position_dodge(width = 0.2)
+	stat_summary(fun = "mean", geom = "point", size = 2) + 
+	stat_summary(fun.data = "mean_cl_boot", geom = "linerange") +
+	# ggpubr::stat_compare_means(
+	# 	label = "p.signif", #"p.signif" # symnum.args <- list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1), symbols = c("****", "***", "**", "*", "ns"))
+	# 	# method = "wilcox.test",
+	# 	paired = FALSE, # baseline and endline are paired but the change is not, and on-going and intervention are not
+	# 	hide.ns = TRUE
+	# ) +
+	viridis::scale_fill_viridis(
+		discrete = TRUE,
+		end = 2/3
+	) +
+	scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+	scale_color_manual(
+		name = "Study arm",
+		breaks = c("intervention", "comparison"),
+		# labels = c("Pre-intervention", "Intervention", "Outdoor"),
+		labels = c("Intervention", "Comparison"),
+		values = c("#138b87",  "#430154"),
+		# values = c("#7570b3",  "#d95f02", "#1b9e77")
+	) +
+	theme_bw() +
+	theme(
+		axis.text.x = element_text(angle = 45, hjust = 1),
+		#axis.text.x = element_blank(),
+		axis.ticks.x = element_blank(),
+		# axis.line.x = element_blank(),
+		legend.position = "none"
+	) + 
+	labs(
+		# title = "Health status over time",
+		x =  "", # "Health category",
+		y = "Prevalence \namong female caregivers",
+		shape = "Timepoint",
+		color = "Study arm"
+	) + 
+	facet_grid( ~ category) # fuel_30_purchased_fuel_endline # , labeller = label_wrap_gen(width = 25, multi_line = TRUE)
+
+
+
+# ggarrange(
+# 	sp,                                                 # First row with scatter plot
+# 	ggarrange(bxp, dp, ncol = 2, labels = c("B", "C")), # Second row with box and dot plots
+# 	nrow = 2, 
+# 	labels = "A"                                        # Labels of the scatter plot
+# ) 
+
+fig_physical_health <-
+	ggarrange(
+		fig_physical_health_child,
+		fig_physical_health_respondent,
+		# fig_mental_health_respondent,
+		common.legend = TRUE, legend = "right",
+		nrow = 2
+	)
+
+fig_physical_health
+
+ggsave(
+	here::here("6_figures", "fig_physical_health.png"),
+	plot = last_plot(),
+	scale = 1,
+	height = 6,
+	width = 10,
+	units = "in",
+	device = "png"
+)
+
+survey_data %>%
+	summarise_at(vars(cost_forest_not_wood), list(mean), na.rm = TRUE)
+```
+
+## Mental health 
+
+```{r}
+fig_mental_health_respondent <- 
+  survey_data %>%
+	select(timepoint, study_arm_overall, fcn_id, all_of(mental_health_vars)) %>%
+	#drop_na() %>% 
+#	filter(timepoint %in% c("baseline", "endline")) %>% 
+	gather(-timepoint, -study_arm_overall, -fcn_id, key = "category", value = "present") %>% # fuel_30_purchased_fuel
+	group_by(timepoint, study_arm_overall, category) %>% # fuel_30_purchased_fuel_endline
+	mutate(
+		category = 
+			ordered(
+				category,
+				levels = c("enjoyed_life", "self_worth", "hopeful", "sick", "no_appetite","diff_concentrating","fearful","cant_get_going", "life_failure", "suicidal_thoughts_30"),
+				# levels = 
+				# 	c(					
+				# 		"happy_yn", "enjoyed_life_yn", "self_worth_yn", "hopeful_yn",                
+				# 		"no_appetite_yn",  "less_talkative_yn",   
+				# 		"depressed_yn",  
+				# 		# "feeling_anxious_yn", "feeling_worry_yn", "feeling_not_relaxing_yn", "feeling_restless_yn",    
+				# 		# "feeling_annoyed_yn", "feeling_afraid_yn", 
+				# 		"suicidal_thoughts_30_yn"
+				# 	), 
+				labels = 
+					c(
+					  "enjoyed life", "as good \nas others", "hopeful", "sick",
+						"no appetite",   "difficulty concentrating", "fearful", "can't get \ngoing",
+						"life is a failure", 
+						# "anxious", "worried", "unable to \nrelax", "restless", "annoyed", "afraid", 
+						"suicidal in \npast 30 days"
+					)
+			)
+	) %>%
+	drop_na(category) %>%
+	filter(category != "NA") %>% 
+	# mutate(expenditure_LCI = expenditure_mean - sd, expenditure_UCI = expenditure_mean + sd) %>%
+	ggplot(aes(x = timepoint, y = present, color = study_arm_overall, group = study_arm_overall, shape = timepoint)) + # y = prevalence
+	stat_summary(fun = "mean", geom = "line", size = 1) + # , position = position_dodge(width = 0.2)
+	stat_summary(fun = "mean", geom = "point", size = 2) + 
+	stat_summary(fun.data = "mean_cl_boot", geom = "linerange") +
+	viridis::scale_fill_viridis(
+		discrete = TRUE,
+		end = 2/3
+	) +
+	#scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+	scale_color_manual(
+		name = "Study arm",
+		breaks = c("intervention", "comparison"),
+		# labels = c("Pre-intervention", "Intervention", "Outdoor"),
+		labels = c("Intervention", "Comparison"),
+		values = c("#138b87",  "#430154"),
+		# values = c("#7570b3",  "#d95f02", "#1b9e77")
+	) +
+	theme_bw() +
+	theme(
+		axis.text.x = element_text(angle = 45, hjust = 1),
+	#	axis.text.x = element_blank(),
+		axis.ticks.x = element_blank()#,
+		# axis.line.x = element_blank(),
+		# legend.position = "none"
+		# legend.position = "bottom",
+		# legend.direction = "horizontal"
+	) + 
+	guides(
+		shape = guide_legend(title.position="top", title.hjust = 0.5),
+		color = guide_legend(title.position="top", title.hjust = 0.5)
+	) +
+	labs(
+		# title = "Health status over time",
+		x =  "", # "Health category",
+		y = "",
+		shape = "Timepoint",
+		color = "Study arm"
+	) + 
+	facet_wrap( ~ category, nrow = 2) # fuel_30_purchased_fuel_endline # , labeller = label_wrap_gen(width = 25, multi_line = TRUE)
+
+fig_mental_health_respondent
+
+ggsave(
+	here::here("6_figures", "fig_mental_health.png"),
+	plot = last_plot(),
+	scale = 1,
+	height = 6,
+	width = 10,
+	units = "in",
+	device = "png"
+)
+
+
+```
+
+## Time Use 
+```{r}
+##########################################################################
+## Livestyle changes since LPG distribution
+##########################################################################
+
+# lpg_changes_lifestyle is select_multiple... table percent of hh that answered each?
+
+survey_data %>%
+  group_by(timepoint, study_arm_overall) %>%
+  summarise_at(
+    vars(starts_with("lpg_changes_lifestyle")),
+    list(mean), 
+    na.rm = TRUE
+  ) %>%
+  gather(-timepoint, -study_arm_overall, key = "lifestyle_change", value = "pc_hh")
+
+
+
+
+##########################################################################
+# Time use
+##########################################################################
+
+# "Think about a day before you obtained LPG at the distribution center and compare it to now, when you do get LPG from the distribution center. Compared to before, do you think that YOU currently spend MORE or LESS time on each of the following activities?"
+# 
+# Same question for children's time
+# 
+# [more_less]	1	more 
+# [more_less]	2	same
+# [more_less]	3	less
+# 
+# For the group of questions "time_free_lpg", at baseline the relevance was "selected(${fuel_30_receive_lpg},'1') and (selected(${collect_wood_g},'1') or selected(${collect_wood_b},'1'))" - this means we ONLY asked the time use questions to family's who's CHILDREN collected wood. That's fine for the group "time_child_free_lpg" but not for the adult respondent question! 
+# 	
+# 	Post-intervention might have better recall because they more recently transition; so assess separately and combine if it seems reasonable to do so.
+# At endline, the Skip logic was selected(${fuel_ever_receive_lpg},'1') and (selected(${collect_wood_g_ever},'1') or selected(${collect_wood_b_ever},'1')) and (selected(${timepoint, study_arm_overall},'3') or selected(${study_arm},'5')) 
+# 
+# activity left column, more-less on top row
+
+
+
+
+
+##########################################################################
+# Change in respondent's time
+##########################################################################
+
+time_respondent_more_less <-
+  survey_data %>%
+  # At baseline, comparison hh had already not used fuel for a year, 
+  # so use only the results from the intervention group at midline, who will have better recall
+  filter(study_arm_overall == "intervention" & timepoint == "midline") %>%
+  #filter(study_arm_overall %in%  c("intervention")) %>%
+  select(fcn_id, timepoint, study_arm_overall, starts_with("time_")) %>% 
+  select(!contains("_child_")) %>%
+  # filter(!is.na(time_child_cooking)) %>% # this question was only answered if girls or boys were reported to collect firewood
+  # count() # There were only 38 respondents of 597 hh that answered the intervention survey
+  gather(-fcn_id, -timepoint, -study_arm_overall, key = "activity", value = "more_less") %>%
+  filter(!is.na(more_less)) %>% # There are still some hh with na, because they reported not recently harvesting wood? 
+  group_by(activity) %>%
+  count(more_less) %>%
+  mutate(
+    pc = n / sum (n) # sum(n) = 99 because this many hh answered these questions
+  ) %>% # make the less ones negative
+  ungroup() %>%
+  # necessary to apply prop.test to each row
+  rowwise() %>%
+  mutate(
+    lower = ifelse(n > 0, prop.test(n, n/pc)$conf.int[1], 88),
+    upper = ifelse(n > 0, prop.test(n, n/pc)$conf.int[2], NA)
+  ) %>%
+  mutate(
+    # Change sign to negative if the value was less
+    pc = ifelse(more_less == 3, pc * (-1), pc),
+    lower = ifelse(more_less == 3, lower * (-1), lower),
+    upper = ifelse(more_less == 3, upper * (-1), upper),
+    more_less = factor(more_less, levels = c(1, 2, 3), labels = c("more", "same", "less"))
+  )
+
+
+
+##### Make fig #########
+
+fig_time_respondent_more_less <-
+  time_respondent_more_less %>%
+  filter(more_less != "same") %>%
+  # no people reported that they spend time gathering non-wood items so remove this
+  filter(!is.na(activity)) %>%
+  filter(activity %in% c(
+    "time_harvesting_wood",
+    "time_cooking",
+    "time_selling_food",
+    "time_washing_dishes",
+    "time_washing_clothes",
+    "time_collecting_water",
+    "time_unskilled_labor",
+    "time_employment_ngo",
+    "time_accompanying_children",
+    "time_caring_for_children",
+    "time_caring_for_others",
+    "time_eating",
+    "time_learning",
+    "time_nothing",
+    "time_socializing",
+    "time_sleeping"
+  )) %>% 
+#  filter(is.na(activity)) %>% 
+  mutate(
+    activity = 
+      ordered(
+        activity, 
+        levels = 
+          c(
+            "time_harvesting_wood",
+            "time_gathering_nonwood_items",
+            "time_cooking",
+            "time_selling_food",
+            "time_washing_dishes",
+            "time_washing_clothes",
+            "time_collecting_water",
+            "time_unskilled_labor",
+            "time_employment_ngo",
+            "time_accompanying_children",
+            "time_caring_for_children",
+            "time_caring_for_others",
+            "time_eating",
+            "time_learning",
+            "time_nothing",
+            "time_socializing",
+            "time_sleeping"
+          ),
+        labels = 
+          c(
+            "Harvesting wood",
+            "Gathering non-wood items",
+            "Cooking", 
+            "Selling food",
+            "Washing dishes",
+            "Washing clothes",
+            "Collecting water", 
+            "Working as unskilled labor",
+            "Wokring for an NGO or wage laborer",
+            "Accompanying children",
+            "Caring for children",  
+            "Caring for others",
+            "Eating",
+            "Learning", 
+            "Doing nothing",
+            "Socializing", 
+            "Sleeping"
+          )
+      )
+  ) %>%
+  ggplot(aes(x = activity, y = pc, fill = more_less)) +
+  geom_col() +
+  geom_linerange(aes(ymin = lower, ymax = upper)) + # , position = position_dodge(0.9)
+  viridis::scale_fill_viridis(
+    discrete = TRUE,
+    begin = 9/10,
+    end = 3/10, 
+    name = "Amount of time",
+    breaks = c("more", "less"),
+    labels = c("More", "Less")
+  ) + 
+  # scale_y_continuous(labels = scales::percent_format(accuracy = 1)) + # Percentage labels rounded to the nearest integer
+  scale_y_continuous(labels = function(x) scales::percent(abs(x))) + # Percentage labels rounded to the nearest integer	
+  theme_bw() +
+theme(
+  axis.text.x = element_text(size = 9, angle = 45, hjust = 1),
+  axis.title.x = element_text(size = 11),
+  axis.title.y = element_text(size = 10),
+  axis.text.y = element_text(size = 10),
+  legend.text = element_text(size = 11),
+  legend.title = element_text(size = 12),
+  plot.margin = margin(10, 10, 10, 10)
+) +
+  labs(
+    title = "",
+    x = "Respondent Activity",
+    y = "Percent of households \nreporting change (n = 475)"
+  ) # + 
+# facet_wrap(~ more_less)
+
+fig_time_respondent_more_less
+
+ggsave(
+  here::here("6_figures", "fig1_time_respondent_more_less.png"),
+  plot = last_plot(),
+  scale = 1,
+  height = 8,
+  width = 8,
+  units = "in",
+  device = "png"
+)
+
+# # Skip logic: selected(${fuel_ever_receive_lpg},'1') and (selected(${collect_wood_g_ever},'1') or selected(${collect_wood_b_ever},'1')) and (selected(${study_arm},'3') or selected(${study_arm},'5')) 
+# survey_data %>% 
+# 	filter(study_arm %in%  c("post-intervention", "intervention follow-up")) %>%
+# 	select(study_arm, fcn_id, fuel_ever_receive_lpg, collect_wood_g_ever, collect_wood_b_ever, starts_with("time_child"))
+
+
+
+
+##########################################################################
+# Change in children's time
+##########################################################################
+
+time_child_more_less <-
+  survey_data %>%
+  # At baseline, comparison hh had already not used fuel for a year, 
+  # so use only the results from the intervention group at midline, who will have better recall
+  filter(study_arm_overall == "intervention" & timepoint == "midline") %>%
+  #filter(study_arm_overall %in%  c("intervention")) %>%
+  select(fcn_id, timepoint, study_arm_overall, starts_with("time_child")) %>% 
+  # filter(!is.na(time_child_cooking)) %>% # this question was only answered if girls or boys were reported to collect firewood
+  # count() # There were only 38 respondents of 597 hh that answered the intervention survey
+  gather(-fcn_id, -timepoint, -study_arm_overall, key = "activity", value = "more_less") %>%
+  filter(!is.na(more_less)) %>% # There are still some hh with na, because they reported not recently harvesting wood? 
+  group_by(activity) %>%
+  count(more_less) %>%
+  mutate(
+    pc = n / sum (n) # sum(n) = 99 because this many hh answered these questions
+  ) %>% # make the less ones negative
+  ungroup() %>%
+  # necessary to apply prop.test to each row
+  rowwise() %>%
+  mutate(
+    lower = ifelse(n > 0, prop.test(n, n/pc)$conf.int[1], 88),
+    upper = ifelse(n > 0, prop.test(n, n/pc)$conf.int[2], NA)
+  ) %>%
+  mutate(
+    # Change sign to negative if the value was less
+    pc = ifelse(more_less == 3, pc * (-1), pc),
+    lower = ifelse(more_less == 3, lower * (-1), lower),
+    upper = ifelse(more_less == 3, upper * (-1), upper),
+    more_less = factor(more_less, levels = c(1, 2, 3), labels = c("more", "same", "less"))
+  )
+
+
+
+#### Make fig ####
+
+fig_time_child_more_less <-
+  time_child_more_less %>%
+  filter(more_less != "same") %>%
+  # We didn't ask about children working, but should have as we see in the IDIs this was the case
+  mutate(
+    activity = 
+      ordered(
+        activity, 
+        levels = 
+          c(
+            "time_child_harvesting_wood",
+            "time_child_gathering_nonwood_items", 
+            "time_child_cooking", 
+            "time_child_cleaning",
+            "time_child_collecting_water",
+            "time_child_school", 
+            "time_child_nothing",
+            "time_child_socializing",
+            "time_child_sleeping"
+            
+          ),
+        labels = 
+          c(
+            "Harvesting wood",
+            "Gathering non-wood items",
+            "Cooking", 
+            "Cleaning",  
+            "Collecting water",
+            "Going to school", 
+            "Doing nothing",
+            "Socializing", 
+            "Sleeping"
+          )
+      )
+  ) %>%
+  ggplot(aes(x = activity, y = pc, fill = more_less)) +
+  geom_col() +
+  geom_linerange(aes(ymin = lower, ymax = upper)) + # , position = position_dodge(0.9)
+  viridis::scale_fill_viridis(
+    discrete = TRUE,
+    begin = 9/10,
+    end = 3/10, 
+    name = "Amount of time",
+    breaks = c("more", "less"),
+    labels = c("More", "Less")
+  ) + 
+  # scale_y_continuous(labels = function(x) scales::percent_format(abs(x), accuracy = 1)) + # Percentage labels rounded to the nearest integer
+  scale_y_continuous(labels = function(x) scales::percent(abs(x))) + # Percentage labels rounded to the nearest integer
+  theme_classic() +
+  theme_bw() +
+theme(
+  axis.text.x = element_text(size = 9, angle = 45, hjust = 1),
+  axis.title.x = element_text(size = 11),
+  axis.title.y = element_text(size = 10),
+  axis.text.y = element_text(size = 10),
+  legend.text = element_text(size = 11),
+  legend.title = element_text(size = 12),
+  plot.margin = margin(10, 10, 10, 10)
+) +
+  labs(
+    title = "",
+    x = "Child Activity",
+    y = "Percent of households \nreporting change (n = 99)"
+  )
+
+fig_time_child_more_less
+
+
+library(ggpubr)
+library(patchwork)
+library(here)
+
+# Arrange plots with shared legend
+combined_plot <- ggarrange(
+  fig_time_respondent_more_less,
+  fig_time_child_more_less,
+  ncol = 1, nrow = 2,
+  common.legend = TRUE,
+  legend = "bottom",
+  align = "v"  # Ensures vertical alignment
+)
+
+# Export the plot with increased resolution and size
+ggexport(
+  plot = combined_plot,
+  filename = here("6_figures", "fig_time_child_more_less.png"),
+  width = 2100, height = 2500, res = 300
+)
+
+
+# # Skip logic: selected(${fuel_ever_receive_lpg},'1') and (selected(${collect_wood_g_ever},'1') or selected(${collect_wood_b_ever},'1')) and (selected(${study_arm_overa},'3') or selected(${study_arm_overa},'5')) 
+# survey_data %>% 
+# 	filter(study_arm %in%  c("post-intervention", "intervention follow-up")) %>%
+# 	select(study_arm, fcn_id, fuel_ever_receive_lpg, collect_wood_g_ever, collect_wood_b_ever, starts_with("time_child"))
+
+```
+
+#Mental health results 
+```{r}
+
+#### Model if depression symptoms changed 
+
+CES_D_data <-
+	survey_data %>%
+	rowwise() %>% 
+	mutate(
+		CES_D_score = sum(c_across(c(mental_health_bad_vars, mental_health_good_vars))) # use all_of() when using select and use c_across() when using other verbs
+	) %>%
+	ungroup() %>%
+	# CES_D >16 meaning at risk for depression has not been validated in Bangladesh
+	mutate(
+		CES_D_o16 = ifelse(CES_D_score > 16, "at-risk", "not at risk"),
+		CES_D_o16_score = ifelse(CES_D_score > 16, 1, 0)
+	)
+
+CES_D_output <- 
+  CES_D_data %>%
+  select(timepoint, study_arm_overall, fcn_id, CES_D_score, CES_D_o16, CES_D_o16_score) %>% 
+  write_rds(here::here("4_data/RohingyaFuel_survey_data_CES_D.rds"))
+
+CES_D_data %>%
+	tabyl(study_arm, CES_D_o16) %>%
+	adorn_percentages("row") %>%
+	adorn_pct_formatting(digits = 2) %>%
+	adorn_ns() %>%
+	select(study_arm, 'at-risk') # no need to also display "not at risk" since it is just 100%-'at-risk'
+
+
+CES_D_data_model <- 
+	CES_D_data %>% 
+	filter(timepoint %in% c("baseline", "endline")) %>% 
+	mutate(study_arm_overall_num = if_else(study_arm_overall == "intervention", 1, 0))
+
+model_data <- 
+  survey_data %>% 
+  filter(timepoint %in% c("baseline", "endline")) %>% 
+  mutate(study_arm_overall_num = if_else(study_arm_overall == "intervention", 1, 0))
+
+
+dind_fxn(var_interest = "CES_D_o16_score", CES_D_data_model)
+dind_fxn(var_interest = "suicidal_thoughts_30_yn", model_data)
+
+model_data_mid <- 
+survey_data %>%
+  filter(timepoint %in% c("baseline", "midline")) 
+
+CES_D_data_model_mid <- 
+	CES_D_data %>% 
+	filter(timepoint %in% c("baseline", "midline")) %>% 
+	mutate(study_arm_overall_num = if_else(study_arm_overall == "intervention", 1, 0))
+
+dind_fxn(var_interest = "CES_D_o16_score", CES_D_data_model_mid)
+dind_fxn(var_interest = "suicidal_thoughts_30_yn", model_data_mid)
+
+```
+

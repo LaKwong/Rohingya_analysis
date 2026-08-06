@@ -1,0 +1,171 @@
+---
+title: RohingyaFuel_food_analysis
+author: Laura Kwong
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+---
+
+To do
+1.  house_material
+
+
+Errors:
+# There was MORE beef in the pre-intervention communities? Look for outliers/mistakes
+# fuel_ever_receive_lpg = 1 is not true for all the intervention hh and it should be!!
+# fuel_30_receive_lpg = 1 (%) is not all true for all the intervention hh!!
+# What is the "other fuel"  - need to ask in FGD
+
+# We can use this question and the price of firewood in August / Sep (when the survey was conducted), to estimate the number of bundles of firewood purchased, then get the average weight of 100 bundles to calculate demand
+buy_wood_cost 
+"In the past 30 days, how much money (taka) did you spend on firewood?"
+
+
+Considerations:
+
+# buy_wood_cost There are 4 hh above 3000 - check their hh size and if they a for others or cooking to sell or boiling frequently
+
+"Who in your family gathers scraps/leaves/twigs?" - is this question interpreted as who has EVER gathered? Or only, who currently gathers? If so, do we think this is a problem?
+
+Add question: fuel_30_other is 10% of homes - what is this other?
+
+
+Many hh have drudgery_most_diff == drudgery_second_most_diff == drudgery_easiest! Need to train that this shouldn't happen. 
+The drudgery questions were accidentally not required, but still why did many skip them?  
+Will probably have to throw this question out. = (
+
+The dates are in three different formats. 
+
+
+
+Need to factor everything -- look at DataChallenge notes
+
+Instead of refactoring or labeling everything, why not just have the label equal the choices tab "name"? Or does the name have to be a number. 
+
+I averaged as many MUAC measurements as were taken - is that right?
+
+Need to know what breathing rate and MUAC should be for each age group to know if ther are fewer out of the ordinary. 
+
+How does icddrb do PCR for wealth? Should have some way to see if the hh are different in terms of SES. 
+
+
+
+
+- percent of hh involved in ngo or wage labor
+
+pre-intervention sep expenditure charts for people 
+- percentage of people buying wood 
+- percentage of those collecting X fuel and being harassed
+- 
+
+
+```{r setup, include=FALSE}
+library(tableone)
+library(janitor) #tabyl() adorn_...()
+library(dplyr)
+library(readxl)
+library(lubridate)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(ggpubr)
+
+knitr::opts_chunk$set(echo = TRUE)
+
+`%notin%` <- Negate(`%in%`)
+
+```
+
+
+
+```{r}
+# file_in
+
+file_survey_data_base <- here::here("4_data/RohingyaFuel_survey_data_paired.rds")
+# file_out_2 <- here::here("4_data/RohingyaFuel_data_hh_member_paired.rds") 
+
+file_survey_data_intervention_baseline <- here::here("4_data/RohingyaFuel_survey_data_intervention_baseline.rds")
+file_survey_data_intervention_endline <- here::here("4_data/RohingyaFuel_survey_data_intervention_endline.rds")
+file_survey_data_comparison_baseline <- here::here("4_data/RohingyaFuel_comparison_baseline.rds")
+file_survey_data_comparison_endline <- here::here("4_data/RohingyaFuel_comparison_endline.rds")
+file_survey_data_intervention <- here::here("4_data/RohingyaFuel_intervention.rds")
+file_survey_data_comparison <- here::here("4_data/RohingyaFuel_comparison.rds")
+
+file_survey_data_base_wide <- here::here("4_data/RohingyaFuel_survey_data_wide_paired.rds")
+
+
+# file_out
+camp_block_id_path <- here::here("4_data/camp_block_id.csv")
+camp_block_sublock_id_path <- here::here("4_data/camp_block_subblock_ids.csv")
+camp_block_subblock_id_100_largest_path <- here::here("4_data/camp_block_subblock_ids_100_largest.csv")
+
+
+file_barplot_firewood_collection_hours <- here::here("6_figures/barplot_firewood_collection_hours.tiff")
+file_barplot_firewood_collection_frequency <- here::here("6_figures/barplot_firewood_collection_frequency.tiff")
+file_barplot_sexual_harassment <- here::here("6_figures/barplot_sexual_harassment.tiff")
+
+
+file_out_CES_D_data <- here::here("4_data/CES_D_data.rds")
+file_out_anxiety_data  <- here::here("4_data/anxiety.rds")
+file_out_FCS_HDDS_data <- here::here("4_data/FCS_HDDS_data.rds")
+file_out_harassment_analysis <- here::here("4_data/harassment_analysis.rds")
+file_out_harassment_freq_prev <- here::here ("4_data/harassment_freq_prev.rds")
+```
+
+
+```{r load_data, include=FALSE} 
+survey_data <- read_rds(file_survey_data_base)
+
+survey_data_intervention_baseline <- read_rds(file_survey_data_intervention_baseline)
+survey_data_intervention_endline <- read_rds(file_survey_data_intervention_endline)
+survey_data_control_baseline <- read_rds(file_survey_data_comparison_baseline)
+survey_data_control_endline <- read_rds(file_survey_data_comparison_endline)
+survey_data_intervention <- read_rds(file_survey_data_intervention)
+survey_data_control <- read_rds(file_survey_data_comparison)
+survey_data_base_wide <- read_rds(file_survey_data_base_wide)
+```
+
+
+
+
+
+DiD estimator
+```{r}
+# survey_data$total_income_30 %>%View()
+library(estimatr)
+lm_did_income <- lm_robust(data = survey_data, formula = income ~ timepoint_num + study_arm_overall_num + did, clusters = fcn_id)
+summary(lm_did_income)
+
+lm_did_wage <- lm_robust(data = survey_data, formula = income_wage_labor ~ timepoint_num + study_arm_overall_num + did, clusters = fcn_id)
+summary(lm_did_wage)
+
+lm_did_NGO <- lm_robust(data = survey_data, formula = income_cash_ngo ~ timepoint_num + study_arm_overall_num + did, clusters = fcn_id)
+summary(lm_did_NGO)
+
+lm_did_expenditures <- lm_robust(data = survey_data, formula = spent_total_month_with_6mo_monthly ~ timepoint_num + study_arm_overall_num + did, clusters = fcn_id)
+summary(lm_did_expenditures)
+
+lm_did_food <- lm_robust(data = survey_data, formula = spent_food ~ timepoint_num + study_arm_overall_num + did, clusters = fcn_id)
+summary(lm_did_food)
+
+lm_did_tobacco_pan <- lm_robust(data = survey_data, formula = spent_tobacco_pan ~ timepoint_num + study_arm_overall_num + did, clusters = fcn_id)
+summary(lm_did_tobacco_pan)
+
+lm_did_wood <- lm_robust(data = survey_data, formula = buy_wood_cost ~ timepoint_num + study_arm_overall_num + did, clusters = fcn_id)
+summary(lm_did_wood)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

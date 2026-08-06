@@ -3,20 +3,33 @@
 # @Author: Laura H Kwong
 # @Description: merge different versions of baseline and endline hh survey data
 # @Version: 3.6.1
-# @Date: 210309
+# @Date: 220707
 ################################################################################
+
+## Chris LeBoa edited this doc and needed to reset the here::here on the file so that it would run 
+#setwd("/Volumes/GoogleDrive/.shortcut-targets-by-id/1g4FGyxS0paoGycT8REXc9ZEXkWLVDMJr/Rohingya_analysis/")
+
+#here::set_here(path = "/Volumes/GoogleDrive/.shortcut-targets-by-id/1g4FGyxS0paoGycT8REXc9ZEXkWLVDMJr/Rohingya_analysis/")
+
+#If you are running from your own computer you may have to set the shortcut to your own google drive shortcut
+
 rm(list = ls())
+
+here::set_here(path = "/Volumes/GoogleDrive/.shortcut-targets-by-id/1g4FGyxS0paoGycT8REXc9ZEXkWLVDMJr/Rohingya_analysis/")
 source(here::here("0_config.R"))
 
+
+
 # ============================================================================
-# Parameters
-# file_in <- here::here("1_data_raw/coded_clips_data.rds")
-# file_out <- here::here("4_data/data.rds")
+# files in
+# So many that I load at the time of import
 
-
+# files out
 file_out_survey_multiple_entry_errors <- here::here("4_data/survey_multiple_entry_errors.xlsx")
 
 # ============================================================================
+
+
 
 ############## Load Rohingya data ###################
 
@@ -34,7 +47,7 @@ survey_data_baseline <-
 	)
 
 
-# endline
+# midline
 # List input files and read them
 # 20 Sep 2020
 data_today_v86 <- 
@@ -131,7 +144,7 @@ survey_data_host_baseline <-
 	read_csv(here::here("2_data_raw/RohingyaFuelMaster_20200220_Corrected_20200308_HOST.csv"), col_types = cols(.default = col_character())) %>%
 	filter(consent == "OK")
 
-# endline
+# midline 
 # v95 was 7 Oct 2020 and onwards
 data_today_v95 <- 
 	read_csv(here::here("2_data_raw/rohingya_fuel_v94_endline_Rohingya.csv"), col_types = cols(.default = col_character())) %>%
@@ -148,12 +161,41 @@ data_today_symptoms_v95 <-
 data_today_location_v95 <- 
 	read_csv(here::here("2_data_raw/rohingya_fuel_v95_endline_Rohingya_host-location.csv"), col_types = cols(.default = col_character())) 
 
+#endline
+#This is the data that was collected in 2022 - the third round of surveys for the project. 
 
+#may need to reset the path to this folder if connecting from a different computer (set it to whatever )
+
+all_files <- 
+	list.files(path = "/Volumes/GoogleDrive/.shortcut-targets-by-id/1g4FGyxS0paoGycT8REXc9ZEXkWLVDMJr/Rohingya_analysis/2_data_raw/survey_endline_with_review", pattern = ".csv", full.names = TRUE)
+#finds all files from raw folder with .csv pattern
+
+symptoms_files <- all_files[str_detect(all_files, "symptoms")]
+hh_members_files <-  all_files[str_detect(all_files, "hh_members")]
+hh_files <-  all_files[str_detect(all_files, "[0-9].csv")]
+
+
+## I am not really sure what I should do with the individual data between midline and endline for these 
+endline_symptoms_repeat <- 
+	symptoms_files %>% 
+	map_dfr(read_csv, col_types = cols(.default = "c"))
+
+endline_hh_members_repeat <- 
+	hh_members_files %>% 
+	map_dfr(read_csv, col_types = cols(.default = "c"))
+
+data_endline_base <- 
+	hh_files %>% 
+	map_dfr(read_csv, col_types = cols(.default = "c"))
 
 ################## Merge data #############################333
 
 ########### Rohingya #####################
-data_endline_base <-
+
+### This needs to be considered midline when rerun but do not want to break the future scripts by changing the name
+##Changed to data midline on 7/6/2022
+
+data_midline_base <-
 	bind_rows(
 		data_today_v86,
 		data_today_v89
@@ -183,13 +225,15 @@ data_endline_base <-
 
 data_wide_character <-
 	survey_data_baseline %>%
-	full_join(data_endline_base, by = c("fcn_id", "camp_id", "block_id", "subblock_id"), suffix = c("", ".endline")) %>%
+	full_join(data_midline_base, by = c("fcn_id", "camp_id", "block_id", "subblock_id"), suffix = c("", ".midline")) %>%
+	full_join(data_endline_base, by = c("fcn_id", "camp_id", "block_id", "subblock_id"), suffix = c("", ".endline")) %>% 
 	select(-X1) %>%
 	select(fcn_id, everything())
 
 data_long_character <-
 	bind_rows(
 		survey_data_baseline,
+		data_midline_base, 
 		data_endline_base
 	) %>%
 	select(-X1) %>%
@@ -371,7 +415,7 @@ data_wide <-
 			# fuel_cant_afford_action, food_cant_afford_action
 			paste0(c("corn_source", "bread_source", "beef_source", "veggies_source", "lentils_source", "eggs_source", "poultry_source", 
 							 "oil_source", "fish_source", "rice_source", "potatoes_source", "fruit_source", "goat_sheep_source", "sugar_source", "dairy_source", 
-							 "first_enrolled_lpg", "first_receive_lpg", "lpg_changes_lifestyle"), ".endline")
+							 "first_enrolled_lpg", "first_receive_lpg", "lpg_changes_lifestyle"), ".midline")
 		), 
 		list(as.factor)
 	) %>%
@@ -390,7 +434,7 @@ data_wide <-
 					"life_failure", "fearful", "restless_sleep", "less_talkative", "lonely", 
 					"unfriendly_people", "crying_spells", "sick", "feeling_disliked", 
 					"cant_get_going", "suicidal_thoughts_30"), 
-				".endline"
+				".midline"
 			)
 		), 
 		funs(as.numeric)

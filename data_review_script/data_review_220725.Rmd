@@ -1,0 +1,26 @@
+---
+title: "Data_review_rohingya"
+author: "Chris LeBoa"
+date: "7/25/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+
+file_in_rohingya <- "/Volumes/GoogleDrive/.shortcut-targets-by-id/1g4FGyxS0paoGycT8REXc9ZEXkWLVDMJr/Rohingya_analysis/2_data_raw/survey_endline_with_review/rohingya_fuel_v116.csv"
+file_in_host <- "/Volumes/GoogleDrive/.shortcut-targets-by-id/1g4FGyxS0paoGycT8REXc9ZEXkWLVDMJr/Rohingya_analysis/2_data_raw/survey_endline_with_review/rohingya_fuel_v119_host.csv"
+
+sheet_review_116 <- "1H-zOWJ0H78nEYj3HAuO0tJx7Ybg6ayWA"
+rohingya_data <- read_csv(file_in_rohingya)
+
+
+#Checking plastics piece 
+# rohingya_data %>% 
+# 	select(c(contains("plastic"), study_arm)) %>% 
+# 	group_by(study_arm) %>% 
+# 	count(burn_plastic_frequency)
+	
+```

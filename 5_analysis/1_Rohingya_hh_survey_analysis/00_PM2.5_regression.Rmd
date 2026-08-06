@@ -1,0 +1,17 @@
+---
+title: 'PM2.5 Exposures'
+author: "Chris LeBoa"
+date: "7/16/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+
+hh_pm_data_location <-here::here("4_data/PM_hh_averages_20220717.rds")
+
+hh_survey_location <- here::here("4_data/RohingyaFuel_survey_data_clean.rds")
+
+```
+
