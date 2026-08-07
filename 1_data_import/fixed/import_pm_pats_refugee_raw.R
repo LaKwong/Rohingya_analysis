@@ -15,8 +15,8 @@ dataset_scope <- "pm25_pats_refugee_raw"
 
 pats_roots <- data.frame(
   path = c(
-    raw_import_path("2_data_raw", "ALL DATA_BASELINE_2020_220703"),
-    raw_import_path("2_data_raw", "ALL DATA_MIDLINE_2021_220703"),
+    raw_import_path("2_data_raw", "ALL DATA_BASELINE_2019_220703"),
+    raw_import_path("2_data_raw", "ALL DATA_MIDLINE_2020_220703"),
     raw_import_path("2_data_raw", "ALL DATA_ENDLINE_2022_220703"),
     raw_import_path("2_data_raw", "ALL PM 2.5 Outdoor data")
   ),

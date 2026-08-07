@@ -89,7 +89,7 @@ project_root <- if (nzchar(project_root_env)) {
 
 clean_final_dir <- file.path(project_root, "4_data", "clean_final")
 input_indoor_path <- file.path(clean_final_dir, "pm25_pats_refugee_indoor.rds")
-input_indoor_anomaly_retained_path <- file.path(clean_final_dir, "pm25_pats_refugee_indoor_anomaly_retained_sensitivity.rds")
+input_indoor_anomaly_retained_path <- NA_character_
 input_ambient_path <- file.path(clean_final_dir, "pm25_pats_refugee_ambient.rds")
 input_survey_household_path <- file.path(clean_final_dir, "survey_refugee_household.rds")
 input_survey_location_path <- file.path(clean_final_dir, "survey_refugee_location.rds")
@@ -204,11 +204,7 @@ if (!file.exists(input_survey_location_path)) stop("Missing input file: ", input
 if (!file.exists(input_survey_hh_members_path)) stop("Missing input file: ", input_survey_hh_members_path, call. = FALSE)
 
 indoor <- readRDS(input_indoor_path)
-indoor_anomaly_retained <- if (file.exists(input_indoor_anomaly_retained_path)) {
-  readRDS(input_indoor_anomaly_retained_path)
-} else {
-  NULL
-}
+indoor_anomaly_retained <- NULL
 ambient <- readRDS(input_ambient_path)
 survey_household <- readRDS(input_survey_household_path)
 survey_location <- readRDS(input_survey_location_path)

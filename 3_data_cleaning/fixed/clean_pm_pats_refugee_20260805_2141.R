@@ -264,15 +264,9 @@ extract_pm_collection_date <- function(data) {
   collection_date <- as.Date(rep(NA_character_, nrow(data)))
   source_col <- rep(NA_character_, nrow(data))
 
-  date_cols <- intersect(c("dateTime", "dateTime_min", "dateTime_hour", "collection_date", "date"), names(data))
-  for (col in date_cols) {
-    parsed <- extract_date_any(data[[col]])
-    idx <- is.na(collection_date) & !is.na(parsed)
-    collection_date[idx] <- parsed[idx]
-    source_col[idx] <- col
-  }
-
-  token_cols <- intersect(c("file_date_token", "raw_source_file", "raw_source_path", "file_name"), names(data))
+  # Timepoint labels must come from dates embedded in file names, not from
+  # parent folder names or batch/export dates in raw_source_path.
+  token_cols <- intersect(c("file_date_token", "raw_source_file", "file_name"), names(data))
   for (col in token_cols) {
     parsed <- parse_pm_date_token(data[[col]])
     idx <- is.na(collection_date) & !is.na(parsed)
@@ -282,49 +276,11 @@ extract_pm_collection_date <- function(data) {
 
   list(date = collection_date, source_col = source_col)
 }
-
-make_pm_source_text <- function(data) {
-  source_cols <- intersect(c("raw_source_path", "raw_collection_round", "raw_source_file"), names(data))
-  out <- rep("", nrow(data))
-  for (col in source_cols) {
-    value <- tolower(clean_pm_chr(data[[col]]))
-    value[is.na(value)] <- ""
-    out <- paste(out, value, sep = " ")
-  }
-  out
-}
-
-pm_timepoint_from_raw_folder <- function(data) {
-  source_text <- make_pm_source_text(data)
-  out <- rep(NA_character_, length(source_text))
-
-  idx <- grepl("all data_baseline_2020_220703|baseline_2019_2020_sensor_folder", source_text)
-  out[idx] <- "baseline"
-  idx <- grepl("all data_midline_2021_220703|midline_2021_sensor_folder", source_text)
-  out[idx] <- "midline"
-  idx <- grepl("all data_endline_2022_220703|endline_2022_sensor_folder", source_text)
-  out[idx] <- "endline"
-
-  out
-}
-
 recode_pm_timepoint <- function(data, dataset_name) {
   old_timepoint <- if ("timepoint" %in% names(data)) clean_pm_chr(data$timepoint) else rep(NA_character_, nrow(data))
-  old_source_col <- if ("timepoint_source_col" %in% names(data)) clean_pm_chr(data$timepoint_source_col) else rep(NA_character_, nrow(data))
   collection <- extract_pm_collection_date(data)
-  date_timepoint <- pm_timepoint_from_date(collection$date)
-  raw_folder_timepoint <- pm_timepoint_from_raw_folder(data)
-
-  final_timepoint <- old_timepoint
-  source_col <- old_source_col
-
-  idx_date <- !is.na(date_timepoint)
-  final_timepoint[idx_date] <- date_timepoint[idx_date]
-  source_col[idx_date] <- collection$source_col[idx_date]
-
-  idx_raw <- !is.na(raw_folder_timepoint)
-  final_timepoint[idx_raw] <- raw_folder_timepoint[idx_raw]
-  source_col[idx_raw] <- "raw_source_folder"
+  final_timepoint <- pm_timepoint_from_date(collection$date)
+  source_col <- ifelse(!is.na(collection$date), collection$source_col, NA_character_)
 
   data$timepoint_original <- old_timepoint
   data$collection_date <- collection$date
@@ -355,17 +311,16 @@ recode_pm_timepoint <- function(data, dataset_name) {
     paste0("reviewed_pm_timepoint_labeling_", gsub("[^A-Za-z0-9]+", "_", dataset_name)),
     nrow(data),
     paste(
-      "Label PM2.5 rows using source folders first for ALL DATA_BASELINE_2020_220703,",
-      "ALL DATA_MIDLINE_2021_220703, and ALL DATA_ENDLINE_2022_220703; otherwise use PM-specific date windows:",
-      "baseline 2019-08-01 to 2019-12-01, midline 2020-09-01 to 2020-11-15,",
-      "and endline 2022-01-01 to 2022-06-15."
+      "Label PM2.5 rows only from dates parsed from filename fields/file_date_token;",
+      "do not use raw household source-folder labels or folder years for PM2.5 timepoints.",
+      "Date windows are baseline 2019-08-01 to 2019-12-01, midline 2020-09-01 to 2020-11-15,",
+      "and endline 2022-01-01 to 2022-06-15. Rows without a filename-derived date in these windows keep timepoint = NA."
     ),
     source_script = pm_current_cleaner
   )
 
   list(data = data, summary = summary)
 }
-
 safe_pm_mean <- function(x) {
   x <- x[!is.na(x)]
   if (!length(x)) return(NA_real_)
@@ -415,7 +370,7 @@ make_pm_quality_summary <- function(data, dataset_name, group_cols) {
     "p95_pm25_ug_m3", "p99_pm25_ug_m3", "max_pm25_ug_m3", "max_pm25_uncensored_ug_m3",
     "n_uncensored_pm_lt_10", "n_uncensored_pm_gt_30000", "n_pm_ge_400", "n_pm_ge_1000",
     "n_pm_ge_5000", "pct_pm_ge_1000", "pct_pm_ge_5000", "n_low_v_power_after_filter",
-    "min_v_power", "n_anomaly_removed_rows"
+    "min_v_power"
   )
 
   if (!nrow(data)) {
@@ -476,8 +431,6 @@ make_pm_quality_summary <- function(data, dataset_name, group_cols) {
       pct_pm_ge_5000 = if (valid_pm_n > 0) 100 * sum(!is.na(pm) & pm >= 5000) / valid_pm_n else NA_real_,
       n_low_v_power_after_filter = sum(!is.na(v_power) & v_power <= 3.6),
       min_v_power = safe_pm_min(v_power),
-      n_pm_anomaly_review_flag_rows = if ("pm_anomaly_review_flag" %in% names(block)) sum(block$pm_anomaly_review_flag, na.rm = TRUE) else 0L,
-      n_anomaly_removed_rows = if ("pm_anomaly_remove" %in% names(block)) sum(block$pm_anomaly_remove, na.rm = TRUE) else 0L,
       stringsAsFactors = FALSE
     )
   })
@@ -516,7 +469,7 @@ write_pm_data_quality_outputs <- function(data, dataset_name) {
     paste(
       "Wrote internal PM2.5 data quality checks by file and by timepoint/study-arm group for", dataset_name,
       "including monitoring duration, missing date/time and PM values, duplicate timestamps, censored PM values,",
-      "very high PM flags, and low-voltage checks after the V_power > 3.6 filter."
+      "very high PM count summaries, and low-voltage checks after the V_power > 3.6 filter."
     ),
     source_script = pm_current_cleaner
   )
@@ -527,121 +480,6 @@ write_pm_data_quality_outputs <- function(data, dataset_name) {
   )
 }
 
-write_pm_anomaly_outputs <- function(data) {
-  reviewed_high_pm_household_ids <- c("10FF33107012", "4EPP10280794")
-  candidate <- data[
-    data$include_in_indoor_final & data$study_arm_overall %in% c("intervention", "comparison"),
-    ,
-    drop = FALSE
-  ]
-
-  window_summary <- make_pm_quality_summary(
-    candidate,
-    "pm25_pats_refugee_indoor_candidate_windows",
-    c("timepoint", "study_arm_overall", "hh_id", "fcn_id", "hh_id_note", "PM_monitor", "raw_source_file")
-  )
-
-  if (nrow(window_summary)) {
-    window_hh <- clean_pm_chr(window_summary$hh_id)
-    reviewed_idx <- window_hh %in% reviewed_high_pm_household_ids
-    high_pm_idx <-
-      (!is.na(window_summary$max_pm25_ug_m3) & window_summary$max_pm25_ug_m3 >= 1000) |
-      (!is.na(window_summary$pct_pm_ge_1000) & window_summary$pct_pm_ge_1000 > 0)
-    anomaly_window_summary <- window_summary[reviewed_idx | high_pm_idx, , drop = FALSE]
-    if (nrow(anomaly_window_summary)) {
-      reviewed_summary_idx <- clean_pm_chr(anomaly_window_summary$hh_id) %in% reviewed_high_pm_household_ids
-      anomaly_window_summary$anomaly_source <- ifelse(
-        reviewed_summary_idx,
-        "reviewed_high_pm_trace_from_20_very_high_PM_anomolies_R",
-        "data_quality_high_pm_window"
-      )
-      anomaly_window_summary$review_decision <- ifelse(
-        reviewed_summary_idx,
-        "retain_in_final_cleaned_indoor_dataset",
-        "retain_flag_only"
-      )
-      anomaly_window_summary <- move_columns_first(
-        anomaly_window_summary,
-        c("dataset", "anomaly_source", "review_decision")
-      )
-    }
-  } else {
-    anomaly_window_summary <- window_summary
-    anomaly_window_summary$anomaly_source <- character()
-    anomaly_window_summary$review_decision <- character()
-  }
-
-  anomaly_arm_timepoint_summary <- make_pm_quality_summary(
-    candidate,
-    "pm25_pats_refugee_indoor_candidate_anomaly_by_arm_timepoint",
-    c("timepoint", "study_arm_overall")
-  )
-
-  reviewed_trace_flag <- rep(FALSE, nrow(data))
-  if (nrow(data)) {
-    reviewed_trace_flag <- data$include_in_indoor_final &
-      clean_pm_chr(data$timepoint) == "endline" &
-      clean_pm_chr(data$hh_id) %in% reviewed_high_pm_household_ids
-    reviewed_trace_flag[is.na(reviewed_trace_flag)] <- FALSE
-  }
-
-  remove <- rep(FALSE, nrow(data))
-
-  reviewed_window_summary <- make_pm_quality_summary(
-    data[reviewed_trace_flag, , drop = FALSE],
-    "pm25_pats_refugee_reviewed_high_pm_retained_windows",
-    c("timepoint", "study_arm_overall", "hh_id", "fcn_id", "hh_id_note", "PM_monitor", "raw_source_file")
-  )
-
-  anomaly_rules <- data.frame(
-    rule_id = paste0("reviewed_retain_endline_high_pm_hh_", reviewed_high_pm_household_ids),
-    timepoint = "endline",
-    hh_id = reviewed_high_pm_household_ids,
-    action = "retain in final cleaned indoor PM2.5 dataset",
-    reason = paste(
-      "Manual comparison of the two reviewed endline high-PM traces with the five next-highest peak households and the all-household average supported retaining these data.",
-      "The formal PM_Estimate cleaning/censoring rule still caps values above 30000 ug/m3 at 30000."
-    ),
-    source_script = paste(
-      "5_analysis_RF105/6_PM_analysis/archive/20_very_high_PM_anomolies.R;",
-      "5_analysis_RF105/reviewed/7_pm25_anomaly_household_comparison_20260806.R"
-    ),
-    stringsAsFactors = FALSE
-  )
-
-  window_path <- clean_final_path("4_data", "clean_final", "pm25_pats_refugee_anomaly_window_summary_internal.csv")
-  arm_path <- clean_final_path("4_data", "clean_final", "pm25_pats_refugee_anomaly_summary_by_arm_timepoint_internal.csv")
-  rules_path <- clean_final_path("4_data", "clean_final", "pm25_pats_refugee_anomaly_review_rules_internal.csv")
-  reviewed_path <- clean_final_path("4_data", "clean_final", "pm25_pats_refugee_reviewed_high_pm_retained_windows_internal.csv")
-  legacy_removed_path <- clean_final_path("4_data", "clean_final", "pm25_pats_refugee_anomaly_removed_windows_internal.csv")
-  ensure_parent_dir(window_path)
-  write.csv(anomaly_window_summary, window_path, row.names = FALSE, na = "")
-  write.csv(anomaly_arm_timepoint_summary, arm_path, row.names = FALSE, na = "")
-  write.csv(anomaly_rules, rules_path, row.names = FALSE, na = "")
-  write.csv(reviewed_window_summary, reviewed_path, row.names = FALSE, na = "")
-  write.csv(data[remove, , drop = FALSE], legacy_removed_path, row.names = FALSE, na = "")
-
-  record_pm_audit(
-    "reviewed_retain_endline_high_pm_traces",
-    sum(reviewed_trace_flag, na.rm = TRUE),
-    paste(
-      "Retain the two manually reviewed endline high-PM PATS+ traces in the final indoor PM2.5 dataset for household IDs",
-      paste(reviewed_high_pm_household_ids, collapse = "; "),
-      "after comparison with the next-highest-peak households and the all-household average. High-PM windows remain documented as QA diagnostics only."
-    ),
-    source_script = pm_current_cleaner
-  )
-
-  list(
-    remove = remove,
-    review_flag = reviewed_trace_flag,
-    window_path = normalizePath(window_path, winslash = "/", mustWork = TRUE),
-    arm_path = normalizePath(arm_path, winslash = "/", mustWork = TRUE),
-    rules_path = normalizePath(rules_path, winslash = "/", mustWork = TRUE),
-    reviewed_path = normalizePath(reviewed_path, winslash = "/", mustWork = TRUE),
-    removed_path = normalizePath(legacy_removed_path, winslash = "/", mustWork = TRUE)
-  )
-}
 make_pm_household_count_summary <- function(data, dataset_name) {
   timepoints <- c("baseline", "midline", "endline")
   arms <- c("intervention", "comparison")
@@ -930,9 +768,6 @@ pm$pm25_ug_m3 <- pm$PM_Estimate
 pm_audit_path <- clean_final_path("4_data", "clean_final", "pm_pats_refugee_reviewed_cleaning_audit.csv")
 ensure_parent_dir(pm_audit_path)
 
-pm_anomaly_outputs <- write_pm_anomaly_outputs(pm)
-pm$pm_anomaly_review_flag <- pm_anomaly_outputs$review_flag
-pm$pm_anomaly_remove <- pm_anomaly_outputs$remove
 pm_quality_outputs <- write_pm_data_quality_outputs(pm, "pm25_pats_refugee_cleaning_all_rows")
 
 pm_audit <- if (length(pm_audit_rows)) do.call(rbind, pm_audit_rows) else data.frame(stringsAsFactors = FALSE)
@@ -968,22 +803,6 @@ indoor$data_type <- "pm25_pats_indoor"
 write_timepoint_summary(make_timepoint_summary(indoor, "pm25_pats_refugee_indoor"), "pm25_pats_refugee_indoor")
 indoor_quality_outputs <- write_pm_data_quality_outputs(indoor, "pm25_pats_refugee_indoor_final")
 
-indoor_anomaly_retained <- pm[
-  (pm$include_in_indoor_final | pm$pm_anomaly_remove) &
-    pm$study_arm_overall %in% c("intervention", "comparison"),
-  ,
-  drop = FALSE
-]
-indoor_anomaly_retained$data_type <- "pm25_pats_indoor_anomaly_retained_sensitivity"
-write_timepoint_summary(
-  make_timepoint_summary(indoor_anomaly_retained, "pm25_pats_refugee_indoor_anomaly_retained_sensitivity"),
-  "pm25_pats_refugee_indoor_anomaly_retained_sensitivity"
-)
-indoor_anomaly_retained_quality_outputs <- write_pm_data_quality_outputs(
-  indoor_anomaly_retained,
-  "pm25_pats_refugee_indoor_anomaly_retained_sensitivity"
-)
-
 indoor_household_counts <- make_pm_household_count_summary(indoor, "pm25_pats_refugee_indoor")
 indoor_household_counts_path <- write_pm_household_count_summary(indoor_household_counts)
 
@@ -995,50 +814,10 @@ indoor <- move_columns_first(
     "community", "data_type", "hh_id", "fcn_id", "hh_id_note", "timepoint", "timepoint_original",
     "collection_date", "collection_year", "timepoint_source_col", "dateTime", "dateTime_min", "nearest_min",
     "dateTime_hour", "nearest_hour", "raw_collection_round", "raw_source_file", "study_arm_overall", "study_arm",
-    "location_type", "note_clean", "pm25_ug_m3", "PM_Estimate", "PM_Estimate_uncensored", "PM_monitor",
-    "pm_anomaly_review_flag", "pm_anomaly_remove"
+    "location_type", "note_clean", "pm25_ug_m3", "PM_Estimate", "PM_Estimate_uncensored", "PM_monitor"
   )
 )
 
-deidentified_indoor_anomaly_retained <- drop_identifier_columns(indoor_anomaly_retained, keep = c("PM_monitor"))
-indoor_anomaly_retained <- deidentified_indoor_anomaly_retained$data
-indoor_anomaly_retained <- move_columns_first(
-  indoor_anomaly_retained,
-  c(
-    "community", "data_type", "hh_id", "fcn_id", "hh_id_note", "timepoint", "timepoint_original",
-    "collection_date", "collection_year", "timepoint_source_col", "dateTime", "dateTime_min", "nearest_min",
-    "dateTime_hour", "nearest_hour", "raw_collection_round", "raw_source_file", "study_arm_overall", "study_arm",
-    "location_type", "note_clean", "pm25_ug_m3", "PM_Estimate", "PM_Estimate_uncensored", "PM_monitor",
-    "pm_anomaly_review_flag", "pm_anomaly_remove"
-  )
-)
-indoor_anomaly_retained_path <- write_final_rds(
-  indoor_anomaly_retained,
-  "4_data/clean_final/pm25_pats_refugee_indoor_anomaly_retained_sensitivity.rds"
-)
-shareable_indoor_anomaly_retained <- make_shareable_dataset(
-  indoor_anomaly_retained,
-  "pm25_pats_refugee_indoor_anomaly_retained_sensitivity"
-)
-shareable_indoor_anomaly_retained_path <- write_shareable_rds(
-  shareable_indoor_anomaly_retained$data,
-  "pm25_pats_refugee_indoor_anomaly_retained_sensitivity.rds"
-)
-entry_indoor_anomaly_retained <- make_inventory_entry(
-  dataset_name = "pm25_pats_refugee_indoor_anomaly_retained_sensitivity",
-  data = indoor_anomaly_retained,
-  output_path = indoor_anomaly_retained_path,
-  source_paths = clean_final_path(source_rel),
-  removed_identifier_columns = deidentified_indoor_anomaly_retained$removed,
-  shareable_output_path = shareable_indoor_anomaly_retained_path,
-  shareable_removed_identifier_columns = shareable_indoor_anomaly_retained$removed,
-  notes = paste(
-    "Backward-compatible copy of pm25_pats_refugee_indoor after the two manually reviewed high-PM traces were retained in the primary cleaned dataset.",
-    "Formal PM cleaning rules are identical to the primary indoor PM2.5 dataset, including exact duplicate row removal, V_power > 3.6 filtering, filename/date/timepoint corrections, insufficient-data/QC exclusions, and PM_Estimate censoring to 10-30000 ug/m3.",
-    "This file is retained for compatibility with older analysis scripts; it should match the primary indoor PM2.5 dataset unless future sensitivity exclusions are added."
-  )
-)
-update_inventory(entry_indoor_anomaly_retained)
 indoor_path <- write_final_rds(indoor, "4_data/clean_final/pm25_pats_refugee_indoor.rds")
 shareable_indoor <- make_shareable_dataset(indoor, "pm25_pats_refugee_indoor")
 shareable_indoor_path <- write_shareable_rds(shareable_indoor$data, "pm25_pats_refugee_indoor.rds")
@@ -1053,8 +832,8 @@ entry_indoor <- make_inventory_entry(
   notes = paste(
     "Refugee household indoor PATS+ PM2.5 data rebuilt from raw-first imports in 2_data_raw.",
     "PM cleaning decisions implemented directly in this file: exact repeated imported row removal, V_power > 3.6 filtering, filename parsing, dateTime rounding, manual filename recodes, insufficient-data labels, 4E179029 QC correction, and PM_Estimate censoring to 10-30000 ug/m3.",
-    "PM2.5 timepoints use the household source folders first, then PM-specific date windows: baseline 2019-08-01 to 2019-12-01, midline 2020-09-01 to 2020-11-15, and endline 2022-01-01 to 2022-06-15.",
-    "Normal household files only are included; QC, insufficient-data, school, mosque, mosjid, outside, and outdoor rows are excluded from the primary indoor output. The two manually reviewed endline high-PM traces are retained and flagged in pm_anomaly_review_flag; no rows are removed for anomaly review.",
+    "PM2.5 timepoints are assigned only from dates parsed from filename fields/file_date_token using PM-specific date windows: baseline 2019-08-01 to 2019-12-01, midline 2020-09-01 to 2020-11-15, and endline 2022-01-01 to 2022-06-15.",
+    "Normal household files only are included; QC, insufficient-data, school, mosque, mosjid, outside, and outdoor rows are excluded from the primary indoor output. No manual high-PM household flags or exclusions are applied; all included rows use the same PM_Estimate censoring rule.",
     "The import explicitly includes ALL DATA_ENDLINE_2022_220703."
   )
 )
@@ -1095,8 +874,7 @@ ambient <- move_columns_first(
     "community", "data_type", "hh_id", "fcn_id", "hh_id_note", "ambient_site_id", "timepoint", "timepoint_original",
     "collection_date", "collection_year", "timepoint_source_col", "dateTime", "dateTime_min", "nearest_min",
     "dateTime_hour", "nearest_hour", "raw_collection_round", "raw_source_file", "study_arm_overall", "study_arm",
-    "location_type", "note_clean", "pm25_ug_m3", "PM_Estimate", "PM_Estimate_uncensored", "PM_monitor",
-    "pm_anomaly_review_flag", "pm_anomaly_remove"
+    "location_type", "note_clean", "pm25_ug_m3", "PM_Estimate", "PM_Estimate_uncensored", "PM_monitor"
   )
 )
 
@@ -1116,7 +894,7 @@ entry_ambient <- make_inventory_entry(
     "Dedicated outdoor PM2.5 files are imported from ALL PM 2.5 Outdoor data; these files do not have household IDs, so hh_id and fcn_id are set to NA in the final ambient output.",
     "Household-folder files with school, mosque, mosjid, outside, outdoor, or close filename variants are excluded at import so they do not enter the indoor clean dataset.",
     "PM cleaning decisions implemented directly in this file include V_power filtering, dateTime rounding, manual site-name recodes, and PM_Estimate censoring to 10-30000 ug/m3.",
-    "PM2.5 ambient timepoints use the PM-specific date windows when records do not come from one of the household source folders.",
+    "PM2.5 ambient timepoints are assigned only from dates parsed from filename fields/file_date_token using the PM-specific date windows, not from household source-folder labels.",
     "No host PATS+ output was created. HAPEX remains excluded and documented in hapex_exclusion_manifest.csv."
   )
 )
@@ -1129,17 +907,12 @@ write_cleaning_fix_log()
 
 message("Wrote ", indoor_path)
 message("Wrote ", shareable_indoor_path)
-message("Wrote ", indoor_anomaly_retained_path)
-message("Wrote ", shareable_indoor_anomaly_retained_path)
 message("Wrote ", ambient_path)
 message("Wrote ", shareable_ambient_path)
 message("Wrote ", qc_path)
 message("Wrote ", shareable_qc_path)
 message("Wrote ", indoor_household_counts_path)
 message("Wrote ", normalizePath(pm_audit_path, winslash = "/", mustWork = TRUE))
-message("Wrote ", pm_anomaly_outputs$window_path)
-message("Wrote ", pm_anomaly_outputs$reviewed_path)
-message("Wrote ", pm_anomaly_outputs$removed_path)
 message("Wrote ", normalizePath(exact_duplicate_summary_path, winslash = "/", mustWork = TRUE))
 message("Wrote ", pm_quality_outputs$by_file_path)
 message("Wrote ", indoor_quality_outputs$by_file_path)

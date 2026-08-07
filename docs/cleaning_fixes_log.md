@@ -1,6 +1,6 @@
 # Cleaning fixes log
 
-Generated: 2026-08-06 14:59:29 PDT
+Generated: 2026-08-06 17:48:11 PDT
 
 ## Fixes implemented
 
@@ -20,8 +20,8 @@ Generated: 2026-08-06 14:59:29 PDT
 
 ## Resulting datasets
 
-- `pm25_pats_refugee_ambient`:  139456 rows,   54 columns; timepoints: endline=52526; baseline=52014; midline=34916
-- `pm25_pats_refugee_indoor`: 1362519 rows,   54 columns; timepoints: baseline=559683; endline=529975; midline=272861
+- `pm25_pats_refugee_ambient`:  139456 rows,   52 columns; timepoints: endline=52526; baseline=52014; midline=34916
+- `pm25_pats_refugee_indoor`: 1362519 rows,   52 columns; timepoints: baseline=559683; endline=529975; midline=272861
 - `pm25_pats_refugee_indoor_anomaly_retained_sensitivity`: 1362519 rows,   54 columns; timepoints: baseline=559683; endline=529975; midline=272861
 - `pm25_pats_refugee_indoor_household_counts_by_arm_timepoint`:       6 rows,    7 columns; timepoints: baseline=2; endline=2; midline=2
 - `pm25_pats_refugee_qc_files`:      61 rows,    8 columns; timepoints: baseline=32; endline=19; midline=10
