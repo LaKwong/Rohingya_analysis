@@ -1,30 +1,21 @@
-# Search path
-VPATH = data data-raw eda reports scripts
+Rscript = C:/Program Files/R/R-4.5.3/bin/Rscript.exe
 
-# Processed data files
-# .rds files in data folder
-DATA =
+.PHONY: all clean-data clean-host clean-refugee rf105-reviewed rf105 drdid
 
-# EDA studies
-# .md files in eda folder
-EDA =
+all: clean-data rf105-reviewed
 
-# Reports
-# .md files in report folder
-REPORTS =
+clean-data: clean-host clean-refugee
 
-# All targets
-all : $(DATA) $(EDA) $(REPORTS)
+clean-host:
+	"$(Rscript)" 1_run_clean_host_20260805_2141.R
 
-# Data dependencies
-# [target file] : [dependency file 1] [dependency file 2] [dependency file 3]
+clean-refugee:
+	"$(Rscript)" 1_run_clean_refugee_20260805_2141.R
 
-# EDA study and report dependencies
-# [knitted file] : [cleaned data 1] [ cleaned data 2]
+rf105-reviewed: clean-data
+	"$(Rscript)" 5_analysis_RF105/reviewed/00_run_RF105_20260805_2213.R
 
+rf105: rf105-reviewed
 
-# Pattern rules
-%.rds : %.R
-	Rscript $<
-%.md : %.Rmd
-	Rscript -e 'rmarkdown::render(input = "$<", output_options = list(html_preview = FALSE))'
+drdid:
+	"$(Rscript)" 5_analysis_RF105/reviewed/5_drDiD_comparison_20260805_2213.R

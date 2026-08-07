@@ -17,7 +17,8 @@
 #   2. Build reviewed Geocene stove-use daily analysis products.
 #   3. Build ambient-adjusted PM2.5 household-timepoint products.
 #   4. Fit and post-process all rDiD/XGBoost and GLM sensitivity models.
-#   5. Generate all descriptive tables and figures from one main descriptive file.
+#   5. Run the DRDID benchmark comparison for the reviewed rDiD estimates.
+#   6. Generate all descriptive tables and figures from one main descriptive file.
 #
 # Outputs:
 #   Tables:  7_tables/RF105_reviewed_YYYYMMDD/
@@ -86,6 +87,7 @@ reviewed_scripts <- c(
   "1_geocene_stove_use_20260805_2213.R",
   "2_pm25_ambient_adjusted_analysis_20260805_2213.R",
   "4_rdid_xgboost_20260805_2213.R",
+  "5_drDiD_comparison_20260805_2213.R",
   "3_descriptive_outcomes_20260805_2213.R"
 )
 

@@ -97,9 +97,38 @@ input_survey_hh_members_path <- file.path(clean_final_dir, "survey_refugee_hh_me
 
 analysis_date <- format(Sys.Date(), "%Y%m%d")
 table_dir <- file.path(project_root, "7_tables", paste0("pm25_ambient_adjusted_", analysis_date))
+restricted_table_dir <- file.path(project_root, "8_restricted", paste0("pm25_ambient_adjusted_", analysis_date))
 figure_dir <- file.path(project_root, "6_figures", paste0("pm25_ambient_adjusted_", analysis_date))
 dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(restricted_table_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(figure_dir, recursive = TRUE, showWarnings = FALSE)
+quarantine_restricted_pm_csvs <- function() {
+  # Old runs wrote ID-level PM datasets under 7_tables. Move them to the
+  # restricted tree before writing fresh public outputs for the current run.
+  restricted_public_files <- c(
+    "table_pm25_window_dataset_internal.csv",
+    "table_pm25_window_dataset_anomaly_retained_internal.csv",
+    "table_rDiD_pm25_panel_internal.csv",
+    "table_rDiD_pm25_panel_anomaly_retained_internal.csv",
+    "table_descriptive_pm25_hours_internal.csv"
+  )
+  quarantine_dir <- file.path(restricted_table_dir, "quarantined_from_7_tables")
+  dir.create(quarantine_dir, recursive = TRUE, showWarnings = FALSE)
+  for (file_name in restricted_public_files) {
+    from <- file.path(table_dir, file_name)
+    if (file.exists(from)) {
+      to <- file.path(quarantine_dir, file_name)
+      if (file.exists(to)) {
+        to <- file.path(
+          quarantine_dir,
+          paste0(tools::file_path_sans_ext(file_name), "_", format(Sys.time(), "%H%M%S"), ".csv")
+        )
+      }
+      file.rename(from, to)
+    }
+  }
+}
+quarantine_restricted_pm_csvs()
 
 check_required_columns <- function(data, required_cols, data_name) {
   missing_cols <- setdiff(required_cols, names(data))
@@ -561,7 +590,7 @@ analysis_data <- analysis_data %>%
   mutate(days_since_round_start = midpoint_day_num - round_start_day_num)
 
 message("Writing analysis-ready datasets and diagnostics")
-analysis_internal_path <- file.path(table_dir, "table_pm25_window_dataset_internal.csv")
+analysis_internal_path <- file.path(restricted_table_dir, "table_pm25_window_dataset_internal.csv")
 analysis_deidentified_path <- file.path(table_dir, "table_pm25_window_dataset_deidentified.csv")
 
 readr::write_csv(analysis_data, analysis_internal_path, na = "")
@@ -1453,7 +1482,7 @@ if (!is.null(indoor_anomaly_retained)) {
 
   readr::write_csv(
     analysis_data_anomaly_retained,
-    file.path(table_dir, "table_pm25_window_dataset_anomaly_retained_internal.csv"),
+    file.path(restricted_table_dir, "table_pm25_window_dataset_anomaly_retained_internal.csv"),
     na = ""
   )
   readr::write_csv(
@@ -1632,11 +1661,11 @@ rdid_excess_household <- primary_data %>%
 
 readr::write_csv(
   rdid_excess_household,
-  file.path(table_dir, "table_rDiD_pm25_panel_internal.csv"),
+  file.path(restricted_table_dir, "table_rDiD_pm25_panel_internal.csv"),
   na = ""
 )
 readr::write_csv(
-  rdid_excess_household %>% select(-fcn_id),
+  rdid_excess_household %>% select(-fcn_id, -collection_date_min, -collection_date_max),
   file.path(table_dir, "table_rDiD_pm25_panel_deidentified.csv"),
   na = ""
 )
@@ -1877,11 +1906,11 @@ if (!is.null(analysis_data_anomaly_retained)) {
 
   readr::write_csv(
     rdid_excess_household_anomaly_retained,
-    file.path(table_dir, "table_rDiD_pm25_panel_anomaly_retained_internal.csv"),
+    file.path(restricted_table_dir, "table_rDiD_pm25_panel_anomaly_retained_internal.csv"),
     na = ""
   )
   readr::write_csv(
-    rdid_excess_household_anomaly_retained %>% select(-fcn_id),
+    rdid_excess_household_anomaly_retained %>% select(-fcn_id, -collection_date_min, -collection_date_max),
     file.path(table_dir, "table_rDiD_pm25_panel_anomaly_retained_deidentified.csv"),
     na = ""
   )
@@ -2105,12 +2134,19 @@ midline_location_hours <- survey_location %>%
     hours_outside_clean = coalesce(hours_outside_clean, if_else(!is.na(hours_inside_clean), 24 - hours_inside_clean, NA_real_)),
     hours_inside_clean = coalesce(hours_inside_clean, if_else(!is.na(hours_outside_clean), 24 - hours_outside_clean, NA_real_))
   ) %>%
-  left_join(household_key, by = c("PARENT_KEY" = "KEY")) %>%
+  left_join(
+    household_key %>%
+      rename(fcn_id_household = fcn_id, hh_id_household = hh_id),
+    by = c("PARENT_KEY" = "KEY")
+  ) %>%
   left_join(
     member_key %>% select(PARENT_KEY, mem_serial, member_age_yrs),
     by = c("PARENT_KEY", "location_number" = "mem_serial")
   ) %>%
   mutate(
+    fcn_id = coalesce(as.character(fcn_id), as.character(fcn_id_household)),
+    hh_id = coalesce(as.character(hh_id), as.character(hh_id_household)),
+    timepoint = coalesce(as.character(timepoint), as.character(timepoint_household)),
     study_arm_overall = coalesce(study_arm_overall_household, as.character(study_arm_overall)),
     is_caregiver = !is.na(respondent_sl) & location_number == respondent_sl,
     is_child_under5 = !is.na(member_age_yrs) & member_age_yrs < 5
@@ -2143,8 +2179,15 @@ endline_member_hours <- survey_hh_members %>%
     member_age_yrs = clean_age_years(age_yrs),
     hours_outside_clean = clean_hours_0_24(hours_outside)
   ) %>%
-  left_join(household_key, by = c("PARENT_KEY" = "KEY")) %>%
+  left_join(
+    household_key %>%
+      rename(fcn_id_household = fcn_id, hh_id_household = hh_id),
+    by = c("PARENT_KEY" = "KEY")
+  ) %>%
   mutate(
+    fcn_id = coalesce(as.character(fcn_id), as.character(fcn_id_household)),
+    hh_id = coalesce(as.character(hh_id), as.character(hh_id_household)),
+    timepoint = coalesce(as.character(timepoint), as.character(timepoint_household)),
     study_arm_overall = coalesce(study_arm_overall_household, as.character(study_arm_overall)),
     is_caregiver = !is.na(respondent_sl) & mem_serial == respondent_sl,
     is_child_under5 = !is.na(member_age_yrs) & member_age_yrs < 5
@@ -2187,7 +2230,7 @@ individual_hours_household <- bind_rows(
 
 readr::write_csv(
   individual_hours_household,
-  file.path(table_dir, "table_descriptive_pm25_hours_internal.csv"),
+  file.path(restricted_table_dir, "table_descriptive_pm25_hours_internal.csv"),
   na = ""
 )
 readr::write_csv(

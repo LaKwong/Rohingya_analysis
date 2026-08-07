@@ -1249,16 +1249,23 @@ apply_refugee_endline_review_corrections <- function(data, identity_data = data)
 
   match_target_rows <- function(source_file, review_row_number, review_hh_id, review_fcn_id) {
     in_source <- identity_data$raw_source_file == source_file
-    if (!is.na(review_row_number)) {
-      idx <- which(in_source & source_row_number == review_row_number)
-      return(idx)
+    valid_hh_id <- "hh_id" %in% names(identity_data) && valid_review_id(review_hh_id, "hh_id")
+    valid_fcn_id <- "fcn_id" %in% names(identity_data) && valid_review_id(review_fcn_id, "fcn_id")
+
+    # Fail closed: row numbers can narrow candidate records, but they are not
+    # sufficient by themselves because review workbooks may be sorted or filtered.
+    if (!valid_hh_id && !valid_fcn_id) {
+      return(integer(0))
     }
 
     idx <- which(in_source)
-    if (length(idx) && "hh_id" %in% names(identity_data) && valid_review_id(review_hh_id, "hh_id")) {
+    if (!is.na(review_row_number)) {
+      idx <- idx[source_row_number[idx] == review_row_number]
+    }
+    if (length(idx) && valid_hh_id) {
       idx <- idx[normalize_id(identity_data$hh_id[idx]) == normalize_id(review_hh_id)]
     }
-    if (length(idx) && "fcn_id" %in% names(identity_data) && valid_review_id(review_fcn_id, "fcn_id")) {
+    if (length(idx) && valid_fcn_id) {
       idx <- idx[normalize_id(identity_data$fcn_id[idx]) == normalize_id(review_fcn_id)]
     }
     idx
@@ -1272,8 +1279,8 @@ apply_refugee_endline_review_corrections <- function(data, identity_data = data)
     if ("fcn_id" %in% names(identity_data) && valid_review_id(review_fcn_id, "fcn_id")) {
       checks <- c(checks, normalize_id(identity_data$fcn_id[row_idx]) == normalize_id(review_fcn_id))
     }
-    if (!length(checks)) return(TRUE)
-    any(checks, na.rm = TRUE)
+    if (!length(checks)) return(FALSE)
+    all(checks %in% TRUE)
   }
 
   review_files <- list.files(review_dir, pattern = "\\.xlsx$", full.names = TRUE)
@@ -1618,6 +1625,18 @@ clean_refugee_related_survey <- function(role, dataset_name, output_file) {
     if (!"collection_year" %in% names(data)) data$collection_year <- NA_integer_
     if (!"timepoint" %in% names(data)) data$timepoint <- NA_character_
     if (!"timepoint_source_col" %in% names(data)) data$timepoint_source_col <- NA_character_
+
+    parent_fields <- intersect(
+      c("fcn_id", "hh_id", "study_arm_overall", "study_arm"),
+      names(household_raw)
+    )
+    for (field in parent_fields) {
+      if (!field %in% names(data)) data[[field]] <- NA_character_
+      parent_value <- as.character(household_raw[[field]][parent_idx])
+      fill <- !is.na(parent_idx) & (is.na(data[[field]]) | as.character(data[[field]]) == "")
+      data[[field]][fill] <- parent_value[fill]
+    }
+
     parent_fill <- is.na(data$collection_date) & !is.na(parent_idx)
     data$collection_date[parent_fill] <- as.Date(household_raw$collection_date[parent_idx[parent_fill]])
     data$collection_year[parent_fill] <- household_raw$collection_year[parent_idx[parent_fill]]

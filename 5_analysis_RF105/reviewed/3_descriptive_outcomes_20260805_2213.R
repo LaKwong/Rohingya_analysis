@@ -13,7 +13,7 @@
 #   4_data/clean_final/pm25_pats_refugee_indoor.rds
 #   4_data/clean_final/pm25_pats_refugee_ambient.rds
 #   7_tables/RF105_reviewed_YYYYMMDD/table_descriptive_stove_daily_dataset.csv
-#   7_tables/pm25_ambient_adjusted_YYYYMMDD/pm25_* outputs, when present
+#   7_tables/pm25_ambient_adjusted_YYYYMMDD public outputs and 8_restricted/pm25_ambient_adjusted_YYYYMMDD internal PM panel, when present
 #
 # Outputs:
 #   Tables:  7_tables/RF105_reviewed_YYYYMMDD/descriptive_*, tab1_*, pm25_*,
@@ -3076,15 +3076,25 @@ if (!file.exists(config_file)) {
 }
 source(config_file)
 
-read_geocene_reviewed_csv <- function(filename) {
-  file_path <- file.path(dir_tables_reviewed, filename)
-  if (!file.exists(file_path)) {
+resolve_reviewed_or_restricted_csv <- function(filename, restricted_subfolder = "identified_tables") {
+  candidate_paths <- c(
+    file.path(dir_tables_reviewed, filename),
+    file.path(dir_restricted_reviewed, restricted_subfolder, filename),
+    file.path(dir_restricted_qa, filename)
+  )
+  candidate_paths <- candidate_paths[file.exists(candidate_paths)]
+  if (length(candidate_paths) == 0) {
     stop(
-      "Required reviewed Geocene result is missing: ", file_path, "\n",
-      "Run 5_analysis_RF105/reviewed/1_geocene_stove_use_20260805_2213.R first.",
+      "Required reviewed result is missing from public and restricted output folders: ", filename, "\n",
+      "Run the upstream reviewed script first.",
       call. = FALSE
     )
   }
+  candidate_paths[[1]]
+}
+
+read_geocene_reviewed_csv <- function(filename) {
+  file_path <- resolve_reviewed_or_restricted_csv(filename)
   readr::read_csv(file_path, show_col_types = FALSE)
 }
 
@@ -4916,16 +4926,9 @@ survey_raw <- readRDS(file_survey_refugee_household) %>%
 survey_population <- make_analysis_population(survey_raw)
 survey <- survey_population$all_deduplicated
 
-stove_daily_file <- file.path(
-  dir_tables_reviewed,
+stove_daily_file <- resolve_reviewed_or_restricted_csv(
   "table_descriptive_stove_daily_dataset.csv"
 )
-if (!file.exists(stove_daily_file)) {
-  stop(
-    "Missing reviewed Geocene stove-use table: ", stove_daily_file,
-    "\nRun 1_geocene_stove_use_20260805_2213.R before this script."
-  )
-}
 stove_daily <- readr::read_csv(stove_daily_file, show_col_types = FALSE)
 
 pm_indoor <- readRDS(file_pm25_indoor)
@@ -5863,8 +5866,8 @@ find_latest_ambient_dir <- function() {
 
 ambient_script_file <- file.path(
   project_root,
-  "5_analysis",
-  "6_PM_analysis",
+  "5_analysis_RF105",
+  "reviewed",
   "2_pm25_ambient_adjusted_analysis_20260805_2213.R"
 )
 
@@ -5881,10 +5884,25 @@ ambient_household_file <- file.path(
   ambient_table_dir,
   "table_pm25_window_dataset_deidentified.csv"
 )
+restricted_ambient_table_dir <- if (!is.na(ambient_table_dir)) {
+  file.path(
+    project_root,
+    "8_restricted",
+    basename(ambient_table_dir)
+  )
+} else {
+  NA_character_
+}
 ambient_household_timepoint_file <- file.path(
-  ambient_table_dir,
+  restricted_ambient_table_dir,
   "table_rDiD_pm25_panel_internal.csv"
 )
+if (is.na(ambient_household_timepoint_file) || !file.exists(ambient_household_timepoint_file)) {
+  ambient_household_timepoint_file <- file.path(
+    ambient_table_dir,
+    "table_rDiD_pm25_panel_internal.csv"
+  )
+}
 
 pm25_source_audit <- tibble(
   ambient_adjusted_script = ambient_script_file,

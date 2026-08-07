@@ -1313,28 +1313,43 @@ message("Wrote QA summary: ", outcome_audit_summary_file)
 ################################################################################
 
 find_ambient_adjusted_pm_file <- function() {
-  same_day_dir <- file.path(
-    project_root,
-    "7_tables",
-    paste0("pm25_ambient_adjusted_", date_stamp)
+  same_day_candidates <- c(
+    file.path(
+      project_root,
+      "8_restricted",
+      paste0("pm25_ambient_adjusted_", date_stamp),
+      "table_rDiD_pm25_panel_internal.csv"
+    ),
+    file.path(
+      project_root,
+      "7_tables",
+      paste0("pm25_ambient_adjusted_", date_stamp),
+      "table_rDiD_pm25_panel_internal.csv"
+    )
   )
-  same_day_file <- file.path(
-    same_day_dir,
-    "table_rDiD_pm25_panel_internal.csv"
-  )
+  same_day_candidates <- same_day_candidates[file.exists(same_day_candidates)]
 
-  if (file.exists(same_day_file)) {
+  if (length(same_day_candidates) > 0) {
+    same_day_file <- same_day_candidates[[1]]
     return(tibble(
-      ambient_adjusted_table_dir = same_day_dir,
+      ambient_adjusted_table_dir = dirname(same_day_file),
       ambient_adjusted_pm_file = same_day_file,
       source_recency = "same_date_as_reviewed_rdid_run"
     ))
   }
 
-  candidate_dirs <- list.dirs(file.path(project_root, "7_tables"),
-                              full.names = TRUE, recursive = FALSE)
+  candidate_roots <- c(
+    file.path(project_root, "8_restricted"),
+    file.path(project_root, "7_tables")
+  )
+  candidate_dirs <- unlist(lapply(
+    candidate_roots[file.exists(candidate_roots)],
+    list.dirs,
+    full.names = TRUE,
+    recursive = FALSE
+  ))
   candidate_dirs <- candidate_dirs[
-    str_detect(basename(candidate_dirs), "^pm25_ambient_adjusted_")
+    str_detect(basename(candidate_dirs), "^pm25_ambient_adjusted_[0-9]{8}$")
   ]
   candidate_files <- file.path(
     candidate_dirs,
@@ -1351,8 +1366,14 @@ find_ambient_adjusted_pm_file <- function() {
     )
   }
 
-  latest_file <- candidate_files[[order(basename(dirname(candidate_files)),
-                                        decreasing = TRUE)[[1]]]]
+  candidate_info <- tibble(
+    candidate_file = candidate_files,
+    source_date = basename(dirname(candidate_files)),
+    restricted_rank = if_else(str_detect(candidate_files, "/8_restricted/"), 1L, 0L)
+  ) %>%
+    arrange(desc(source_date), desc(restricted_rank))
+
+  latest_file <- candidate_info$candidate_file[[1]]
   tibble(
     ambient_adjusted_table_dir = dirname(latest_file),
     ambient_adjusted_pm_file = latest_file,

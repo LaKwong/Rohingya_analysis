@@ -9,7 +9,7 @@
 # Inputs:
 #   4_data/clean_final/survey_refugee_household.rds
 #   4_data/clean_final/survey_refugee_hh_members.rds
-#   7_tables/pm25_ambient_adjusted_YYYYMMDD/table_rDiD_pm25_panel_internal.csv
+#   8_restricted/pm25_ambient_adjusted_YYYYMMDD/table_rDiD_pm25_panel_internal.csv
 #   7_tables/RF105_reviewed_YYYYMMDD/table_rDiD_xgboost_all_results.csv
 #
 # Outputs:
@@ -220,18 +220,32 @@ outcome_specs <- rdid_xgboost_reference %>%
 ################################################################################
 
 find_ambient_adjusted_pm_file <- function() {
-  same_day_file <- file.path(
-    project_root,
-    "7_tables",
-    paste0("pm25_ambient_adjusted_", date_stamp),
-    "table_rDiD_pm25_panel_internal.csv"
+  same_day_candidates <- c(
+    file.path(
+      project_root,
+      "8_restricted",
+      paste0("pm25_ambient_adjusted_", date_stamp),
+      "table_rDiD_pm25_panel_internal.csv"
+    ),
+    file.path(
+      project_root,
+      "7_tables",
+      paste0("pm25_ambient_adjusted_", date_stamp),
+      "table_rDiD_pm25_panel_internal.csv"
+    )
   )
-
-  if (file.exists(same_day_file)) {
-    return(normalizePath(same_day_file, winslash = "/", mustWork = FALSE))
+  same_day_candidates <- same_day_candidates[file.exists(same_day_candidates)]
+  if (length(same_day_candidates) > 0) {
+    return(normalizePath(same_day_candidates[[1]], winslash = "/", mustWork = FALSE))
   }
 
-  candidate_dirs <- list.dirs(file.path(project_root, "7_tables"), full.names = TRUE, recursive = FALSE)
+  candidate_roots <- c(file.path(project_root, "8_restricted"), file.path(project_root, "7_tables"))
+  candidate_dirs <- unlist(lapply(
+    candidate_roots[file.exists(candidate_roots)],
+    list.dirs,
+    full.names = TRUE,
+    recursive = FALSE
+  ))
   candidate_dirs <- candidate_dirs[grepl("^pm25_ambient_adjusted_[0-9]{8}$", basename(candidate_dirs))]
   candidate_files <- file.path(candidate_dirs, "table_rDiD_pm25_panel_internal.csv")
   candidate_files <- candidate_files[file.exists(candidate_files)]
@@ -244,11 +258,14 @@ find_ambient_adjusted_pm_file <- function() {
     )
   }
 
-  normalizePath(
-    candidate_files[[order(basename(dirname(candidate_files)), decreasing = TRUE)[[1]]]],
-    winslash = "/",
-    mustWork = FALSE
-  )
+  candidate_info <- tibble(
+    candidate_file = candidate_files,
+    source_date = basename(dirname(candidate_files)),
+    restricted_rank = if_else(str_detect(candidate_files, "/8_restricted/"), 1L, 0L)
+  ) %>%
+    arrange(desc(source_date), desc(restricted_rank))
+
+  normalizePath(candidate_info$candidate_file[[1]], winslash = "/", mustWork = FALSE)
 }
 
 pm_adjusted_file <- find_ambient_adjusted_pm_file()

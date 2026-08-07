@@ -102,11 +102,17 @@ ensure_cols <- function(df, vars) {
   df
 }
 
-read_allocation_master <- function(path = file.path(
+default_allocation_master_path <- file.path(
   project_root,
   "2_data_raw",
   "RohingyaFuelMaster_hh_data - Copy.xlsx"
-)) {
+)
+
+public_clean_data_override <- nzchar(Sys.getenv("RF105_CLEAN_DATA_DIR", unset = ""))
+run_private_allocation_qa <- !public_clean_data_override ||
+  identical(str_to_lower(Sys.getenv("RF105_RUN_PRIVATE_ALLOCATION_QA", unset = "false")), "true")
+
+read_allocation_master <- function(path = default_allocation_master_path) {
   if (!file.exists(path)) {
     stop("Allocation master file not found: ", path, call. = FALSE)
   }
@@ -185,8 +191,38 @@ read_allocation_master <- function(path = file.path(
 }
 
 make_allocation_master_reconciliation <- function(df) {
-  allocation_master <- read_allocation_master()
+  if (!isTRUE(run_private_allocation_qa)) {
+    return(
+      df %>%
+        distinct(fcn_id, study_arm_overall) %>%
+        mutate(
+          allocation_master_path = NA_character_,
+          allocation_master_rows = NA_integer_,
+          allocation_master_fcn_id_originals = NA_character_,
+          allocation_master_fcn_id_recode_notes = NA_character_,
+          allocation_master_arm = NA_character_,
+          allocation_master_status = "not_run_public_clean_data_rerun",
+          allocation_master_study_arm_labels = NA_character_,
+          allocation_master_hh_ids = NA_character_,
+          allocation_master_camp_ids = NA_character_,
+          allocation_master_block_ids = NA_character_,
+          allocation_master_subblock_ids = NA_character_,
+          allocation_master_names_available = NA,
+          cleaned_survey_rows = NA_integer_,
+          cleaned_study_arm_values = as.character(study_arm_overall),
+          cleaned_study_arm_overall = as.character(study_arm_overall),
+          reconciliation_status = "not_run_public_clean_data_rerun",
+          allocation_reconciliation_note = paste(
+            "Private allocation-master reconciliation was skipped because RF105_CLEAN_DATA_DIR is set.",
+            "Pseudonymized public IDs are not intended to match the private allocation workbook.",
+            "Set RF105_RUN_PRIVATE_ALLOCATION_QA=true and provide private data to run this QA."
+          )
+        ) %>%
+        arrange(cleaned_study_arm_overall, fcn_id)
+    )
+  }
 
+  allocation_master <- read_allocation_master()
   survey_for_reconciliation <- df %>%
     ensure_cols(c(
       "fcn_id", "hh_id", "timepoint", "study_arm_overall", "camp_id",
@@ -644,16 +680,19 @@ write_rf105_release_checklist(
   tibble(
     item = c(
       "Review the restricted fcn_id QA manifest before release",
-      "Do not include restricted fcn_id QA files in manuscript/shareable outputs"
+      "Do not include restricted fcn_id QA files in manuscript/shareable outputs",
+      "Do not claim public clean-data reruns reproduce private allocation-master QA"
     ),
     status = "required_before_public_release",
     location = c(
       file.path(dir_tables_release, audit_output_file("table_release_restricted_qa_manifest.csv")),
-      dir_restricted_qa
+      dir_restricted_qa,
+      file.path(project_root, "5_analysis_RF105", "README.md")
     ),
     notes = c(
       "The manifest names restricted internal QA files without exposing household-level rows.",
-      "These files contain fcn_id values, household IDs, dates, location-like fields, and raw source-file provenance."
+      "These files contain fcn_id values, household IDs, dates, location-like fields, and raw source-file provenance.",
+      "Public clean-data reruns skip allocation-master reconciliation unless RF105_RUN_PRIVATE_ALLOCATION_QA=true and the private workbook/original IDs are available."
     )
   )
 )

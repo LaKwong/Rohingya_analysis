@@ -171,43 +171,177 @@ exchange_bdt_per_usd <- c(
 )
 
 restricted_qa_fields <- c(
-  "fcn_id", "hh_id", "uuid", "KEY", "camp_id", "block_id", "subblock_id",
-  "collection_date", "collection_dates_all_raw", "start_date", "end_date",
+  "fcn_id", "hh_id", "UNHCR_id", "UNHCR_card", "uuid", "KEY", "PARENT_KEY",
+  "camp_id", "block_id", "subblock_id", "collection_date",
+  "collection_dates_all_raw", "start_date", "end_date", "date", "datetime",
   "submission_time", "raw_source_file", "raw_source_files_all_raw",
   "raw_collection_round", "raw_collection_rounds_all_raw",
-  "raw_survey_version", "raw_survey_versions_all_raw"
+  "raw_survey_version", "raw_survey_versions_all_raw",
+  "raw_source_path", "source_path", "source_file", "file_name"
+)
+
+restricted_field_patterns <- c(
+  "^name($|_)", "^name_(respondent|hh_head|mahji)$", "target_child_name",
+  "^fcn_id($|_)",
+  "^hh_id($|_)",
+  "UNHCR", "unhcr", "uuid", "^KEY$", "^PARENT_KEY$",
+  "^camp_id$", "^block_id$", "^subblock_id$",
+  "^collection_date($|_)", "^start_date$", "^end_date$",
+  "^date$", "^datetime$", "submission_time",
+  "raw_source", "^source_file$", "file_name", "source_path"
 )
 
 restricted_fields_present <- function(x) {
-  intersect(names(x), restricted_qa_fields)
+  direct <- intersect(names(x), restricted_qa_fields)
+  patterned <- unique(unlist(lapply(
+    restricted_field_patterns,
+    function(pattern) grep(pattern, names(x), ignore.case = TRUE, value = TRUE)
+  )))
+  unique(c(direct, patterned))
 }
 
-warn_if_restricted_fields <- function(x, out_file) {
-  restricted_fields <- restricted_fields_present(x)
-  if (length(restricted_fields) > 0) {
-    warning(
-      "Shareable table output contains restricted QA field(s): ",
-      paste(restricted_fields, collapse = ", "),
-      ". Write ID-level QA with write_restricted_qa_csv() instead: ",
-      out_file,
-      call. = FALSE
-    )
+restricted_output_dir <- function(subfolder = NULL) {
+  if (is.null(subfolder)) {
+    file.path(dir_restricted_reviewed, "identified_tables")
+  } else if (identical(subfolder, "qa")) {
+    dir_restricted_qa
+  } else {
+    file.path(dir_restricted_reviewed, subfolder)
   }
-  invisible(restricted_fields)
+}
+
+manifest_subfolder_value <- function(subfolder = NULL) {
+  if (is.null(subfolder)) "." else subfolder
+}
+
+write_restricted_output_manifest <- function(filename, public_path, restricted_path,
+                                             restricted_fields, subfolder = NULL) {
+  manifest_file <- file.path(dir_tables_release, "table_release_restricted_output_manifest.csv")
+  new_row <- tibble(
+    filename = filename,
+    public_table_path = normalizePath(public_path, winslash = "/", mustWork = FALSE),
+    restricted_table_path = normalizePath(restricted_path, winslash = "/", mustWork = FALSE),
+    requested_subfolder = manifest_subfolder_value(subfolder),
+    restricted_fields = paste(restricted_fields, collapse = "; "),
+    release_status = "restricted_internal_only",
+    generated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  )
+
+  if (file.exists(manifest_file)) {
+    existing <- suppressMessages(readr::read_csv(manifest_file, show_col_types = FALSE))
+    existing <- existing %>%
+      filter(.data$filename != new_row$filename | .data$requested_subfolder != new_row$requested_subfolder)
+    new_row <- bind_rows(existing, new_row)
+  }
+
+  readr::write_csv(new_row, manifest_file, na = "")
+  invisible(manifest_file)
+}
+
+remove_restricted_output_manifest_entry <- function(filename, subfolder = NULL) {
+  manifest_file <- file.path(dir_tables_release, "table_release_restricted_output_manifest.csv")
+  if (!file.exists(manifest_file)) return(invisible(FALSE))
+
+  existing <- suppressMessages(readr::read_csv(manifest_file, show_col_types = FALSE))
+  if (!nrow(existing)) return(invisible(FALSE))
+
+  target_subfolder <- manifest_subfolder_value(subfolder)
+  existing_subfolder <- existing$requested_subfolder
+  same_subfolder <- (is.na(existing_subfolder) & is.na(target_subfolder)) |
+    (!is.na(existing_subfolder) & !is.na(target_subfolder) & existing_subfolder == target_subfolder)
+  keep <- !(existing$filename == filename & same_subfolder)
+  updated <- existing[keep %in% TRUE, , drop = FALSE]
+  readr::write_csv(updated, manifest_file, na = "")
+  invisible(nrow(updated) < nrow(existing))
 }
 
 write_reviewed_csv <- function(x, filename, subfolder = NULL) {
-  out_dir <- if (is.null(subfolder)) {
+  public_dir <- if (is.null(subfolder)) {
     dir_tables_reviewed
   } else {
     file.path(dir_tables_reviewed, subfolder)
   }
-  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-  out_file <- file.path(out_dir, filename)
-  warn_if_restricted_fields(x, out_file)
-  readr::write_csv(x, out_file, na = "")
-  message("Wrote table: ", out_file)
-  invisible(out_file)
+  public_file <- file.path(public_dir, filename)
+  restricted_fields <- restricted_fields_present(x)
+
+  if (length(restricted_fields) > 0) {
+    out_dir <- restricted_output_dir(subfolder)
+    dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+    out_file <- file.path(out_dir, filename)
+    readr::write_csv(x, out_file, na = "")
+    write_restricted_output_manifest(
+      filename = filename,
+      public_path = public_file,
+      restricted_path = out_file,
+      restricted_fields = restricted_fields,
+      subfolder = subfolder
+    )
+    message(
+      "Restricted fields detected (", paste(restricted_fields, collapse = ", "),
+      "); wrote restricted table only: ", out_file
+    )
+    return(invisible(out_file))
+  }
+
+  dir.create(public_dir, recursive = TRUE, showWarnings = FALSE)
+  readr::write_csv(x, public_file, na = "")
+  remove_restricted_output_manifest_entry(filename, subfolder)
+  message("Wrote table: ", public_file)
+  invisible(public_file)
+}
+
+quarantine_restricted_public_csvs <- function() {
+  if (!dir.exists(dir_tables_reviewed)) return(invisible(tibble()))
+  csv_files <- list.files(dir_tables_reviewed, pattern = "\\.csv$", full.names = TRUE, recursive = TRUE)
+  csv_files <- csv_files[!grepl("/release/", normalizePath(csv_files, winslash = "/", mustWork = FALSE))]
+  if (!length(csv_files)) return(invisible(tibble()))
+
+  moved <- lapply(csv_files, function(csv_file) {
+    header <- tryCatch(names(readr::read_csv(csv_file, n_max = 0, show_col_types = FALSE)), error = function(e) character())
+    restricted_fields <- restricted_fields_present(setNames(as.list(rep(NA, length(header))), header))
+    if (!length(restricted_fields)) return(NULL)
+
+    rel <- substr(normalizePath(csv_file, winslash = "/", mustWork = FALSE),
+                  nchar(normalizePath(dir_tables_reviewed, winslash = "/", mustWork = FALSE)) + 2L,
+                  nchar(normalizePath(csv_file, winslash = "/", mustWork = FALSE)))
+    dest <- file.path(dir_restricted_reviewed, "quarantined_from_7_tables", rel)
+    dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
+    if (file.exists(dest)) file.remove(dest)
+    file.rename(csv_file, dest)
+    write_restricted_output_manifest(
+      filename = basename(csv_file),
+      public_path = csv_file,
+      restricted_path = dest,
+      restricted_fields = restricted_fields,
+      subfolder = dirname(rel)
+    )
+    tibble(public_table_path = csv_file, restricted_table_path = dest,
+           restricted_fields = paste(restricted_fields, collapse = "; "))
+  })
+
+  moved <- bind_rows(Filter(Negate(is.null), moved))
+  if (nrow(moved) > 0) {
+    message("Moved ", nrow(moved), " restricted CSV(s) out of public 7_tables outputs.")
+  }
+  invisible(moved)
+}
+
+quarantine_restricted_public_csvs()
+
+resolve_reviewed_or_restricted_csv <- function(filename, restricted_subfolder = "identified_tables") {
+  candidate_paths <- c(
+    file.path(dir_tables_reviewed, filename),
+    file.path(dir_restricted_reviewed, restricted_subfolder, filename),
+    file.path(dir_restricted_qa, filename)
+  )
+  candidate_paths <- candidate_paths[file.exists(candidate_paths)]
+  if (length(candidate_paths) == 0) {
+    stop(
+      "Required reviewed result is missing from public and restricted output folders: ", filename,
+      call. = FALSE
+    )
+  }
+  candidate_paths[[1]]
 }
 
 write_restricted_qa_csv <- function(x, filename, subfolder = NULL,
