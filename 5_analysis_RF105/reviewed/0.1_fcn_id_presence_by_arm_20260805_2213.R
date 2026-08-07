@@ -9,12 +9,18 @@
 #   4_data/clean_final/survey_refugee_household.rds
 #
 # Outputs:
-#   7_tables/RF105_reviewed_YYYYMMDD/qa/table_qa_fcn_arm_timepoint_counts.csv
-#   7_tables/RF105_reviewed_YYYYMMDD/qa/table_qa_fcn_presence_long.csv
-#   7_tables/RF105_reviewed_YYYYMMDD/qa/table_qa_fcn_presence_wide.csv
-#   7_tables/RF105_reviewed_YYYYMMDD/qa/table_qa_fcn_set_differences.csv
-#   7_tables/RF105_reviewed_YYYYMMDD/qa/table_qa_intervention_endline_ids.csv
-#   7_tables/RF105_reviewed_YYYYMMDD/qa/table_qa_comparison_midline_ids.csv
+#   Shareable aggregate QA:
+#     7_tables/RF105_reviewed_YYYYMMDD/qa/table_qa_fcn_arm_timepoint_counts.csv
+#     7_tables/RF105_reviewed_YYYYMMDD/qa/table_qa_fcn_set_differences.csv
+#     7_tables/RF105_reviewed_YYYYMMDD/qa/table_qa_fcn_allocation_master_summary.csv
+#   Restricted internal QA, not for public release:
+#     8_restricted/RF105_reviewed_YYYYMMDD/qa/restricted_qa_fcn_presence_long.csv
+#     8_restricted/RF105_reviewed_YYYYMMDD/qa/restricted_qa_fcn_presence_wide.csv
+#     8_restricted/RF105_reviewed_YYYYMMDD/qa/restricted_qa_fcn_allocation_reconciliation.csv
+#     8_restricted/RF105_reviewed_YYYYMMDD/qa/restricted_qa_fcn_intervention_endline_ids.csv
+#     8_restricted/RF105_reviewed_YYYYMMDD/qa/restricted_qa_fcn_comparison_midline_ids.csv
+#   Release checklist:
+#     7_tables/RF105_reviewed_YYYYMMDD/release/table_release_checklist.csv
 #
 # Notes:
 #   Two kinds of set differences are written:
@@ -388,12 +394,11 @@ source_file_summary <- survey_records %>%
 
 analysis_population <- make_analysis_population(survey_data_raw, id_var = "fcn_id")
 
-write_reviewed_csv(
+write_restricted_qa_csv(
   analysis_population$duplicate_records,
-  audit_output_file("table_qa_fcn_duplicate_records.csv"),
-  subfolder = "qa"
+  audit_output_file("restricted_qa_fcn_duplicate_records.csv"),
+  reason = "Duplicate fcn_id/timepoint listings include household identifiers and source-file provenance for internal QA."
 )
-
 population_datasets <- list(
   all_deduplicated = analysis_population$all_deduplicated %>%
     mutate(timepoint = as.character(timepoint),
@@ -560,27 +565,30 @@ comparison_midline_not_endline <- bind_rows(
 # Write reproducible QA outputs
 ################################################################################
 
+restricted_qa_manifest <- tibble(
+  output_file = c(
+    audit_output_file("restricted_qa_fcn_duplicate_records.csv"),
+    audit_output_file("restricted_qa_fcn_presence_long.csv"),
+    audit_output_file("restricted_qa_fcn_presence_wide.csv"),
+    audit_output_file("restricted_qa_fcn_allocation_reconciliation.csv"),
+    audit_output_file("restricted_qa_fcn_intervention_endline_ids.csv"),
+    audit_output_file("restricted_qa_fcn_comparison_midline_ids.csv")
+  ),
+  restricted_location = file.path(dir_restricted_qa, output_file),
+  purpose = c(
+    "List duplicate fcn_id/timepoint records retained for internal cleaning QA.",
+    "List fcn_id presence by arm and survey timepoint with dates and source files.",
+    "Wide fcn_id presence matrix used to check timepoint overlap and arm coding.",
+    "Compare cleaned study arm against the allocation master at fcn_id level.",
+    "Identify intervention fcn_id values present at endline but not prior timepoints.",
+    "Identify comparison fcn_id values present at midline but not endline."
+  ),
+  release_status = "restricted_internal_only"
+)
+
 write_reviewed_csv(
   arm_timepoint_counts,
   audit_output_file("table_qa_fcn_arm_timepoint_counts.csv"),
-  subfolder = "qa"
-)
-
-write_reviewed_csv(
-  presence_long,
-  audit_output_file("table_qa_fcn_presence_long.csv"),
-  subfolder = "qa"
-)
-
-write_reviewed_csv(
-  presence_wide,
-  audit_output_file("table_qa_fcn_presence_wide.csv"),
-  subfolder = "qa"
-)
-
-write_reviewed_csv(
-  allocation_reconciliation,
-  audit_output_file("table_qa_fcn_allocation_master_reconciliation.csv"),
   subfolder = "qa"
 )
 
@@ -589,6 +597,7 @@ write_reviewed_csv(
   audit_output_file("table_qa_fcn_allocation_master_summary.csv"),
   subfolder = "qa"
 )
+
 write_reviewed_csv(
   set_difference_counts,
   audit_output_file("table_qa_fcn_set_differences.csv"),
@@ -596,17 +605,58 @@ write_reviewed_csv(
 )
 
 write_reviewed_csv(
+  restricted_qa_manifest,
+  audit_output_file("table_release_restricted_qa_manifest.csv"),
+  subfolder = "release"
+)
+
+write_restricted_qa_csv(
+  presence_long,
+  audit_output_file("restricted_qa_fcn_presence_long.csv"),
+  reason = "Contains fcn_id, collection dates, source file names, and location-like survey fields."
+)
+
+write_restricted_qa_csv(
+  presence_wide,
+  audit_output_file("restricted_qa_fcn_presence_wide.csv"),
+  reason = "Contains fcn_id-level timepoint and source-file presence across survey rounds."
+)
+
+write_restricted_qa_csv(
+  allocation_reconciliation,
+  audit_output_file("restricted_qa_fcn_allocation_reconciliation.csv"),
+  reason = "Contains fcn_id-level allocation-master reconciliation details."
+)
+
+write_restricted_qa_csv(
   intervention_endline_not_baseline_midline,
-  audit_output_file("table_qa_intervention_endline_ids.csv"),
-  subfolder = "qa"
+  audit_output_file("restricted_qa_fcn_intervention_endline_ids.csv"),
+  reason = "Contains fcn_id-level intervention households present at endline only."
 )
 
-write_reviewed_csv(
+write_restricted_qa_csv(
   comparison_midline_not_endline,
-  audit_output_file("table_qa_comparison_midline_ids.csv"),
-  subfolder = "qa"
+  audit_output_file("restricted_qa_fcn_comparison_midline_ids.csv"),
+  reason = "Contains fcn_id-level comparison households present at midline but not endline."
 )
 
+write_rf105_release_checklist(
+  tibble(
+    item = c(
+      "Review the restricted fcn_id QA manifest before release",
+      "Do not include restricted fcn_id QA files in manuscript/shareable outputs"
+    ),
+    status = "required_before_public_release",
+    location = c(
+      file.path(dir_tables_release, audit_output_file("table_release_restricted_qa_manifest.csv")),
+      dir_restricted_qa
+    ),
+    notes = c(
+      "The manifest names restricted internal QA files without exposing household-level rows.",
+      "These files contain fcn_id values, household IDs, dates, location-like fields, and raw source-file provenance."
+    )
+  )
+)
 allocation_blocking_statuses <- c(
   "mismatch_cleaned_vs_allocation_master",
   "cleaned_survey_conflicting_arms_for_fcn_id",
@@ -618,7 +668,7 @@ allocation_blocking_n <- allocation_reconciliation %>%
 if (allocation_blocking_n > 0) {
   stop(
     "Allocation-master reconciliation found ", allocation_blocking_n,
-    " blocking study-arm issue(s). Review table_qa_fcn_allocation_master_reconciliation.csv.",
+    " blocking study-arm issue(s). Review restricted_qa_fcn_allocation_reconciliation.csv in the restricted QA folder.",
     call. = FALSE
   )
 }

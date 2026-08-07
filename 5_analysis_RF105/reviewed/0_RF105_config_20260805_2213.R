@@ -12,8 +12,10 @@
 #   4_data/clean_final/*.rds
 #
 # Outputs:
-#   6_figures/RF105_reviewed_YYYYMMDD/
-#   7_tables/RF105_reviewed_YYYYMMDD/
+#   6_figures/RF105_reviewed_YYYYMMDD/                 manuscript figures
+#   7_tables/RF105_reviewed_YYYYMMDD/                  shareable tables
+#   7_tables/RF105_reviewed_YYYYMMDD/release/          release checklist
+#   8_restricted/RF105_reviewed_YYYYMMDD/qa/           internal ID-level QA
 #
 # Notes:
 #   These helpers keep the existing tidyverse/script workflow while making
@@ -86,7 +88,12 @@ find_project_root <- function() {
 
 project_root <- find_project_root()
 
-dir_clean_final <- file.path(project_root, "4_data", "clean_final")
+clean_data_dir_override <- Sys.getenv("RF105_CLEAN_DATA_DIR", unset = "")
+dir_clean_final <- if (nzchar(clean_data_dir_override)) {
+  normalizePath(clean_data_dir_override, winslash = "/", mustWork = FALSE)
+} else {
+  file.path(project_root, "4_data", "clean_final")
+}
 dir_figures_reviewed <- file.path(
   project_root, "6_figures", paste0("RF105_reviewed_", date_stamp)
 )
@@ -94,11 +101,16 @@ dir_tables_reviewed <- file.path(
   project_root, "7_tables", paste0("RF105_reviewed_", date_stamp)
 )
 dir_tables_qa <- file.path(dir_tables_reviewed, "qa")
-
+dir_tables_release <- file.path(dir_tables_reviewed, "release")
+dir_restricted_reviewed <- file.path(
+  project_root, "8_restricted", paste0("RF105_reviewed_", date_stamp)
+)
+dir_restricted_qa <- file.path(dir_restricted_reviewed, "qa")
 dir.create(dir_figures_reviewed, recursive = TRUE, showWarnings = FALSE)
 dir.create(dir_tables_reviewed, recursive = TRUE, showWarnings = FALSE)
 dir.create(dir_tables_qa, recursive = TRUE, showWarnings = FALSE)
-
+dir.create(dir_tables_release, recursive = TRUE, showWarnings = FALSE)
+dir.create(dir_restricted_qa, recursive = TRUE, showWarnings = FALSE)
 file_survey_refugee_household <- file.path(
   dir_clean_final, "survey_refugee_household.rds"
 )
@@ -158,6 +170,32 @@ exchange_bdt_per_usd <- c(
   endline = 93.45
 )
 
+restricted_qa_fields <- c(
+  "fcn_id", "hh_id", "uuid", "KEY", "camp_id", "block_id", "subblock_id",
+  "collection_date", "collection_dates_all_raw", "start_date", "end_date",
+  "submission_time", "raw_source_file", "raw_source_files_all_raw",
+  "raw_collection_round", "raw_collection_rounds_all_raw",
+  "raw_survey_version", "raw_survey_versions_all_raw"
+)
+
+restricted_fields_present <- function(x) {
+  intersect(names(x), restricted_qa_fields)
+}
+
+warn_if_restricted_fields <- function(x, out_file) {
+  restricted_fields <- restricted_fields_present(x)
+  if (length(restricted_fields) > 0) {
+    warning(
+      "Shareable table output contains restricted QA field(s): ",
+      paste(restricted_fields, collapse = ", "),
+      ". Write ID-level QA with write_restricted_qa_csv() instead: ",
+      out_file,
+      call. = FALSE
+    )
+  }
+  invisible(restricted_fields)
+}
+
 write_reviewed_csv <- function(x, filename, subfolder = NULL) {
   out_dir <- if (is.null(subfolder)) {
     dir_tables_reviewed
@@ -166,11 +204,87 @@ write_reviewed_csv <- function(x, filename, subfolder = NULL) {
   }
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   out_file <- file.path(out_dir, filename)
+  warn_if_restricted_fields(x, out_file)
   readr::write_csv(x, out_file, na = "")
   message("Wrote table: ", out_file)
   invisible(out_file)
 }
 
+write_restricted_qa_csv <- function(x, filename, subfolder = NULL,
+                                    reason = NULL) {
+  out_dir <- if (is.null(subfolder)) {
+    dir_restricted_qa
+  } else {
+    file.path(dir_restricted_qa, subfolder)
+  }
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  out_file <- file.path(out_dir, filename)
+  restricted_fields <- restricted_fields_present(x)
+  if (length(restricted_fields) == 0) {
+    warning(
+      "Restricted QA output has no known restricted identifier/date/source fields: ",
+      out_file,
+      call. = FALSE
+    )
+  }
+  readr::write_csv(x, out_file, na = "")
+  message("Wrote restricted QA file: ", out_file)
+
+  if (!is.null(reason)) {
+    metadata <- tibble(
+      output_file = normalizePath(out_file, winslash = "/", mustWork = FALSE),
+      generated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
+      restricted_fields = paste(restricted_fields, collapse = "; "),
+      reason = reason,
+      release_status = "restricted_internal_only"
+    )
+    readr::write_csv(metadata, paste0(out_file, ".metadata.csv"), na = "")
+  }
+
+  invisible(out_file)
+}
+
+make_rf105_release_checklist <- function(extra_items = NULL) {
+  checklist <- tibble(
+    item = c(
+      "Confirm shareable outputs exclude direct household identifiers",
+      "Confirm ID-level QA is stored only under 8_restricted",
+      "Confirm restricted QA folder is excluded from git/public release",
+      "Confirm tables and figures can be regenerated from reviewed scripts",
+      "Confirm no raw, restricted, or legacy-review paths are included in release"
+    ),
+    status = "required_before_public_release",
+    location = c(
+      dir_tables_reviewed,
+      dir_restricted_qa,
+      file.path(project_root, ".gitignore"),
+      file.path(project_root, "5_analysis_RF105", "reviewed"),
+      project_root
+    ),
+    notes = c(
+      "Search release files for fcn_id, hh_id, uuid, raw source file names, and date-rich QA listings before sharing.",
+      "This folder is for internal reproducibility checks only and should not be copied into public release bundles.",
+      "The project .gitignore should include 8_restricted/**.",
+      "Rerun the reviewed workflow from import through analysis before final release.",
+      "Release bundles should include reviewed/final code, shareable tables/figures, and de-identified data only."
+    )
+  )
+
+  if (!is.null(extra_items)) {
+    checklist <- bind_rows(checklist, extra_items)
+  }
+
+  checklist
+}
+
+write_rf105_release_checklist <- function(extra_items = NULL,
+                                          filename = "table_release_checklist.csv") {
+  write_reviewed_csv(
+    make_rf105_release_checklist(extra_items),
+    filename,
+    subfolder = "release"
+  )
+}
 save_reviewed_plot <- function(plot, filename, width = 8, height = 5,
                                units = "in", dpi = 300, bg = "white") {
   out_file <- file.path(dir_figures_reviewed, filename)
