@@ -83,11 +83,10 @@ for (env_name in names(rf105_default_thread_env)) {
 }
 reviewed_scripts <- c(
   "0.1_fcn_id_presence_by_arm_20260805_2213.R",
-  "8_geocene_stove_use_combined_20260805_2213.R",
-  "3_pm25_ambient_adjusted_analysis_20260805_2213.R",
-  "7_pm25_anomaly_household_comparison_20260806.R",
+  "1_geocene_stove_use_20260805_2213.R",
+  "2_pm25_ambient_adjusted_analysis_20260805_2213.R",
   "4_rdid_xgboost_20260805_2213.R",
-  "6_descriptive_outcomes_20260805_2213.R"
+  "3_descriptive_outcomes_20260805_2213.R"
 )
 
 for (script in reviewed_scripts) {

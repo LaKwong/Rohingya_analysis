@@ -239,7 +239,7 @@ find_ambient_adjusted_pm_file <- function() {
   if (length(candidate_files) == 0) {
     stop(
       "No ambient-adjusted PM2.5 household-timepoint file found. Run ",
-      "3_pm25_ambient_adjusted_analysis_20260805_2213.R first.",
+      "2_pm25_ambient_adjusted_analysis_20260805_2213.R first.",
       call. = FALSE
     )
   }

@@ -72,7 +72,7 @@ suppressPackageStartupMessages({
 geocene_pathway_notes <- tibble(
   note_id = 1:5,
   note = c(
-    "8_geocene_stove_use_combined_20260805_2213.R is the only active reviewed Geocene analysis script.",
+    "1_geocene_stove_use_20260805_2213.R is the only active reviewed Geocene analysis script.",
     "Standalone files previously copied under reviewed/5_geocene_analysis have been removed from the active workflow to avoid duplicate or contradictory stove-use code.",
     "Raw Geocene exports are imported by 1_data_import/fixed/import_geocene_refugee_raw.R and cleaned by 3_data_cleaning/fixed/clean_geocene_refugee_20260805_2141.R.",
     "This script uses clean_final daily stove-use, imported raw stove-event, and imported raw mission-log files to reconcile stove-use events to monitored-day denominators.",
