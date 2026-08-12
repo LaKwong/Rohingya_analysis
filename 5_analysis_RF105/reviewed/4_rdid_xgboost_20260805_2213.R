@@ -323,6 +323,348 @@ multi_select_code_yn <- function(df, base_var, option_code,
   as.integer(value)
 }
 
+clean_coping_code_rdid <- function(x, missing_codes = c(77, 99)) {
+  x_chr <- str_squish(as.character(x))
+  x_num <- as_number(x_chr)
+  out <- x_chr
+  numeric_like <- !is.na(x_num)
+  out[numeric_like] <- as.character(as.integer(x_num[numeric_like]))
+  out[out %in% as.character(missing_codes) | out == ""] <- NA_character_
+  out
+}
+
+weekly_code_to_days_midpoint_rdid <- function(x) {
+  x_code <- clean_coping_code_rdid(x, missing_codes = c(77, 88, 99))
+  dplyr::recode(
+    x_code,
+    `0` = 0,
+    `1` = 1.5,
+    `2` = 3.5,
+    `3` = 5.5,
+    `4` = 7,
+    .default = NA_real_
+  )
+}
+
+score_coping_days_rdid <- function(df, frequency_var, selected_var, shortage_yn_var) {
+  frequency_days <- if (frequency_var %in% names(df)) {
+    weekly_code_to_days_midpoint_rdid(df[[frequency_var]])
+  } else {
+    rep(NA_real_, nrow(df))
+  }
+  selected <- if (selected_var %in% names(df)) {
+    as.integer(df[[selected_var]])
+  } else {
+    rep(NA_integer_, nrow(df))
+  }
+  shortage_yn <- if (shortage_yn_var %in% names(df)) {
+    as.integer(df[[shortage_yn_var]])
+  } else {
+    rep(NA_integer_, nrow(df))
+  }
+
+  case_when(
+    !is.na(frequency_days) ~ frequency_days,
+    shortage_yn == 0 | selected == 0 ~ 0,
+    TRUE ~ NA_real_
+  )
+}
+
+rdid_weight <- function(weight_lookup, var_name) {
+  value <- unname(weight_lookup[var_name])
+  if (length(value) == 0 || is.na(value)) {
+    return(NA_real_)
+  }
+  as.numeric(value)
+}
+
+format_weighted_components_rdid <- function(weight_lookup, variables) {
+  variables <- variables[variables %in% names(weight_lookup)]
+  if (length(variables) == 0) {
+    return(NA_character_)
+  }
+  paste0(variables, "*", round(unname(weight_lookup[variables]), 2), collapse = " + ")
+}
+
+derive_rdid_empirical_coping_weights <- function(df, label_data, component_map,
+                                                 difficult_var, easiest_var,
+                                                 included_col) {
+  difficult_code <- if (difficult_var %in% names(df)) {
+    clean_coping_code_rdid(df[[difficult_var]], missing_codes = c(77, 99))
+  } else {
+    rep(NA_character_, nrow(df))
+  }
+  easiest_code <- if (easiest_var %in% names(df)) {
+    clean_coping_code_rdid(df[[easiest_var]], missing_codes = c(77, 99))
+  } else {
+    rep(NA_character_, nrow(df))
+  }
+
+  out <- label_data %>%
+    left_join(component_map, by = "option_code") %>%
+    mutate(
+      n_most_difficult = vapply(
+        option_code,
+        function(code) sum(difficult_code == code, na.rm = TRUE),
+        integer(1)
+      ),
+      n_easiest = vapply(
+        option_code,
+        function(code) sum(easiest_code == code, na.rm = TRUE),
+        integer(1)
+      ),
+      n_rank_mentions = n_most_difficult + n_easiest,
+      pct_most_difficult_among_rank_mentions = if_else(
+        n_rank_mentions > 0,
+        100 * n_most_difficult / n_rank_mentions,
+        NA_real_
+      ),
+      pct_easiest_among_rank_mentions = if_else(
+        n_rank_mentions > 0,
+        100 * n_easiest / n_rank_mentions,
+        NA_real_
+      ),
+      empirical_difficulty_weight = if_else(
+        n_rank_mentions > 0,
+        1 + 3 * n_most_difficult / n_rank_mentions,
+        NA_real_
+      ),
+      empirical_difficulty_weight_rounded = round(empirical_difficulty_weight, 2),
+      weight_method = "Survey-derived from most difficult/easiest rankings: 1 + 3 * n_most_difficult / (n_most_difficult + n_easiest)",
+      stability_note = if_else(
+        n_rank_mentions < 10,
+        "Fewer than 10 ranking mentions; interpret this empirical weight cautiously.",
+        NA_character_
+      )
+    )
+
+  out[[included_col]] <- !is.na(out$source_variable) & out$source_variable %in% names(df)
+  out
+}
+
+summarise_coping_index_rdid <- function(df, index_var, missing_var, index_type,
+                                        included_components, weight_method,
+                                        maximum_possible_score) {
+  df %>%
+    group_by(timepoint, study_arm_overall) %>%
+    summarise(
+      index_type = index_type,
+      n_records = n(),
+      n_households = n_distinct(fcn_id),
+      n_index_nonmissing = sum(!is.na(.data[[index_var]])),
+      n_missing_any_included_component = sum(.data[[missing_var]] > 0, na.rm = TRUE),
+      mean_index = mean(.data[[index_var]], na.rm = TRUE),
+      sd_index = sd(.data[[index_var]], na.rm = TRUE),
+      min_index = if (all(is.na(.data[[index_var]]))) NA_real_ else min(.data[[index_var]], na.rm = TRUE),
+      max_index = if (all(is.na(.data[[index_var]]))) NA_real_ else max(.data[[index_var]], na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      across(
+        c(mean_index, sd_index, min_index, max_index),
+        ~ if_else(is.nan(.x) | is.infinite(.x), NA_real_, round(.x, 2))
+      ),
+      included_components = included_components,
+      weight_method = weight_method,
+      frequency_conversion = "weekly_choices categories converted to midpoint days: 0, 1.5, 3.5, 5.5, 7",
+      maximum_possible_score = maximum_possible_score
+    )
+}
+
+derive_coping_strategy_indices_rdid <- function(df) {
+  food_coping_labels <- tibble(
+    option_code = c(as.character(1:13), "66", "88"),
+    option_label = c(
+      "Borrowed food or relied on relatives/friends",
+      "Reduced food per meal",
+      "Reduced meals per day",
+      "Skipped all meals on some days",
+      "Restricted adult food so children under 5 could eat",
+      "Sold household goods",
+      "Purchased food on credit",
+      "Borrowed money",
+      "Reduced health/education expenditures",
+      "Spent savings",
+      "Worked for money to buy food",
+      "Sold or consumed livestock",
+      "Exchanged food for other food",
+      "Other",
+      "Did not need to manage"
+    )
+  )
+
+  food_csi_component_map <- tibble(
+    option_code = c("1", "2", "3", "4", "5"),
+    source_variable = c("borrow_food", "reduce_food", "reduce_meals", "not_eat", "restrict_food"),
+    csi_component = c(
+      "borrow_food_or_rely_on_help",
+      "reduce_food_per_meal",
+      "reduce_meals_per_day",
+      "skip_all_meals_on_some_days",
+      "restrict_adult_intake_so_children_can_eat"
+    )
+  )
+
+  food_empirical_coping_weights <- derive_rdid_empirical_coping_weights(
+    df,
+    food_coping_labels,
+    food_csi_component_map,
+    "food_cant_afford_difficult",
+    "food_cant_afford_easiest",
+    "included_in_coping_strategy_index"
+  ) %>%
+    filter(option_code %in% food_csi_component_map$option_code) %>%
+    select(
+      option_code, source_variable, csi_component, outcome_label = option_label,
+      included_in_coping_strategy_index, n_most_difficult, n_easiest,
+      n_rank_mentions, pct_most_difficult_among_rank_mentions,
+      pct_easiest_among_rank_mentions, empirical_difficulty_weight,
+      empirical_difficulty_weight_rounded, weight_method, stability_note
+    )
+
+  food_csi_weights <- food_empirical_coping_weights %>%
+    filter(included_in_coping_strategy_index) %>%
+    select(source_variable, empirical_difficulty_weight) %>%
+    tibble::deframe()
+
+  df <- df %>%
+    mutate(
+      borrow_food_selected = multi_select_code_yn(., "food_cant_afford_action", "1"),
+      reduce_food_selected = multi_select_code_yn(., "food_cant_afford_action", "2"),
+      reduce_meals_selected = multi_select_code_yn(., "food_cant_afford_action", "3"),
+      not_eat_selected = multi_select_code_yn(., "food_cant_afford_action", "4"),
+      restrict_food_selected = multi_select_code_yn(., "food_cant_afford_action", "5")
+    ) %>%
+    mutate(
+      borrow_food_days = score_coping_days_rdid(., "borrow_food", "borrow_food_selected", "food_cant_afford_2wk_yn"),
+      reduce_food_days = score_coping_days_rdid(., "reduce_food", "reduce_food_selected", "food_cant_afford_2wk_yn"),
+      reduce_meals_days = score_coping_days_rdid(., "reduce_meals", "reduce_meals_selected", "food_cant_afford_2wk_yn"),
+      not_eat_days = score_coping_days_rdid(., "not_eat", "not_eat_selected", "food_cant_afford_2wk_yn"),
+      restrict_food_days = score_coping_days_rdid(., "restrict_food", "restrict_food_selected", "food_cant_afford_2wk_yn"),
+      csi_survey_weighted =
+        rdid_weight(food_csi_weights, "borrow_food") * borrow_food_days +
+        rdid_weight(food_csi_weights, "reduce_food") * reduce_food_days +
+        rdid_weight(food_csi_weights, "reduce_meals") * reduce_meals_days +
+        rdid_weight(food_csi_weights, "not_eat") * not_eat_days +
+        rdid_weight(food_csi_weights, "restrict_food") * restrict_food_days,
+      csi_survey_weighted_n_missing_components = rowSums(is.na(cbind(
+        borrow_food_days, reduce_food_days, reduce_meals_days,
+        not_eat_days, restrict_food_days
+      )))
+    )
+
+  fuel_coping_index_component_map <- tibble(
+    option_code = c("1", "2", "3", "4"),
+    source_variable = c("borrow_fuel", "reduce_fuel", "reduce_meals1", "not_eat1"),
+    index_component = c(
+      "borrow_fuel",
+      "reduce_fuel_use_or_portion",
+      "reduce_meals_due_to_fuel_shortage",
+      "skip_eating_due_to_fuel_shortage"
+    ),
+    food_coping_analog = c("borrow_food", "reduce_food", "reduce_meals", "not_eat")
+  ) %>%
+    left_join(
+      food_empirical_coping_weights %>%
+        select(
+          option_code,
+          food_coping_outcome_label = outcome_label,
+          n_most_difficult,
+          n_easiest,
+          n_rank_mentions,
+          pct_most_difficult_among_rank_mentions,
+          pct_easiest_among_rank_mentions,
+          empirical_difficulty_weight,
+          empirical_difficulty_weight_rounded,
+          weight_method,
+          stability_note
+        ),
+      by = "option_code"
+    ) %>%
+    mutate(
+      outcome_label = c(
+        "Borrowed fuel",
+        "Reduced fuel use",
+        "Reduced meals per day due to fuel shortage",
+        "Skipped eating due to fuel shortage"
+      ),
+      included_in_fuel_coping_index = source_variable %in% names(df),
+      reason = "Weight is derived from survey-ranked difficulty/ease for the analogous food coping strategy."
+    ) %>%
+    select(
+      option_code, source_variable, index_component, outcome_label,
+      food_coping_analog, food_coping_outcome_label,
+      included_in_fuel_coping_index, n_most_difficult, n_easiest,
+      n_rank_mentions, pct_most_difficult_among_rank_mentions,
+      pct_easiest_among_rank_mentions, empirical_difficulty_weight,
+      empirical_difficulty_weight_rounded, weight_method, reason, stability_note
+    )
+
+  fuel_csi_weights <- fuel_coping_index_component_map %>%
+    filter(included_in_fuel_coping_index) %>%
+    select(source_variable, empirical_difficulty_weight) %>%
+    tibble::deframe()
+
+  df <- df %>%
+    mutate(
+      borrow_fuel_selected = multi_select_code_yn(., "fuel_cant_afford_action", "1"),
+      reduce_fuel_selected = multi_select_code_yn(., "fuel_cant_afford_action", "2"),
+      reduce_meals_fuel_selected = multi_select_code_yn(., "fuel_cant_afford_action", "3"),
+      not_eat_fuel_selected = multi_select_code_yn(., "fuel_cant_afford_action", "4")
+    ) %>%
+    mutate(
+      borrow_fuel_days = score_coping_days_rdid(., "borrow_fuel", "borrow_fuel_selected", "fuel_cant_afford_2wk_yn"),
+      reduce_fuel_days = score_coping_days_rdid(., "reduce_fuel", "reduce_fuel_selected", "fuel_cant_afford_2wk_yn"),
+      reduce_meals_fuel_days = score_coping_days_rdid(., "reduce_meals1", "reduce_meals_fuel_selected", "fuel_cant_afford_2wk_yn"),
+      not_eat_fuel_days = score_coping_days_rdid(., "not_eat1", "not_eat_fuel_selected", "fuel_cant_afford_2wk_yn"),
+      fuel_coping_strategy_index =
+        rdid_weight(fuel_csi_weights, "borrow_fuel") * borrow_fuel_days +
+        rdid_weight(fuel_csi_weights, "reduce_fuel") * reduce_fuel_days +
+        rdid_weight(fuel_csi_weights, "reduce_meals1") * reduce_meals_fuel_days +
+        rdid_weight(fuel_csi_weights, "not_eat1") * not_eat_fuel_days,
+      fuel_coping_index_n_missing_components = rowSums(is.na(cbind(
+        borrow_fuel_days, reduce_fuel_days, reduce_meals_fuel_days, not_eat_fuel_days
+      )))
+    )
+
+  food_summary <- summarise_coping_index_rdid(
+    df,
+    "csi_survey_weighted",
+    "csi_survey_weighted_n_missing_components",
+    "survey_weighted_food_coping_strategy_index",
+    format_weighted_components_rdid(
+      food_csi_weights,
+      c("borrow_food", "reduce_food", "reduce_meals", "not_eat", "restrict_food")
+    ),
+    "Survey-derived from food_cant_afford_difficult and food_cant_afford_easiest",
+    round(7 * sum(food_csi_weights[c(
+      "borrow_food", "reduce_food", "reduce_meals", "not_eat", "restrict_food"
+    )], na.rm = TRUE), 2)
+  )
+
+  fuel_summary <- summarise_coping_index_rdid(
+    df,
+    "fuel_coping_strategy_index",
+    "fuel_coping_index_n_missing_components",
+    "survey_weighted_fuel_coping_strategy_index",
+    format_weighted_components_rdid(
+      fuel_csi_weights,
+      c("borrow_fuel", "reduce_fuel", "reduce_meals1", "not_eat1")
+    ),
+    "Survey-derived from food_cant_afford_difficult and food_cant_afford_easiest for analogous food coping strategies",
+    round(7 * sum(fuel_csi_weights[c(
+      "borrow_fuel", "reduce_fuel", "reduce_meals1", "not_eat1"
+    )], na.rm = TRUE), 2)
+  )
+
+  list(
+    data = df,
+    food_component_audit = food_empirical_coping_weights,
+    fuel_component_audit = fuel_coping_index_component_map,
+    score_summary = bind_rows(food_summary, fuel_summary)
+  )
+}
+
 estimate_significance <- function(estimate, conf_low, conf_high, p_value) {
   case_when(
     !is.na(p_value) ~ p_value < 0.05,
@@ -573,6 +915,27 @@ safe_write_reviewed_csv(
 
 survey_model_data <- analysis_population$all_deduplicated %>%
   derive_rdid_survey_outcomes()
+
+coping_strategy_indices <- derive_coping_strategy_indices_rdid(survey_model_data)
+survey_model_data <- coping_strategy_indices$data
+
+safe_write_reviewed_csv(
+  coping_strategy_indices$food_component_audit,
+  "table_rDiD_food_coping_strategy_index_components.csv",
+  subfolder = "qa"
+)
+
+safe_write_reviewed_csv(
+  coping_strategy_indices$fuel_component_audit,
+  "table_rDiD_fuel_coping_strategy_index_components.csv",
+  subfolder = "qa"
+)
+
+safe_write_reviewed_csv(
+  coping_strategy_indices$score_summary,
+  "table_rDiD_coping_strategy_index_summary.csv",
+  subfolder = "qa"
+)
 
 severe_asthma_coding_audit <- survey_model_data %>%
   group_by(timepoint, study_arm_overall, target_child_disturbed_speech_missing_type) %>%
@@ -828,6 +1191,7 @@ survey_outcomes <- tribble(
   "income_wage_labor_usd", "Wage-labor income", "Income", "continuous", "USD",
   "income_cash_ngo_usd", "NGO cash income", "Income", "continuous", "USD",
   "food_cant_afford_2wk_yn", "Household could not afford food in past 2 weeks", "Food coping", "binary", "percentage_points",
+  "csi_survey_weighted", "Food coping strategies index (survey-weighted)", "Food coping", "continuous", "score",
   "food_coping_action_1", "Food coping: borrowed food or relied on relatives/friends", "Food coping", "binary", "percentage_points",
   "food_coping_action_2", "Food coping: reduced food per meal", "Food coping", "binary", "percentage_points",
   "food_coping_action_3", "Food coping: reduced meals per day", "Food coping", "binary", "percentage_points",
@@ -843,6 +1207,7 @@ survey_outcomes <- tribble(
   "food_coping_action_13", "Food coping: exchanged food for other food", "Food coping", "binary", "percentage_points",
   "food_coping_action_66", "Food coping: other strategy", "Food coping", "binary", "percentage_points",
   "fuel_cant_afford_2wk_yn", "Household could not afford fuel in past 2 weeks", "Fuel coping", "binary", "percentage_points",
+  "fuel_coping_strategy_index", "Fuel coping strategies index (survey-weighted)", "Fuel coping", "continuous", "score",
   "fuel_coping_action_1", "Fuel coping: borrowed fuel", "Fuel coping", "binary", "percentage_points",
   "fuel_coping_action_2", "Fuel coping: reduced food per meal", "Fuel coping", "binary", "percentage_points",
   "fuel_coping_action_3", "Fuel coping: reduced meals per day", "Fuel coping", "binary", "percentage_points",
@@ -923,6 +1288,8 @@ rf105_source_outcome_audit <- tribble(
 "spent_tobacco_pan", "spent_tobacco_pan_usd", "implemented_in_current_rdid_script", "included_corrected", "Converted from BDT to USD using timepoint-specific exchange rates.",
 "spent_food_pct", "spent_food_pct", "implemented_in_current_rdid_script", "included_corrected", "Reviewed code calculates spent_food / spent_total_month when both values are nonmissing and total spending is >0; the prior if_else expression returned a logical value for most positive food-spending records.",
 "total_income_30", "total_income_30_usd", "implemented_in_current_rdid_script", "included_corrected", "Baseline total_income_30 is calculated as the sum of income_cash_ngo, income_own_business, income_wage_labor, income_skill_labor, income_selling_wood, income_abroad, income_humanitarian_asst, income_handicrafts_tailoring, and income_farming when the aggregate is missing; follow-up reported aggregates are preserved when nonmissing. Converted from BDT to USD using timepoint-specific exchange rates.",
+"csi_survey_weighted", "csi_survey_weighted", "3_descriptive_outcomes_20260805_2213.R", "included", "Survey-weighted food coping strategy index using weekly frequency midpoint days and empirical difficulty weights derived from food_cant_afford_difficult and food_cant_afford_easiest, matching the descriptive outcome table.",
+"fuel_coping_strategy_index", "fuel_coping_strategy_index", "3_descriptive_outcomes_20260805_2213.R", "included", "Survey-weighted fuel coping strategy index using weekly frequency midpoint days and empirical difficulty weights from the analogous food coping strategies, matching the descriptive outcome table.",
 "CES_D_o16_score", "CES_D_o16_score", "implemented_in_current_rdid_script", "included_corrected", "CES-D score is the sum of all 20 cleaned CES-D items; reviewed code now sets the score to missing if any item is missing, matching rowwise sum() behavior.",
 "suicidal_thoughts_30_yn", "suicidal_thoughts_30_yn", "implemented_in_current_rdid_script", "included", "Binary indicator equals 0 for never and 1 for any nonzero frequency.",
 "target_child_asthma", "target_child_asthma", "implemented_in_current_rdid_script", "included", "Binary asthma proxy equals child wheeze.",
@@ -1254,7 +1621,7 @@ requested_rdid_outcome_coverage <- tribble(
   7, "Money spent on food", "modeled", "spent_food_usd", "spent_food; exchange_bdt_per_usd", "Food expenditure converted from BDT to USD using project exchange rates.",
   8, "Food security", "modeled", "fcs; fcs_binary", "weekly adult food-consumption variables", "Food Consumption Score recalculated from weekly food-group variables using WFP weights and modeled as continuous FCS and poor/borderline FCS <=35.",
   9, "Dietary diversity", "modeled", "hdds_assume_misc_1", "clean_final hdds_assume_misc_1; weekly adult food-frequency variables", "HDDS assuming miscellaneous group equals 1 is now available at baseline, midline, and endline from clean_final and is modeled as a continuous rDiD outcome.",
-  10, "Coping strategies", "modeled", paste(c("food_cant_afford_2wk_yn", paste0("food_coping_action_", c(1:13, 66)), "fuel_cant_afford_2wk_yn", paste0("fuel_coping_action_", c(1:15, 66))), collapse = "; "), "food_cant_afford_2wk; food_cant_afford_action*; fuel_cant_afford_2wk; fuel_cant_afford_action*", "Models include overall food/fuel shortage indicators and individual shortage-management strategies. Households without the relevant shortage are coded 0 for strategy use; missing strategy data among households with a shortage remain missing.",
+  10, "Coping strategies", "modeled", paste(c("food_cant_afford_2wk_yn", "csi_survey_weighted", paste0("food_coping_action_", c(1:13, 66)), "fuel_cant_afford_2wk_yn", "fuel_coping_strategy_index", paste0("fuel_coping_action_", c(1:15, 66))), collapse = "; "), "food_cant_afford_2wk; food_cant_afford_action*; food_cant_afford_difficult; food_cant_afford_easiest; borrow_food; reduce_food; reduce_meals; not_eat; restrict_food; fuel_cant_afford_2wk; fuel_cant_afford_action*; borrow_fuel; reduce_fuel; reduce_meals1; not_eat1", "Models include overall food/fuel shortage indicators, individual shortage-management strategies, and survey-weighted food/fuel coping strategy index scores from the descriptive outcome workflow. Households without the relevant shortage are coded 0 for strategy use; missing strategy data among households with a shortage remain missing.",
   11, "Verbal, physical, sexual, and combined harassment prevalence", "not_rdid_estimable_documented", NA_character_, "baseline *_hh variables; midline *_hh_ever variables; no nonmissing endline household harassment variables", "Reviewed code writes table_rDiD_harassment_estimability.csv with result-shaped NA rDiD rows for verbal/emotional, physical, sexual, and any harassment. Estimates are intentionally not modeled because the draft harassment code says baseline recall was not specified, midline uses _ever since-arrival wording, and endline harassment data are missing in clean_final.",
   12, "Livelihood training and use of skills", "partially_modeled_use_of_skilled_labor_only", "income_skill_labor_any; income_skill_labor_usd", "income_skill_labor; livlihood_training_ever; livlihood_skills_freq; livlihood_training_SAFE", "Use of skilled labor is represented by any skilled-labor income and skilled-labor income amount. Livelihood training variables are midline/endline only with no baseline values, so training uptake and training-related skill use cannot be estimated with baseline-to-follow-up rDiD."
 ) %>%
@@ -1295,6 +1662,7 @@ writeLines(
     "- The severe-asthma proxy now uses child wheeze AND disturbed speech with an NA-preserving primary definition plus a skip-as-no sensitivity for structurally skipped no-wheeze responses.",
     "- Food and wood expenditures now use the project exchange rates defined in the active RF105 configuration: 84.88, 84.74, and 93.45 BDT/USD for baseline, midline, and endline.",
     "- Additional requested health outcomes were added as binary rDiD outcomes where the clean_final columns are available: child lethargy, child weight loss, respondent cough, respondent disturbed sleep, respondent headache, and respondent backache.",
+    "- Food and fuel coping strategy index scores were added as continuous rDiD outcomes using the same weekly-frequency midpoint conversion and survey-derived empirical difficulty weights as 3_descriptive_outcomes_20260805_2213.R.",
     "",
     "Documented discrepancies or limitations:",
     "- respondent_resp_rate and respondent_weight_loss were requested in the outcome audit but are not present in survey_refugee_household.rds, so they cannot be modeled from clean_final.",

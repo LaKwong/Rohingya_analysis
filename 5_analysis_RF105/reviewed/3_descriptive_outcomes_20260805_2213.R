@@ -389,30 +389,136 @@ write_reviewed_csv(
   subfolder = "qa"
 )
 ################################################################################
-# Requested descriptive LPG, fuel, stove, kitchen, and safety outcomes imported from
-# 3.1_descriptive_requested_outcomes_20260812.R
+# Generic descriptive LPG, fuel, stove, kitchen, and safety outcomes imported from
+# 3.1_descriptive_generic_outcomes_20260812.R
 #
-# This imported framework produces broad generic requested-outcome summaries. It
-# intentionally keeps outputs named table_descriptive_requested_* and
-# fig_descriptive_requested_* so they can be distinguished from the more tailored
-# topic-specific descriptive tables already present below. Duplicate and
+# This imported framework produces broad generic outcome summaries. It
+# writes generic companion outputs using table_descriptive_* and
+# fig_descriptive_* filenames without the earlier generic-output prefix.
+# These outputs remain distinct from the more tailored topic-specific descriptive tables already present below. Duplicate and
 # near-duplicate analyses are documented in
-# 7_tables/RF105_reviewed_YYYYMMDD/qa/table_descriptive_requested_duplicate_notes.csv.
+# 7_tables/RF105_reviewed_YYYYMMDD/qa/table_descriptive_duplicate_notes.csv.
 ################################################################################
 
-requested_descriptive_script_label <- "3_descriptive_outcomes_20260805_2213.R"
-requested_missing_response_codes <- c("77", "88", "99")
+generic_descriptive_script_label <- "3_descriptive_outcomes_20260805_2213.R"
+generic_missing_response_codes <- c("77", "88", "99")
+generic_choice_form_files <- tibble(
+  form_file = file.path(
+    project_root,
+    c(
+      "2_data_raw/survey_baseline_survey and data review/rohingya_fuel_v64.xlsx",
+      "2_data_raw/survey_midline_survey/rohingya_fuel_v94_endline_Rohingya.xlsx",
+      "2_data_raw/survey_endline_survey and data review/rohingya_fuel_v116_no_hr.xlsx"
+    )
+  ),
+  form_priority = c(1L, 2L, 3L)
+)
 
-requested_clean_numeric_value <- function(x, nonnegative = FALSE) {
+generic_clean_choice_code <- function(x) {
+  out <- str_squish(as.character(x))
+  out[is.na(x) | out == ""] <- NA_character_
+  out_num <- suppressWarnings(as.numeric(out))
+  if_else(!is.na(out_num) & out_num == floor(out_num),
+          as.character(as.integer(out_num)), out)
+}
+
+generic_read_choice_labels <- function(form_file, form_priority) {
+  if (!file.exists(form_file)) {
+    return(tibble())
+  }
+
+  form_sheets <- readxl::excel_sheets(form_file)
+  if (!"choices" %in% form_sheets) {
+    return(tibble())
+  }
+
+  survey_sheets <- intersect(
+    c("survey", "survey_single_lang", "survey_combined"), form_sheets
+  )
+  if (length(survey_sheets) == 0) {
+    return(tibble())
+  }
+
+  survey_choice_lists <- purrr::map_dfr(survey_sheets, function(sheet_name) {
+    suppressMessages(
+      readxl::read_excel(form_file, sheet = sheet_name, .name_repair = "unique")
+    ) %>%
+      janitor::clean_names() %>%
+      transmute(
+        source_variable = as.character(name),
+        select_type = as.character(type),
+        survey_sheet = sheet_name
+      )
+  }) %>%
+    filter(str_detect(select_type, "^select_(one|multiple)\\s+")) %>%
+    mutate(
+      choice_list = str_match(select_type, "^select_(?:one|multiple)\\s+([^\\s]+)")[, 2],
+      choice_list = str_remove_all(choice_list, "^\\[|\\]$")
+    ) %>%
+    filter(!is.na(source_variable), !is.na(choice_list))
+
+  choice_sheet <- suppressMessages(
+    readxl::read_excel(form_file, sheet = "choices", .name_repair = "unique")
+  ) %>%
+    janitor::clean_names()
+  label_cols <- intersect(
+    c("label_english_en", "label_english", "label"), names(choice_sheet)
+  )
+  if (length(label_cols) == 0) {
+    return(tibble())
+  }
+  label_col <- label_cols[[1]]
+
+  choices <- choice_sheet %>%
+    transmute(
+      choice_list = str_remove_all(as.character(list_name), "^\\[|\\]$"),
+      response_value = generic_clean_choice_code(name),
+      response_label = str_squish(as.character(.data[[label_col]]))
+    ) %>%
+    filter(!is.na(choice_list), !is.na(response_value), !is.na(response_label),
+           response_label != "") %>%
+    distinct(choice_list, response_value, response_label)
+
+  survey_choice_lists %>%
+    left_join(choices, by = "choice_list", relationship = "many-to-many") %>%
+    filter(!is.na(response_value), !is.na(response_label)) %>%
+    mutate(form_file = form_file, form_priority = form_priority) %>%
+    distinct(source_variable, response_value, response_label, form_file,
+             form_priority)
+}
+
+generic_choice_label_lookup <- purrr::map2_dfr(
+  generic_choice_form_files$form_file,
+  generic_choice_form_files$form_priority,
+  generic_read_choice_labels
+) %>%
+  arrange(desc(form_priority)) %>%
+  distinct(source_variable, response_value, .keep_all = TRUE)
+
+generic_manual_choice_labels <- tribble(
+  ~source_variable, ~response_value, ~response_label,
+  "burn_plastic_frequency", "5", "5 times in prior week",
+  "burn_plastic_frequency", "7", "7 times in prior week"
+)
+
+generic_choice_label_lookup <- bind_rows(
+  generic_manual_choice_labels %>%
+    mutate(form_file = NA_character_, form_priority = Inf),
+  generic_choice_label_lookup
+) %>%
+  arrange(desc(form_priority)) %>%
+  distinct(source_variable, response_value, .keep_all = TRUE)
+
+generic_clean_numeric_value <- function(x, nonnegative = FALSE) {
   out <- as_number(x)
-  out[out %in% as.numeric(requested_missing_response_codes)] <- NA_real_
+  out[out %in% as.numeric(generic_missing_response_codes)] <- NA_real_
   if (isTRUE(nonnegative)) {
     out[out < 0] <- NA_real_
   }
   out
 }
 
-requested_clean_category_value <- function(x, missing_codes = requested_missing_response_codes) {
+generic_clean_category_value <- function(x, missing_codes = generic_missing_response_codes) {
   out <- str_squish(as.character(x))
   out[is.na(x)] <- NA_character_
   out <- na_if(out, "")
@@ -421,27 +527,27 @@ requested_clean_category_value <- function(x, missing_codes = requested_missing_
   out
 }
 
-requested_clean_text_value <- function(x) {
-  out <- requested_clean_category_value(x)
+generic_clean_text_value <- function(x) {
+  out <- generic_clean_category_value(x)
   out[out == "0"] <- NA_character_
   out
 }
 
-requested_continuous_ci_lower <- function(mean_value, se_value, n_value) {
+generic_continuous_ci_lower <- function(mean_value, se_value, n_value) {
   if (is.na(n_value) || n_value <= 1 || is.na(se_value) || is.na(mean_value)) {
     return(NA_real_)
   }
   mean_value - qt(0.975, n_value - 1) * se_value
 }
 
-requested_continuous_ci_upper <- function(mean_value, se_value, n_value) {
+generic_continuous_ci_upper <- function(mean_value, se_value, n_value) {
   if (is.na(n_value) || n_value <= 1 || is.na(se_value) || is.na(mean_value)) {
     return(NA_real_)
   }
   mean_value + qt(0.975, n_value - 1) * se_value
 }
 
-requested_write_internal_text_csv <- function(x, filename, reason) {
+generic_write_internal_text_csv <- function(x, filename, reason) {
   dir.create(dir_restricted_qa, recursive = TRUE, showWarnings = FALSE)
   out_file <- file.path(dir_restricted_qa, filename)
   readr::write_csv(x, out_file, na = "")
@@ -457,26 +563,47 @@ requested_write_internal_text_csv <- function(x, filename, reason) {
   invisible(out_file)
 }
 
-requested_label_response_value <- function(value) {
-  value <- as.character(value)
-  case_when(
-    is.na(value) ~ NA_character_,
-    value == "0" ~ "0: No/none",
-    value == "66" ~ "66: Other",
-    str_detect(value, "^[0-9]+$") ~ paste0("Code ", value),
-    TRUE ~ value
-  )
+analysis_label_response_value <- function(value, source_variable = NA_character_) {
+  value <- generic_clean_category_value(value)
+  source_variable <- rep_len(as.character(source_variable), length(value))
+
+  purrr::map2_chr(value, source_variable, function(value_i, source_variable_i) {
+    if (is.na(value_i)) {
+      return(NA_character_)
+    }
+
+    if (!is.na(source_variable_i) && nrow(generic_choice_label_lookup) > 0) {
+      matched_label <- generic_choice_label_lookup %>%
+        filter(source_variable == source_variable_i, response_value == value_i) %>%
+        pull(response_label) %>%
+        unique()
+
+      if (length(matched_label) > 0 && !is.na(matched_label[[1]]) &&
+          nzchar(matched_label[[1]])) {
+        return(matched_label[[1]])
+      }
+    }
+
+    case_when(
+      value_i == "0" ~ "No/none",
+      value_i == "66" ~ "Other",
+      value_i == "77" ~ "Refused",
+      value_i == "88" ~ "Not applicable",
+      value_i == "99" ~ "Do not know",
+      TRUE ~ paste0("Unlabeled response ", value_i)
+    )
+  })
 }
 
-requested_clean_filename_token <- function(x) {
+generic_clean_filename_token <- function(x) {
   x %>%
     str_to_lower() %>%
     str_replace_all("[^a-z0-9]+", "_") %>%
     str_replace_all("^_|_$", "")
 }
 
-requested_split_response_codes <- function(x) {
-  x_clean <- requested_clean_category_value(x)
+generic_split_response_codes <- function(x) {
+  x_clean <- generic_clean_category_value(x)
   lapply(x_clean, function(value) {
     if (is.na(value)) {
       return(NA_character_)
@@ -486,29 +613,29 @@ requested_split_response_codes <- function(x) {
   })
 }
 
-requested_multi_select_any_yn <- function(x) {
-  tokens <- requested_split_response_codes(x)
+generic_multi_select_any_yn <- function(x) {
+  tokens <- generic_split_response_codes(x)
   vapply(tokens, function(value) {
     if (length(value) == 1 && is.na(value)) {
       return(NA_integer_)
     }
-    selected_codes <- setdiff(value, c("0", requested_missing_response_codes))
+    selected_codes <- setdiff(value, c("0", generic_missing_response_codes))
     as.integer(length(selected_codes) > 0)
   }, integer(1))
 }
 
-requested_multi_select_any_col <- function(df, var) {
+generic_multi_select_any_col <- function(df, var) {
   if (var %in% names(df)) {
-    return(requested_multi_select_any_yn(df[[var]]))
+    return(generic_multi_select_any_yn(df[[var]]))
   }
   rep(NA_integer_, nrow(df))
 }
 
-requested_positive_numeric_yn_col <- function(df, var) {
+generic_positive_numeric_yn_col <- function(df, var) {
   if (!var %in% names(df)) {
     return(rep(NA_integer_, nrow(df)))
   }
-  value <- requested_clean_numeric_value(df[[var]], nonnegative = TRUE)
+  value <- generic_clean_numeric_value(df[[var]], nonnegative = TRUE)
   case_when(
     is.na(value) ~ NA_integer_,
     value > 0 ~ 1L,
@@ -516,16 +643,16 @@ requested_positive_numeric_yn_col <- function(df, var) {
   )
 }
 
-requested_option_codes_for_var <- function(df, base_var) {
+generic_option_codes_for_var <- function(df, base_var) {
   option_cols <- names(df)[startsWith(names(df), paste0(base_var, "/"))]
   option_codes_cols <- substring(option_cols, nchar(base_var) + 2L)
 
   option_codes_values <- character()
   if (base_var %in% names(df)) {
-    option_codes_values <- unlist(requested_split_response_codes(df[[base_var]]))
+    option_codes_values <- unlist(generic_split_response_codes(df[[base_var]]))
   }
 
-  codes <- requested_clean_category_value(unique(c(option_codes_cols, option_codes_values)))
+  codes <- generic_clean_category_value(unique(c(option_codes_cols, option_codes_values)))
   codes <- codes[!is.na(codes)]
   if (length(codes) == 0) {
     return(character())
@@ -539,7 +666,7 @@ requested_option_codes_for_var <- function(df, base_var) {
     pull(option_code)
 }
 
-requested_select_multi_response <- function(df, base_var, option_code) {
+generic_select_multi_response <- function(df, base_var, option_code) {
   option_var <- paste0(base_var, "/", option_code)
 
   if (option_var %in% names(df)) {
@@ -550,7 +677,7 @@ requested_select_multi_response <- function(df, base_var, option_code) {
   }
 
   if (base_var %in% names(df)) {
-    tokens <- requested_split_response_codes(df[[base_var]])
+    tokens <- generic_split_response_codes(df[[base_var]])
     value <- vapply(tokens, function(response_codes) {
       if (length(response_codes) == 1 && is.na(response_codes)) {
         return(NA_integer_)
@@ -570,7 +697,7 @@ requested_select_multi_response <- function(df, base_var, option_code) {
   )
 }
 
-requested_prop_ci_lower <- function(proportion, n_nonmissing) {
+generic_prop_ci_lower <- function(proportion, n_nonmissing) {
   if_else(
     n_nonmissing > 0 & !is.na(proportion),
     pmax(0, 100 * (proportion - qnorm(0.975) *
@@ -579,7 +706,7 @@ requested_prop_ci_lower <- function(proportion, n_nonmissing) {
   )
 }
 
-requested_prop_ci_upper <- function(proportion, n_nonmissing) {
+generic_prop_ci_upper <- function(proportion, n_nonmissing) {
   if_else(
     n_nonmissing > 0 & !is.na(proportion),
     pmin(100, 100 * (proportion + qnorm(0.975) *
@@ -588,7 +715,7 @@ requested_prop_ci_upper <- function(proportion, n_nonmissing) {
   )
 }
 
-requested_summarise_binary_vars <- function(df, var_table,
+generic_summarise_binary_vars <- function(df, var_table,
                                   population = "all_deduplicated_household_timepoint_records") {
   var_table <- var_table %>% filter(source_variable %in% names(df))
   if (nrow(var_table) == 0) {
@@ -611,8 +738,8 @@ requested_summarise_binary_vars <- function(df, var_table,
         n_yes = sum(value == 1, na.rm = TRUE),
         proportion = if_else(n_nonmissing > 0, n_yes / n_nonmissing, NA_real_),
         percent = 100 * proportion,
-        ci_lower = requested_prop_ci_lower(proportion, n_nonmissing),
-        ci_upper = requested_prop_ci_upper(proportion, n_nonmissing),
+        ci_lower = generic_prop_ci_lower(proportion, n_nonmissing),
+        ci_upper = generic_prop_ci_upper(proportion, n_nonmissing),
         .groups = "drop"
       ) %>%
       mutate(
@@ -620,7 +747,7 @@ requested_summarise_binary_vars <- function(df, var_table,
         outcome_name = var_table$outcome_name[[i]],
         outcome_label = var_table$outcome_label[[i]],
         source_variable = var,
-        requested_variable = var_table$requested_variable[[i]],
+        analysis_variable = var_table$analysis_variable[[i]],
         analysis_type = "binary_percent",
         unit = "percent",
         population = population,
@@ -628,13 +755,13 @@ requested_summarise_binary_vars <- function(df, var_table,
       )
   }) %>%
     select(timepoint, study_arm_overall, outcome_group, outcome_name,
-           outcome_label, requested_variable, source_variable, analysis_type,
+           outcome_label, analysis_variable, source_variable, analysis_type,
            unit, population, n_total, n_nonmissing, n_yes, percent, ci_lower,
            ci_upper, denominator_note) %>%
     arrange_timepoint_arm(outcome_group, outcome_name)
 }
 
-requested_summarise_continuous_vars <- function(df, var_table,
+generic_summarise_continuous_vars <- function(df, var_table,
                                       population = "all_deduplicated_household_timepoint_records") {
   var_table <- var_table %>% filter(source_variable %in% names(df))
   if (nrow(var_table) == 0) {
@@ -647,7 +774,7 @@ requested_summarise_continuous_vars <- function(df, var_table,
       transmute(
         timepoint,
         study_arm_overall,
-        value = requested_clean_numeric_value(.data[[var]], nonnegative = TRUE)
+        value = generic_clean_numeric_value(.data[[var]], nonnegative = TRUE)
       ) %>%
       add_all_arms_rows() %>%
       group_by(timepoint, study_arm_overall) %>%
@@ -664,8 +791,8 @@ requested_summarise_continuous_vars <- function(df, var_table,
         se = if_else(n_nonmissing > 1 & !is.na(sd),
                      sd / sqrt(n_nonmissing),
                      NA_real_),
-        ci_lower = requested_continuous_ci_lower(mean, se, n_nonmissing),
-        ci_upper = requested_continuous_ci_upper(mean, se, n_nonmissing),
+        ci_lower = generic_continuous_ci_lower(mean, se, n_nonmissing),
+        ci_upper = generic_continuous_ci_upper(mean, se, n_nonmissing),
         .groups = "drop"
       ) %>%
       mutate(
@@ -673,7 +800,7 @@ requested_summarise_continuous_vars <- function(df, var_table,
         outcome_name = var_table$outcome_name[[i]],
         outcome_label = var_table$outcome_label[[i]],
         source_variable = var,
-        requested_variable = var_table$requested_variable[[i]],
+        analysis_variable = var_table$analysis_variable[[i]],
         analysis_type = "continuous_summary",
         unit = var_table$unit[[i]],
         population = population,
@@ -681,13 +808,13 @@ requested_summarise_continuous_vars <- function(df, var_table,
       )
   }) %>%
     select(timepoint, study_arm_overall, outcome_group, outcome_name,
-           outcome_label, requested_variable, source_variable, analysis_type,
+           outcome_label, analysis_variable, source_variable, analysis_type,
            unit, population, n_total, n_nonmissing, mean, sd, median, p25,
            p75, min, max, ci_lower, ci_upper, denominator_note) %>%
     arrange_timepoint_arm(outcome_group, outcome_name)
 }
 
-requested_summarise_categorical_vars <- function(df, var_table,
+generic_summarise_categorical_vars <- function(df, var_table,
                                        population = "all_deduplicated_household_timepoint_records") {
   var_table <- var_table %>% filter(source_variable %in% names(df))
   if (nrow(var_table) == 0) {
@@ -700,7 +827,7 @@ requested_summarise_categorical_vars <- function(df, var_table,
       transmute(
         timepoint,
         study_arm_overall,
-        category_value = requested_clean_category_value(.data[[var]])
+        category_value = generic_clean_category_value(.data[[var]])
       ) %>%
       add_all_arms_rows()
 
@@ -721,12 +848,12 @@ requested_summarise_categorical_vars <- function(df, var_table,
         percent = if_else(n_nonmissing > 0,
                           100 * n_category / n_nonmissing,
                           NA_real_),
-        category_label = requested_label_response_value(category_value),
+        category_label = analysis_label_response_value(category_value, var),
         outcome_group = var_table$outcome_group[[i]],
         outcome_name = var_table$outcome_name[[i]],
         outcome_label = var_table$outcome_label[[i]],
         source_variable = var,
-        requested_variable = var_table$requested_variable[[i]],
+        analysis_variable = var_table$analysis_variable[[i]],
         analysis_type = "categorical_distribution",
         unit = "percent",
         population = population,
@@ -734,13 +861,13 @@ requested_summarise_categorical_vars <- function(df, var_table,
       )
   }) %>%
     select(timepoint, study_arm_overall, outcome_group, outcome_name,
-           outcome_label, requested_variable, source_variable, analysis_type,
+           outcome_label, analysis_variable, source_variable, analysis_type,
            category_value, category_label, unit, population, n_total,
            n_nonmissing, n_category, percent, denominator_note) %>%
     arrange_timepoint_arm(outcome_group, outcome_name, category_value)
 }
 
-requested_summarise_multi_select_vars <- function(df, var_table,
+generic_summarise_multi_select_vars <- function(df, var_table,
                                         population = "all_deduplicated_household_timepoint_records") {
   var_table <- var_table %>% filter(source_variable %in% names(df) |
                                       map_lgl(source_variable, ~ any(startsWith(names(df), paste0(.x, "/")))))
@@ -750,13 +877,13 @@ requested_summarise_multi_select_vars <- function(df, var_table,
 
   map_dfr(seq_len(nrow(var_table)), function(i) {
     base_var <- var_table$source_variable[[i]]
-    option_codes <- requested_option_codes_for_var(df, base_var)
+    option_codes <- generic_option_codes_for_var(df, base_var)
     if (length(option_codes) == 0) {
       return(tibble())
     }
 
     map_dfr(option_codes, function(option_code) {
-      selected <- requested_select_multi_response(df, base_var, option_code)
+      selected <- generic_select_multi_response(df, base_var, option_code)
 
       tibble(
         timepoint = df$timepoint,
@@ -773,19 +900,19 @@ requested_summarise_multi_select_vars <- function(df, var_table,
                                n_selected / n_nonmissing,
                                NA_real_),
           percent = 100 * proportion,
-          ci_lower = requested_prop_ci_lower(proportion, n_nonmissing),
-          ci_upper = requested_prop_ci_upper(proportion, n_nonmissing),
+          ci_lower = generic_prop_ci_lower(proportion, n_nonmissing),
+          ci_upper = generic_prop_ci_upper(proportion, n_nonmissing),
           .groups = "drop"
         ) %>%
         mutate(
           outcome_group = var_table$outcome_group[[i]],
           outcome_name = var_table$outcome_name[[i]],
           outcome_label = var_table$outcome_label[[i]],
-          requested_variable = var_table$requested_variable[[i]],
+          analysis_variable = var_table$analysis_variable[[i]],
           source_variable = base_var,
           source_variable_used = selected$source_variable_used,
           option_code = option_code,
-          option_label = requested_label_response_value(option_code),
+          option_label = analysis_label_response_value(option_code, base_var),
           analysis_type = "multiselect_option_percent",
           unit = "percent",
           population = population,
@@ -794,14 +921,14 @@ requested_summarise_multi_select_vars <- function(df, var_table,
     })
   }) %>%
     select(timepoint, study_arm_overall, outcome_group, outcome_name,
-           outcome_label, requested_variable, source_variable,
+           outcome_label, analysis_variable, source_variable,
            source_variable_used, analysis_type, option_code, option_label,
            unit, population, n_total, n_nonmissing, n_selected, percent,
            ci_lower, ci_upper, denominator_note) %>%
     arrange_timepoint_arm(outcome_group, outcome_name, option_code)
 }
 
-requested_summarise_text_presence <- function(df, var_table,
+generic_summarise_text_presence <- function(df, var_table,
                                     population = "all_deduplicated_household_timepoint_records") {
   var_table <- var_table %>% filter(source_variable %in% names(df))
   if (nrow(var_table) == 0) {
@@ -814,7 +941,7 @@ requested_summarise_text_presence <- function(df, var_table,
       transmute(
         timepoint,
         study_arm_overall,
-        text_value = requested_clean_text_value(.data[[var]])
+        text_value = generic_clean_text_value(.data[[var]])
       ) %>%
       add_all_arms_rows() %>%
       group_by(timepoint, study_arm_overall) %>%
@@ -831,7 +958,7 @@ requested_summarise_text_presence <- function(df, var_table,
         outcome_group = var_table$outcome_group[[i]],
         outcome_name = var_table$outcome_name[[i]],
         outcome_label = var_table$outcome_label[[i]],
-        requested_variable = var_table$requested_variable[[i]],
+        analysis_variable = var_table$analysis_variable[[i]],
         source_variable = var,
         analysis_type = "text_response_presence",
         unit = "percent",
@@ -840,13 +967,13 @@ requested_summarise_text_presence <- function(df, var_table,
       )
   }) %>%
     select(timepoint, study_arm_overall, outcome_group, outcome_name,
-           outcome_label, requested_variable, source_variable, analysis_type,
+           outcome_label, analysis_variable, source_variable, analysis_type,
            unit, population, n_total, n_nonmissing_text, n_unique_text,
            percent_with_text, denominator_note) %>%
     arrange_timepoint_arm(outcome_group, outcome_name)
 }
 
-requested_summarise_text_response_counts <- function(df, var_table) {
+generic_summarise_text_response_counts <- function(df, var_table) {
   var_table <- var_table %>% filter(source_variable %in% names(df))
   if (nrow(var_table) == 0) {
     return(tibble())
@@ -858,7 +985,7 @@ requested_summarise_text_response_counts <- function(df, var_table) {
       transmute(
         timepoint,
         study_arm_overall,
-        text_value = requested_clean_text_value(.data[[var]])
+        text_value = generic_clean_text_value(.data[[var]])
       ) %>%
       add_all_arms_rows()
 
@@ -880,19 +1007,19 @@ requested_summarise_text_response_counts <- function(df, var_table) {
         outcome_group = var_table$outcome_group[[i]],
         outcome_name = var_table$outcome_name[[i]],
         outcome_label = var_table$outcome_label[[i]],
-        requested_variable = var_table$requested_variable[[i]],
+        analysis_variable = var_table$analysis_variable[[i]],
         source_variable = var,
         analysis_type = "restricted_text_response_counts"
       )
   }) %>%
     select(timepoint, study_arm_overall, outcome_group, outcome_name,
-           outcome_label, requested_variable, source_variable, analysis_type,
+           outcome_label, analysis_variable, source_variable, analysis_type,
            text_value, n_nonmissing_text, n_text_response,
            percent_among_text_responses) %>%
     arrange_timepoint_arm(outcome_group, outcome_name, text_value)
 }
 
-requested_write_plot_if_data <- function(plot_data, plot, filename, width = 10, height = 6) {
+generic_write_plot_if_data <- function(plot_data, plot, filename, width = 10, height = 6) {
   if (nrow(plot_data) == 0) {
     message("No rows available for figure: ", filename)
     return(invisible(NULL))
@@ -902,7 +1029,7 @@ requested_write_plot_if_data <- function(plot_data, plot, filename, width = 10, 
 
 arm_colors_requested <- c(comparison = "#3B6EA8", intervention = "#C94C4C")
 
-requested_save_binary_figures <- function(binary_summary) {
+generic_save_binary_figures <- function(binary_summary) {
   groups <- binary_summary %>%
     filter(study_arm_overall %in% arm_levels, n_nonmissing > 0, !is.na(percent)) %>%
     distinct(outcome_group) %>%
@@ -936,17 +1063,17 @@ requested_save_binary_figures <- function(binary_summary) {
       labs(x = "Timepoint", y = "Percent of households", fill = "Study arm")
 
     height <- max(4.5, 2.2 + 1.6 * ceiling(n_distinct(plot_data$outcome_label) / 2))
-    requested_write_plot_if_data(
+    generic_write_plot_if_data(
       plot_data,
       fig,
-      paste0("fig_descriptive_requested_binary_", requested_clean_filename_token(group_name), ".png"),
+      paste0("fig_descriptive_binary_", generic_clean_filename_token(group_name), ".png"),
       width = 10,
       height = height
     )
   })
 }
 
-requested_save_multiselect_figures <- function(multiselect_summary) {
+generic_save_multiselect_figures <- function(multiselect_summary) {
   groups <- multiselect_summary %>%
     filter(study_arm_overall %in% arm_levels, n_nonmissing > 0, !is.na(percent)) %>%
     distinct(outcome_group) %>%
@@ -983,17 +1110,17 @@ requested_save_multiselect_figures <- function(multiselect_summary) {
 
     height <- max(5, min(16, 2.5 + 0.32 * n_distinct(paste(plot_data$outcome_label,
                                                            plot_data$option_code))))
-    requested_write_plot_if_data(
+    generic_write_plot_if_data(
       plot_data,
       fig,
-      paste0("fig_descriptive_requested_multiselect_", requested_clean_filename_token(group_name), ".png"),
+      paste0("fig_descriptive_multiselect_", generic_clean_filename_token(group_name), ".png"),
       width = 12,
       height = height
     )
   })
 }
 
-requested_save_categorical_figures <- function(categorical_summary) {
+generic_save_categorical_figures <- function(categorical_summary) {
   groups <- categorical_summary %>%
     filter(study_arm_overall %in% arm_levels, n_nonmissing > 0, !is.na(percent)) %>%
     distinct(outcome_group) %>%
@@ -1030,17 +1157,17 @@ requested_save_categorical_figures <- function(categorical_summary) {
 
     height <- max(5, min(16, 2.5 + 0.32 * n_distinct(paste(plot_data$outcome_label,
                                                            plot_data$category_label))))
-    requested_write_plot_if_data(
+    generic_write_plot_if_data(
       plot_data,
       fig,
-      paste0("fig_descriptive_requested_categorical_", requested_clean_filename_token(group_name), ".png"),
+      paste0("fig_descriptive_categorical_", generic_clean_filename_token(group_name), ".png"),
       width = 12,
       height = height
     )
   })
 }
 
-requested_save_continuous_figure <- function(continuous_summary) {
+generic_save_continuous_figure <- function(continuous_summary) {
   plot_data <- continuous_summary %>%
     filter(study_arm_overall %in% arm_levels, n_nonmissing > 0, !is.na(mean)) %>%
     mutate(outcome_label_plot = str_wrap(paste0(outcome_label, " (", unit, ")"), width = 34))
@@ -1068,10 +1195,10 @@ requested_save_continuous_figure <- function(continuous_summary) {
     labs(x = "Timepoint", y = "Mean with 95% CI", color = "Study arm")
 
   height <- max(5, 2.4 + 1.7 * ceiling(n_distinct(plot_data$outcome_label) / 2))
-  requested_write_plot_if_data(
+  generic_write_plot_if_data(
     plot_data,
     fig,
-    "fig_descriptive_requested_continuous_outcomes.png",
+    "fig_descriptive_continuous_outcomes.png",
     width = 10,
     height = height
   )
@@ -1082,20 +1209,20 @@ requested_save_continuous_figure <- function(continuous_summary) {
 # Analysis population and derived variables
 ################################################################################
 
-survey$lpg_stove_repair_any_yn <- requested_multi_select_any_col(survey, "lpg_stove_repair")
-survey$lpg_stove_repair_inspect_any_yn <- requested_multi_select_any_col(survey, "lpg_stove_repair_inspect")
-survey$lpg_cylinder_repair_any_yn <- requested_multi_select_any_col(survey, "lpg_cylinder_repair")
-survey$lpg_cylinder_repair_inspect_any_yn <- requested_multi_select_any_col(survey, "lpg_cylinder_repair_inspect")
-survey$lpg_repair_details_any_yn <- requested_multi_select_any_col(survey, "lpg_repair_details")
-survey$lpg_afraid_any_yn <- requested_multi_select_any_col(survey, "lpg_afraid")
-survey$fire_any_yn <- requested_positive_numeric_yn_col(survey, "fire_number")
-survey$burn_plastic_any_yn <- requested_positive_numeric_yn_col(survey, "burn_plastic_frequency")
-survey$cook_sell_yesterday_any_yn <- requested_positive_numeric_yn_col(survey, "cook_sell_yesterday")
-survey$cook_pressure_cooker_any_yn <- requested_positive_numeric_yn_col(survey, "cook_pressure_cooker")
+survey$lpg_stove_repair_any_yn <- generic_multi_select_any_col(survey, "lpg_stove_repair")
+survey$lpg_stove_repair_inspect_any_yn <- generic_multi_select_any_col(survey, "lpg_stove_repair_inspect")
+survey$lpg_cylinder_repair_any_yn <- generic_multi_select_any_col(survey, "lpg_cylinder_repair")
+survey$lpg_cylinder_repair_inspect_any_yn <- generic_multi_select_any_col(survey, "lpg_cylinder_repair_inspect")
+survey$lpg_repair_details_any_yn <- generic_multi_select_any_col(survey, "lpg_repair_details")
+survey$lpg_afraid_any_yn <- generic_multi_select_any_col(survey, "lpg_afraid")
+survey$fire_any_yn <- generic_positive_numeric_yn_col(survey, "fire_number")
+survey$burn_plastic_any_yn <- generic_positive_numeric_yn_col(survey, "burn_plastic_frequency")
+survey$cook_sell_yesterday_any_yn <- generic_positive_numeric_yn_col(survey, "cook_sell_yesterday")
+survey$cook_pressure_cooker_any_yn <- generic_positive_numeric_yn_col(survey, "cook_pressure_cooker")
 
 write_reviewed_csv(
   analysis_population$sample_counts,
-  "table_descriptive_requested_population_counts.csv",
+  "table_descriptive_generic_population_counts.csv",
   subfolder = "qa"
 )
 
@@ -1107,8 +1234,8 @@ write_reviewed_csv(
 # Requested variable inventory
 ################################################################################
 
-requested_variables <- tribble(
-  ~outcome_group, ~requested_variable, ~requested_label,
+analysis_variables <- tribble(
+  ~outcome_group, ~analysis_variable, ~analysis_label,
   "lpg_repair", "lpg_stove_repair", "LPG stove repair",
   "lpg_repair", "lpg_stove_repair_inspect", "LPG stove repair inspection",
   "lpg_repair", "lpg_stove_repair_image", "LPG stove repair image",
@@ -1226,7 +1353,7 @@ requested_variables <- tribble(
 )
 
 binary_vars <- tribble(
-  ~outcome_group, ~requested_variable, ~source_variable, ~outcome_name, ~outcome_label,
+  ~outcome_group, ~analysis_variable, ~source_variable, ~outcome_name, ~outcome_label,
   "lpg_repair", "lpg_stove_repair", "lpg_stove_repair_any_yn", "lpg_stove_repair_any", "Any LPG stove repair item reported",
   "lpg_repair", "lpg_stove_repair_inspect", "lpg_stove_repair_inspect_any_yn", "lpg_stove_repair_inspect_any", "Any LPG stove repair inspection item reported",
   "lpg_repair", "lpg_cylinder_repair", "lpg_cylinder_repair_any_yn", "lpg_cylinder_repair_any", "Any LPG cylinder repair item reported",
@@ -1271,10 +1398,10 @@ binary_vars <- tribble(
   "kitchen_spotcheck", "window_kitchen_stove_location", "window_kitchen_stove_location", "window_kitchen_stove_location", "Window near stove location",
   "kitchen_spotcheck", "cook_pressure_cooker", "cook_pressure_cooker_any_yn", "cook_pressure_cooker_any", "Pressure cooker present"
 ) %>%
-  mutate(analysis_output = "table_descriptive_requested_binary_outcomes.csv")
+  mutate(analysis_output = "table_descriptive_binary_outcomes.csv")
 
 multi_select_vars <- tribble(
-  ~outcome_group, ~requested_variable, ~source_variable, ~outcome_name, ~outcome_label,
+  ~outcome_group, ~analysis_variable, ~source_variable, ~outcome_name, ~outcome_label,
   "lpg_repair", "lpg_stove_repair", "lpg_stove_repair", "lpg_stove_repair_options", "LPG stove repair",
   "lpg_repair", "lpg_stove_repair_inspect", "lpg_stove_repair_inspect", "lpg_stove_repair_inspect_options", "LPG stove repair inspection",
   "lpg_repair", "lpg_cylinder_repair", "lpg_cylinder_repair", "lpg_cylinder_repair_options", "LPG cylinder repair",
@@ -1290,10 +1417,10 @@ multi_select_vars <- tribble(
   "fuel_consequences", "food_flavor", "food_flavor", "food_flavor_options", "Fuel effects on food flavor",
   "fuel_consequences", "food_burn_consequence", "food_burn_consequence", "food_burn_consequence_options", "Consequences of food burning"
 ) %>%
-  mutate(analysis_output = "table_descriptive_requested_multiselect_outcomes.csv")
+  mutate(analysis_output = "table_descriptive_multiselect_outcomes.csv")
 
 categorical_vars <- tribble(
-  ~outcome_group, ~requested_variable, ~source_variable, ~outcome_name, ~outcome_label,
+  ~outcome_group, ~analysis_variable, ~source_variable, ~outcome_name, ~outcome_label,
   "lpg_behaviors", "buy_lpg_place", "buy_lpg_place", "buy_lpg_place", "Place household buys LPG",
   "lpg_behaviors", "lpg_use", "lpg_use", "lpg_use", "LPG use",
   "lpg_behaviors", "lpg_extra_use", "lpg_extra_use", "lpg_extra_use", "Extra LPG use",
@@ -1326,10 +1453,10 @@ categorical_vars <- tribble(
   "kitchen_spotcheck", "window_kitchen_use", "window_kitchen_use", "window_kitchen_use", "Kitchen window use",
   "kitchen_spotcheck", "cook_pressure_cooker", "cook_pressure_cooker", "cook_pressure_cooker_categories", "Pressure cooker present"
 ) %>%
-  mutate(analysis_output = "table_descriptive_requested_categorical_outcomes.csv")
+  mutate(analysis_output = "table_descriptive_categorical_outcomes.csv")
 
 continuous_vars <- tribble(
-  ~outcome_group, ~requested_variable, ~source_variable, ~outcome_name, ~outcome_label, ~unit,
+  ~outcome_group, ~analysis_variable, ~source_variable, ~outcome_name, ~outcome_label, ~unit,
   "lpg_repair", "lpg_repair_costs", "lpg_repair_costs", "lpg_repair_costs", "LPG repair costs", "BDT",
   "safety", "fire_number", "fire_number", "fire_number", "Number of fires", "count",
   "forest_reasons", "cost_forest_not_wood", "cost_forest_not_wood", "cost_forest_not_wood", "Cost of non-wood forest product", "BDT",
@@ -1365,93 +1492,93 @@ continuous_vars <- tribble(
   "kitchen_spotcheck", "cook_pot_with_handle_num", "cook_pot_with_handle_num", "cook_pot_with_handle_num", "Number of pots with handles", "count",
   "kitchen_spotcheck", "cook_pressure_cooker_num", "cook_pressure_cooker_num", "cook_pressure_cooker_num", "Number of pressure cookers", "count"
 ) %>%
-  mutate(analysis_output = "table_descriptive_requested_continuous_outcomes.csv")
+  mutate(analysis_output = "table_descriptive_continuous_outcomes.csv")
 
 text_vars <- tribble(
-  ~outcome_group, ~requested_variable, ~source_variable, ~outcome_name, ~outcome_label,
+  ~outcome_group, ~analysis_variable, ~source_variable, ~outcome_name, ~outcome_label,
   "missed_refill", "refill_time_lpg_missed_other", "refill_time_lpg_missed_other", "refill_time_lpg_missed_other", "Other reason household missed refill",
   "forest_reasons", "reason_forest_other_specified", "reason_forest_other_specified", "reason_forest_other_specified", "Other forest reason specified"
 ) %>%
   mutate(
-    analysis_output = "table_descriptive_requested_text_response_presence.csv",
-    restricted_analysis_output = "table_descriptive_requested_text_response_counts_internal.csv"
+    analysis_output = "table_descriptive_text_response_presence.csv",
+    restricted_analysis_output = "table_descriptive_text_response_counts_internal.csv"
   )
 
 ################################################################################
 # Tables
 ################################################################################
 
-binary_summary <- requested_summarise_binary_vars(survey, binary_vars)
-multiselect_summary <- requested_summarise_multi_select_vars(survey, multi_select_vars)
-categorical_summary <- requested_summarise_categorical_vars(survey, categorical_vars)
-continuous_summary <- requested_summarise_continuous_vars(survey, continuous_vars)
-text_presence_summary <- requested_summarise_text_presence(survey, text_vars)
-text_response_counts_internal <- requested_summarise_text_response_counts(survey, text_vars)
+binary_summary <- generic_summarise_binary_vars(survey, binary_vars)
+multiselect_summary <- generic_summarise_multi_select_vars(survey, multi_select_vars)
+categorical_summary <- generic_summarise_categorical_vars(survey, categorical_vars)
+continuous_summary <- generic_summarise_continuous_vars(survey, continuous_vars)
+text_presence_summary <- generic_summarise_text_presence(survey, text_vars)
+text_response_counts_internal <- generic_summarise_text_response_counts(survey, text_vars)
 
 write_reviewed_csv(
   binary_summary,
-  "table_descriptive_requested_binary_outcomes.csv"
+  "table_descriptive_binary_outcomes.csv"
 )
 write_reviewed_csv(
   multiselect_summary,
-  "table_descriptive_requested_multiselect_outcomes.csv"
+  "table_descriptive_multiselect_outcomes.csv"
 )
 write_reviewed_csv(
   categorical_summary,
-  "table_descriptive_requested_categorical_outcomes.csv"
+  "table_descriptive_categorical_outcomes.csv"
 )
 write_reviewed_csv(
   continuous_summary,
-  "table_descriptive_requested_continuous_outcomes.csv"
+  "table_descriptive_continuous_outcomes.csv"
 )
 write_reviewed_csv(
   text_presence_summary,
-  "table_descriptive_requested_text_response_presence.csv"
+  "table_descriptive_text_response_presence.csv"
 )
 
 if (nrow(text_response_counts_internal) > 0) {
-  requested_write_internal_text_csv(
+  generic_write_internal_text_csv(
     text_response_counts_internal,
-    "table_descriptive_requested_text_response_counts_internal.csv",
+    "table_descriptive_text_response_counts_internal.csv",
     reason = "Free-text responses can contain sensitive or identifying details and should be reviewed internally before sharing."
   )
 }
 
 analysis_map <- bind_rows(
   binary_vars %>%
-    transmute(requested_variable, analysis_type = "binary_percent",
+    transmute(analysis_variable, analysis_type = "binary_percent",
               reviewed_output = analysis_output),
   multi_select_vars %>%
-    transmute(requested_variable, analysis_type = "multiselect_option_percent",
+    transmute(analysis_variable, analysis_type = "multiselect_option_percent",
               reviewed_output = analysis_output),
   categorical_vars %>%
-    transmute(requested_variable, analysis_type = "categorical_distribution",
+    transmute(analysis_variable, analysis_type = "categorical_distribution",
               reviewed_output = analysis_output),
   continuous_vars %>%
-    transmute(requested_variable, analysis_type = "continuous_summary",
+    transmute(analysis_variable, analysis_type = "continuous_summary",
               reviewed_output = analysis_output),
   text_vars %>%
-    transmute(requested_variable, analysis_type = "text_response_presence",
+    transmute(analysis_variable, analysis_type = "text_response_presence",
               reviewed_output = analysis_output),
   text_vars %>%
-    transmute(requested_variable, analysis_type = "restricted_text_response_counts",
+    transmute(analysis_variable, analysis_type = "restricted_text_response_counts",
               reviewed_output = restricted_analysis_output)
 ) %>%
   distinct()
 
 analysis_map_summary <- analysis_map %>%
-  group_by(requested_variable) %>%
+  group_by(analysis_variable) %>%
   summarise(
     analysis_types = paste(sort(unique(analysis_type)), collapse = "; "),
     reviewed_outputs = paste(sort(unique(reviewed_output)), collapse = "; "),
     .groups = "drop"
   )
 
-variable_coverage <- requested_variables %>%
+variable_coverage <- analysis_variables %>%
   mutate(
-    direct_variable_available = requested_variable %in% names(survey),
+    direct_variable_available = analysis_variable %in% names(survey),
     slash_column_count = map_int(
-      requested_variable,
+      analysis_variable,
       ~ sum(startsWith(names(survey), paste0(.x, "/")))
     ),
     availability_status = case_when(
@@ -1460,36 +1587,36 @@ variable_coverage <- requested_variables %>%
       TRUE ~ "missing_from_clean_final"
     )
   ) %>%
-  left_join(analysis_map_summary, by = "requested_variable") %>%
+  left_join(analysis_map_summary, by = "analysis_variable") %>%
   mutate(
     analysis_types = replace_na(analysis_types, ""),
     reviewed_outputs = replace_na(reviewed_outputs, ""),
     note = case_when(
-      str_detect(requested_variable, "_image") &
+      str_detect(analysis_variable, "_image") &
         availability_status == "missing_from_clean_final" ~
-        "Requested image field was not present in the clean_final household survey file inspected by this script.",
+        "Image field was not present in the clean_final household survey file inspected by this script.",
       analysis_types == "" & availability_status != "missing_from_clean_final" ~
         "Variable is available but not assigned to a summary table; review dictionary if this was unexpected.",
       TRUE ~ ""
     ),
-    generated_by = requested_descriptive_script_label
+    generated_by = generic_descriptive_script_label
   ) %>%
-  arrange(outcome_group, requested_variable)
+  arrange(outcome_group, analysis_variable)
 
 write_reviewed_csv(
   variable_coverage,
-  "table_descriptive_requested_variable_coverage.csv",
+  "table_descriptive_analysis_variable_coverage.csv",
   subfolder = "qa"
 )
 
 multiselect_option_coverage <- multiselect_summary %>%
-  distinct(outcome_group, outcome_name, outcome_label, requested_variable,
+  distinct(outcome_group, outcome_name, outcome_label, analysis_variable,
            source_variable, source_variable_used, option_code, option_label) %>%
   arrange(outcome_group, outcome_name, option_code)
 
 write_reviewed_csv(
   multiselect_option_coverage,
-  "table_descriptive_requested_multiselect_option_coverage.csv",
+  "table_descriptive_multiselect_option_coverage.csv",
   subfolder = "qa"
 )
 
@@ -1497,14 +1624,14 @@ write_reviewed_csv(
 # Figures
 ################################################################################
 
-requested_save_binary_figures(binary_summary)
-requested_save_multiselect_figures(multiselect_summary)
-requested_save_categorical_figures(categorical_summary)
-requested_save_continuous_figure(continuous_summary)
+generic_save_binary_figures(binary_summary)
+generic_save_multiselect_figures(multiselect_summary)
+generic_save_categorical_figures(categorical_summary)
+generic_save_continuous_figure(continuous_summary)
 
 
-requested_duplicate_notes <- tribble(
-  ~requested_variable, ~overlap_type, ~existing_output_or_section, ~note,
+generic_duplicate_notes <- tribble(
+  ~analysis_variable, ~overlap_type, ~existing_output_or_section, ~note,
   "buy_lpg_cost", "duplicate", "table_descriptive_lpg_purchase_cost.csv", "The imported requested-outcome summary also reports buy_lpg_cost as a generic continuous requested outcome; the topic-specific LPG purchase-cost table remains the preferred manuscript table.",
   "lpg_willingness_to_pay", "duplicate", "table_descriptive_lpg_wtp_summary.csv", "The imported requested-outcome summary also reports willingness to pay as a generic continuous outcome; the topic-specific WTP table includes positive-only and threshold summaries requested later.",
   "lpg_days_possible", "near_duplicate", "table_descriptive_lpg_duration_household_size.csv", "The imported requested-outcome summary reports overall days LPG lasted/could last; the existing topic-specific figure/table stratifies by household size.",
@@ -1516,12 +1643,12 @@ requested_duplicate_notes <- tribble(
   "stove_boil_drink/stove_boil_bathe/stove_reason_*", "near_duplicate", "table_descriptive_supplemental_binary_outcomes.csv; stove-monitor descriptive outputs", "Survey-reported stove-use purposes overlap with supplemental survey summaries and are distinct from Geocene monitor-measured stove-use outputs."
 )
 write_reviewed_csv(
-  requested_duplicate_notes,
-  "table_descriptive_requested_duplicate_notes.csv",
+  generic_duplicate_notes,
+  "table_descriptive_duplicate_notes.csv",
   subfolder = "qa"
 )
 
-message("Requested descriptive outcome tables and figures complete.")
+message("Generic descriptive outcome tables and figures complete.")
 
 write_reviewed_csv(
   analysis_population$duplicate_records,
@@ -2289,7 +2416,7 @@ if (nrow(food_specific_fuel_vars) > 0) {
 # Baseline summaries use the comparison arm only, because intervention households
 # had not yet received LPG. Midline and endline summaries include both arms.
 # Some households answered both gathered-wood and purchased-wood reason items;
-# the primary categorized reason below gives priority to code 1, then 2, then 66,
+# the primary categorized reason below gives priority to option 1, then 2, then 66,
 # and a companion table records discordant paired responses.
 if (all(c("gather_wood_reason", "buy_wood_reason") %in% names(survey))) {
   non_lpg_reason_levels <- c(
@@ -2813,15 +2940,25 @@ summarise_binary_percent <- function(df, labels, outcome_group) {
 }
 
 summarise_food_action_option <- function(option_code, option_label) {
+  if (!"food_cant_afford_2wk" %in% names(survey)) {
+    stop(
+      "food_cant_afford_2wk is required to denominator food coping actions.",
+      call. = FALSE
+    )
+  }
+
   selected <- food_multiselect_option(survey, "food_cant_afford_action", option_code)
   survey %>%
-    mutate(action_selected = selected) %>%
+    mutate(
+      food_shortage_yn = make_yn(food_cant_afford_2wk),
+      action_selected = selected
+    ) %>%
     add_all_arms_rows() %>%
     group_by(timepoint, study_arm_overall) %>%
     summarise(
       n_total = n(),
-      n_nonmissing = sum(!is.na(action_selected)),
-      n_yes = sum(action_selected == 1, na.rm = TRUE),
+      n_nonmissing = sum(food_shortage_yn == 1, na.rm = TRUE),
+      n_yes = sum(food_shortage_yn == 1 & action_selected == 1, na.rm = TRUE),
       percent = if_else(n_nonmissing > 0, 100 * n_yes / n_nonmissing, NA_real_),
       pct_all_households = if_else(n_total > 0, 100 * n_yes / n_total, NA_real_),
       .groups = "drop"
@@ -2833,7 +2970,7 @@ summarise_food_action_option <- function(option_code, option_label) {
       source_variable = paste0("food_cant_afford_action/", option_code),
       unit = "percent",
       population = "all_deduplicated_household_timepoint_records",
-      denominator_type = "nonmissing multi-select option column",
+      denominator_type = "households reporting food shortage in prior 2 weeks",
       percent = round(percent, 1),
       pct_all_households = round(pct_all_households, 1)
     ) %>%
@@ -3189,15 +3326,25 @@ fuel_frequency_labels <- tibble(
   filter(source_variable %in% names(survey))
 
 summarise_fuel_action_option <- function(option_code, option_label) {
+  if (!"fuel_cant_afford_2wk" %in% names(survey)) {
+    stop(
+      "fuel_cant_afford_2wk is required to denominator fuel coping actions.",
+      call. = FALSE
+    )
+  }
+
   selected <- food_multiselect_option(survey, "fuel_cant_afford_action", option_code)
   survey %>%
-    mutate(action_selected = selected) %>%
+    mutate(
+      fuel_shortage_yn = make_yn(fuel_cant_afford_2wk),
+      action_selected = selected
+    ) %>%
     add_all_arms_rows() %>%
     group_by(timepoint, study_arm_overall) %>%
     summarise(
       n_total = n(),
-      n_nonmissing = sum(!is.na(action_selected)),
-      n_yes = sum(action_selected == 1, na.rm = TRUE),
+      n_nonmissing = sum(fuel_shortage_yn == 1, na.rm = TRUE),
+      n_yes = sum(fuel_shortage_yn == 1 & action_selected == 1, na.rm = TRUE),
       percent = if_else(n_nonmissing > 0, 100 * n_yes / n_nonmissing, NA_real_),
       pct_all_households = if_else(n_total > 0, 100 * n_yes / n_total, NA_real_),
       .groups = "drop"
@@ -3209,7 +3356,7 @@ summarise_fuel_action_option <- function(option_code, option_label) {
       source_variable = paste0("fuel_cant_afford_action/", option_code),
       unit = "percent",
       population = "all_deduplicated_household_timepoint_records",
-      denominator_type = "nonmissing multi-select option column",
+      denominator_type = "households reporting fuel shortage in prior 2 weeks",
       percent = round(percent, 1),
       pct_all_households = round(pct_all_households, 1)
     ) %>%
@@ -4764,12 +4911,12 @@ write_plot_if_data(
 ################################################################################
 
 coverage <- tribble(
-  ~item, ~requested_output, ~table_file, ~figure_file, ~status, ~note,
+  ~item, ~output_description, ~table_file, ~figure_file, ~status, ~note,
   1, "Types of cooking fuel used in past 30 days by arm/timepoint", "table_descriptive_fuel_use_past_month.csv", "fig_descriptive_fuel_use_past_month.png", "complete", "Uses clean_final fuel_30 variables plus reviewed aliases for any LPG/wood/CRH.",
   2, "Usable duration of 12 kg LPG cylinder by household size", "table_descriptive_lpg_duration_household_size.csv", "fig_descriptive_lpg_duration_household_size.png", "complete", "Uses hh_size and lpg_days_possible; QA table flags zero and >120 day values.",
   3, "Livelihood training and use of skills", "table_descriptive_livelihood_training_skills.csv", "fig_descriptive_livelihood_training_skills.png", "complete_with_label_limitations", "Training/skill barrier option text was not preserved in clean_final; code outputs option codes and broad labels.",
   4, "Strategies used to cope with shortage of food", "table_descriptive_food_shortage_coping.csv", "fig_descriptive_food_shortage_coping.png", "complete", "Coping labels copied from 3_data_cleaning/1.5_define_vector_columns.R.",
-  5, "Strategies used to cope with shortage of fuel", "table_descriptive_fuel_shortage_coping.csv", "fig_descriptive_fuel_shortage_coping.png", "complete", "Coping labels copied from 3_data_cleaning/1.5_define_vector_columns.R; code 1 note retained.",
+  5, "Strategies used to cope with shortage of fuel", "table_descriptive_fuel_shortage_coping.csv", "fig_descriptive_fuel_shortage_coping.png", "complete", "Coping labels copied from 3_data_cleaning/1.5_define_vector_columns.R; option-1 wording note retained.",
   6, "Food insecurity", "table_descriptive_food_insecurity_scores.csv", "fig_descriptive_food_insecurity_scores.png", "complete", "Recalculates FCS from weekly food-frequency variables and categorizes poor/borderline/acceptable.",
   7, "Asthma and severe asthma", "table_descriptive_child_asthma_prevalence.csv", "fig_descriptive_child_asthma_prevalence.png", "complete", "Uses reviewed child wheeze proxy and severe asthma proxy from wheeze plus disturbed speech, with NA-preserving and skip-as-no severe-asthma rows.",
   8, "Time collecting fuel", "table_descriptive_fuel_collection_time.csv", "fig_descriptive_fuel_collection_time.png", "complete", "Summarizes walking/waiting time variables in hours; values <0.01 treated as missing as in old script.",
@@ -4786,7 +4933,7 @@ coverage <- tribble(
 )
 write_reviewed_csv(
   coverage,
-  "table_descriptive_requested_output_coverage.csv",
+  "table_descriptive_output_coverage.csv",
   subfolder = "qa"
 )
 
@@ -5527,6 +5674,16 @@ fuel_30_vars <- c(
   "fuel_30_other"
 )
 
+fuel_30_line_vars <- c(
+  "fuel_30_receive_lpg",
+  "fuel_30_gather_scraps",
+  "fuel_30_buy_wood",
+  "fuel_30_buy_lpg",
+  "fuel_30_buy_crh",
+  "fuel_30_receive_crh",
+  "fuel_30_other"
+)
+
 fuel_labels <- c(
   fuel_ever_lpg = "LPG",
   fuel_ever_wood = "Wood",
@@ -5553,11 +5710,13 @@ fuel_labels <- c(
 fuel_related_vars <- c(
   fuel_ever_vars,
   fuel_30_vars,
+  fuel_30_line_vars,
   "lpg_runout",
   "lpg_runout_days",
   "fuel_use_non_lpg",
   "fuel_use_non_lpg_freq_cook",
   "plastic_cook",
+  "fuel_cant_afford_2wk",
   "fuel_cant_afford"
 )
 
@@ -5624,45 +5783,230 @@ fuel_summary <- bind_rows(
 
 write_reviewed_csv(fuel_summary, "table_descriptive_fuel_use_summary.csv")
 
+summarise_fuel_use_among_fuel_shortage <- function(df, fuel_vars, population_label) {
+  if (!"fuel_cant_afford_2wk" %in% names(df)) {
+    warning(
+      "fuel_cant_afford_2wk is missing; skipping fuel-use table among fuel-shortage households.",
+      call. = FALSE
+    )
+    return(tibble())
+  }
+
+  fuel_vars_available <- fuel_vars[fuel_vars %in% names(df)]
+  if (length(fuel_vars_available) == 0) {
+    return(tibble())
+  }
+
+  fuel_shortage_records <- df %>%
+    mutate(fuel_shortage_2wk_yn = make_yn(fuel_cant_afford_2wk)) %>%
+    filter(fuel_shortage_2wk_yn == 1)
+
+  if (nrow(fuel_shortage_records) == 0) {
+    return(tibble())
+  }
+
+  shortage_totals <- fuel_shortage_records %>%
+    select(any_of(c("fcn_id", "timepoint", "study_arm_overall"))) %>%
+    add_all_arms_rows() %>%
+    count(timepoint, study_arm_overall, name = "n_fuel_shortage_households")
+
+  fuel_shortage_records %>%
+    select(any_of(c("fcn_id", "timepoint", "study_arm_overall", fuel_vars_available))) %>%
+    add_all_arms_rows() %>%
+    pivot_longer(
+      cols = all_of(fuel_vars_available),
+      names_to = "fuel_variable",
+      values_to = "used_raw",
+      values_transform = list(used_raw = as.character)
+    ) %>%
+    mutate(
+      used = make_yn(used_raw),
+      fuel_type = recode(fuel_variable, !!!fuel_labels, .default = fuel_variable),
+      population = population_label,
+      recall_period = "past_30_days",
+      shortage_variable = "fuel_cant_afford_2wk",
+      shortage_condition = "make_yn(fuel_cant_afford_2wk) == 1",
+      denominator_type = "households reporting fuel shortage in prior 2 weeks with nonmissing fuel-use item"
+    ) %>%
+    group_by(population, recall_period, shortage_variable, shortage_condition,
+             denominator_type, timepoint, study_arm_overall, fuel_variable,
+             fuel_type) %>%
+    summarise(
+      n_nonmissing = sum(!is.na(used)),
+      n_used = sum(used == 1, na.rm = TRUE),
+      pct_used = if_else(n_nonmissing > 0, 100 * n_used / n_nonmissing, NA_real_),
+      .groups = "drop"
+    ) %>%
+    left_join(shortage_totals, by = c("timepoint", "study_arm_overall")) %>%
+    mutate(
+      pct_used_all_fuel_shortage_households = if_else(
+        n_fuel_shortage_households > 0,
+        100 * n_used / n_fuel_shortage_households,
+        NA_real_
+      )
+    ) %>%
+    select(
+      population, recall_period, shortage_variable, shortage_condition,
+      denominator_type, timepoint, study_arm_overall, fuel_variable, fuel_type,
+      n_fuel_shortage_households, n_nonmissing, n_used, pct_used,
+      pct_used_all_fuel_shortage_households
+    ) %>%
+    arrange(population, recall_period, fuel_type, timepoint, study_arm_overall)
+}
+
+fuel_30_among_fuel_shortage <- summarise_fuel_use_among_fuel_shortage(
+  survey_all_dedup,
+  fuel_30_vars,
+  "all_deduplicated_records_reporting_fuel_shortage_2wk"
+)
+
+write_reviewed_csv(
+  fuel_30_among_fuel_shortage,
+  "table_descriptive_fuel_use_past_30_days_among_fuel_shortage.csv"
+)
+
 ################################################################################
 # Fuel-use figure for complete three-survey households
 ################################################################################
 
-fuel_plot_data <- fuel_30_complete %>%
-  filter(!is.na(pct_used)) %>%
-  mutate(
-    fuel_type = fct_reorder(fuel_type, pct_used, .fun = max, .desc = TRUE)
+fuel_line_var_table <- tibble(
+  fuel_variable = fuel_30_line_vars,
+  fuel = factor(
+    c(
+      "LPG, received",
+      "Scraps, gathered",
+      "Wood, purchased",
+      "LPG, purchased",
+      "Compressed rice husks, purchased",
+      "Compressed rice husks, received",
+      "Plastic, collected"
+    ),
+    levels = c(
+      "LPG, received",
+      "Scraps, gathered",
+      "Wood, purchased",
+      "LPG, purchased",
+      "Compressed rice husks, purchased",
+      "Compressed rice husks, received",
+      "Plastic, collected"
+    )
+  ),
+  fuel_method = factor(
+    c("received", "collected", "purchased", "purchased", "purchased", "received", "collected"),
+    levels = c("purchased", "received", "collected")
+  ),
+  fuel_type = factor(
+    c("LPG", "Wood", "Wood", "LPG", "Compressed rice husks", "Compressed rice husks", "Plastic"),
+    levels = c("LPG", "Wood", "Compressed rice husks", "Plastic")
   )
+)
+
+missing_fuel_line_vars <- setdiff(fuel_line_var_table$fuel_variable, names(survey_complete))
+if (length(missing_fuel_line_vars) > 0) {
+  stop(
+    "Missing fuel variables needed for fig_descriptive_fuel_use_summary.png: ",
+    paste(missing_fuel_line_vars, collapse = ", "),
+    call. = FALSE
+  )
+}
+
+fuel_plot_data <- survey_complete %>%
+  select(fcn_id, study_arm_overall, timepoint, all_of(fuel_line_var_table$fuel_variable)) %>%
+  pivot_longer(
+    cols = all_of(fuel_line_var_table$fuel_variable),
+    names_to = "fuel_variable",
+    values_to = "used_raw",
+    values_transform = list(used_raw = as.character)
+  ) %>%
+  mutate(
+    used = make_yn(used_raw),
+    used = if_else(is.na(used), 0L, used)
+  ) %>%
+  left_join(fuel_line_var_table, by = "fuel_variable") %>%
+  filter(
+    !is.na(fuel),
+    study_arm_overall %in% arm_levels,
+    timepoint %in% timepoint_levels
+  ) %>%
+  group_by(fuel_variable, fuel, fuel_method, fuel_type, study_arm_overall, timepoint) %>%
+  summarise(
+    n_households = n(),
+    n_used = sum(used == 1, na.rm = TRUE),
+    proportion = n_used / n_households,
+    se = sqrt(proportion * (1 - proportion) / n_households),
+    ci_lower = pmax(0, proportion - 1.96 * se),
+    ci_upper = pmin(1, proportion + 1.96 * se),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    study_arm_label = factor(
+      as.character(study_arm_overall),
+      levels = arm_levels,
+      labels = c("Comparison group", "Intervention group")
+    ),
+    timepoint = factor(
+      as.character(timepoint),
+      levels = timepoint_levels,
+      labels = timepoint_levels,
+      ordered = TRUE
+    ),
+    denominator_note = paste(
+      "Complete three-survey households; missing fuel indicators are treated",
+      "as no-use to match the legacy RF105A Figure 2 calculation. The",
+      "fuel_30_other variable is labelled as Plastic, collected following the",
+      "legacy manuscript code."
+    )
+  ) %>%
+  arrange(study_arm_label, fuel_type, fuel_method, fuel, timepoint)
+
+write_reviewed_csv(
+  fuel_plot_data,
+  "table_descriptive_fuel_use_line_plot_data.csv"
+)
 
 fig_fuel_30 <- ggplot(
   fuel_plot_data,
-  aes(x = timepoint, y = pct_used, fill = study_arm_overall)
+  aes(
+    x = timepoint,
+    y = proportion,
+    color = fuel_type,
+    linetype = fuel_method,
+    group = fuel
+  )
 ) +
-  geom_col(position = position_dodge(width = 0.75), width = 0.68) +
-  facet_wrap(~ fuel_type, ncol = 5) +
-  scale_y_continuous(
-    limits = c(0, 100),
-    breaks = seq(0, 100, 25),
-    labels = label_number(suffix = "%")
+  geom_point(size = 1.8) +
+  geom_line(linewidth = 0.7) +
+  geom_errorbar(
+    aes(ymin = ci_lower, ymax = ci_upper),
+    width = 0.15,
+    linewidth = 0.4
   ) +
-  scale_fill_manual(
-    values = c(comparison = "#4E79A7", intervention = "#F28E2B"),
-    na.translate = FALSE
+  facet_wrap(~ study_arm_label) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    breaks = seq(0, 1, by = 0.1),
+    labels = scales::percent_format(accuracy = 1)
   ) +
   labs(
-    x = NULL,
-    y = "Households reporting fuel use in past 30 days",
-    fill = "Study arm"
+    title = "Types of Cooking Fuel Used in the Past 30 Days,\n By Study Arm and Timepoint",
+    x = "Timepoint",
+    y = "Proportion of Households (%)",
+    color = NULL,
+    linetype = NULL
   ) +
   theme_bw(base_size = 11) +
   theme(
     legend.position = "bottom",
-    panel.grid.minor = element_blank(),
-    axis.text.x = element_text(angle = 30, hjust = 1)
+    legend.box = "vertical",
+    panel.grid.minor = element_blank()
+  ) +
+  guides(
+    color = guide_legend(nrow = 1),
+    linetype = guide_legend(nrow = 1)
   )
 
 save_reviewed_plot(fig_fuel_30, "fig_descriptive_fuel_use_summary.png",
-                   width = 10, height = 6)
+                   width = 6, height = 6)
 
 ################################################################################
 # LPG outage summaries
@@ -7981,6 +8325,7 @@ on.exit({
 #
 # Outputs:
 #   Figures in 6_figures/RF105_reviewed_YYYYMMDD/:
+#     fig_descriptive_stove_use_composite_panel.png
 #     fig_descriptive_stove_exclusive_midline.tiff
 #     fig_descriptive_stove_minutes_midline.tiff
 #     fig_descriptive_respondent_time_changes.png
@@ -8164,6 +8509,7 @@ change_colors <- c(more = "#2F8F5B", less = "#B6463A")
 
 manuscript_figure_targets <- tibble(
   figure_description = c(
+    "Composite stove-use and energy-consumption panel",
     "Exclusive LPG stove use by month since receipt (2020 data collection)",
     "Daily stove-use minutes by fuel and month since receipt (2020 data collection)",
     "Child time-use changes",
@@ -8175,6 +8521,7 @@ manuscript_figure_targets <- tibble(
     "LPG willingness to pay"
   ),
   reviewed_figure = c(
+    "fig_descriptive_stove_use_composite_panel.png",
     "fig_descriptive_stove_exclusive_midline.tiff",
     "fig_descriptive_stove_minutes_midline.tiff",
     "fig_descriptive_child_time_changes.png",
@@ -8210,6 +8557,619 @@ stove_daily <- readr::read_csv(stove_daily_file, show_col_types = FALSE)
 
 pm_indoor <- readRDS(file_pm25_indoor)
 
+################################################################################
+# Composite stove-use and energy-consumption panel like RF105A fig3/fig4
+################################################################################
+
+if (!requireNamespace("gridExtra", quietly = TRUE)) {
+  stop(
+    "Install gridExtra before generating the stove-use composite panel.",
+    call. = FALSE
+  )
+}
+
+align_ggplot_widths <- function(...) {
+  grobs <- lapply(list(...), ggplotGrob)
+  max_width <- do.call(
+    grid::unit.pmax,
+    lapply(grobs, function(grob) grob$widths[2:5])
+  )
+  lapply(grobs, function(grob) {
+    grob$widths[2:5] <- as.list(max_width)
+    grob
+  })
+}
+
+stove_composite_data <- stove_daily %>%
+  clean_timepoint_arm() %>%
+  mutate(
+    date = as.Date(date),
+    collection_year = lubridate::year(date),
+    days_after_first_receiving = as_number(days_after_first_receiving),
+    weeks_after_first_receiving = floor(days_after_first_receiving / 7),
+    months_after_first_receiving_display = days_after_first_receiving / 30,
+    period30_after_first_receiving = floor(days_after_first_receiving / 30),
+    period30_midpoint_days = period30_after_first_receiving * 30 + 15,
+    period30_midpoint_weeks = period30_midpoint_days / 7,
+    period30_midpoint_months = period30_midpoint_days / 30,
+    lpg_available_for_analysis = as.logical(lpg_available_for_analysis),
+    observed_stove_use_day = as.logical(observed_stove_use_day),
+    valid_exclusive_use_denominator =
+      as.logical(valid_exclusive_use_denominator),
+    lpg_recorded = as.logical(lpg_recorded),
+    biomass_recorded = as.logical(biomass_recorded),
+    exclusive_lpg_recalc = as.logical(exclusive_lpg_recalc),
+    mixed_use_recalc = as.logical(mixed_use_recalc),
+    stove_on_min_sum_lpg_zero = as_number(stove_on_min_sum_lpg_zero),
+    stove_on_min_sum_biomass_zero =
+      as_number(stove_on_min_sum_biomass_zero)
+  ) %>%
+  filter(
+    lpg_available_for_analysis,
+    observed_stove_use_day,
+    days_after_first_receiving >= 0,
+    !is.na(days_after_first_receiving)
+  )
+
+if (nrow(stove_composite_data) > 0) {
+  stove_composite_month_breaks <- seq(
+    0,
+    max(
+      6,
+      ceiling(max(stove_composite_data$months_after_first_receiving_display,
+                  na.rm = TRUE) / 6) * 6
+    ),
+    by = 6
+  )
+  stove_composite_colors <- c(Biomass = "#D55E00", LPG = "#0072B2")
+  stove_energy_colors <- c(
+    biomass = "#D55E00",
+    lpg = "#0072B2",
+    `mixed use` = "#6A51A3"
+  )
+  stove_composite_x_label <-
+    "Months after first receiving LPG through free distribution program"
+
+  make_stove_period_summary <- function(df, period_var, period_type) {
+    df %>%
+      group_by(period_value = .data[[period_var]]) %>%
+      summarise(
+        collection_years = collapse_collection_years(collection_year),
+        n_household_days = n(),
+        n_households = n_distinct(fcn_id),
+        n_lpg_stoves_monitored = sum(lpg_recorded, na.rm = TRUE),
+        n_biomass_stoves_monitored = sum(biomass_recorded, na.rm = TRUE),
+        mean_lpg_minutes_per_day =
+          mean(stove_on_min_sum_lpg_zero, na.rm = TRUE),
+        mean_biomass_minutes_per_day =
+          mean(stove_on_min_sum_biomass_zero, na.rm = TRUE),
+        n_days_exclusive_denominator =
+          sum(valid_exclusive_use_denominator, na.rm = TRUE),
+        n_exclusive_lpg_days = sum(exclusive_lpg_recalc, na.rm = TRUE),
+        pct_exclusive_lpg_days = if_else(
+          n_days_exclusive_denominator > 0,
+          100 * n_exclusive_lpg_days / n_days_exclusive_denominator,
+          NA_real_
+        ),
+        .groups = "drop"
+      ) %>%
+      mutate(period_type = period_type, .before = 1) %>%
+      arrange(period_value)
+  }
+
+  make_stove_monitored_plot_data <- function(df, period_var) {
+    df %>%
+      transmute(
+        period_value = .data[[period_var]],
+        Biomass = as.integer(biomass_recorded),
+        LPG = as.integer(lpg_recorded)
+      ) %>%
+      pivot_longer(
+        cols = c(Biomass, LPG),
+        names_to = "stove",
+        values_to = "stove_count"
+      ) %>%
+      group_by(period_value, stove) %>%
+      summarise(
+        number_stoves_monitored = sum(stove_count, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      mutate(stove = factor(stove, levels = c("Biomass", "LPG")))
+  }
+
+  make_stove_minutes_plot_data <- function(df, period_var) {
+    df %>%
+      group_by(period_value = .data[[period_var]]) %>%
+      summarise(
+        n_household_days = n(),
+        Biomass = mean(stove_on_min_sum_biomass_zero, na.rm = TRUE),
+        LPG = mean(stove_on_min_sum_lpg_zero, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      pivot_longer(
+        cols = c(Biomass, LPG),
+        names_to = "stove",
+        values_to = "average_minutes_of_use"
+      ) %>%
+      mutate(stove = factor(stove, levels = c("Biomass", "LPG")))
+  }
+
+  stove_use_composite_day_summary <- make_stove_period_summary(
+    stove_composite_data,
+    "days_after_first_receiving",
+    "days_after_first_receiving"
+  )
+  stove_use_composite_week_summary <- make_stove_period_summary(
+    stove_composite_data,
+    "weeks_after_first_receiving",
+    "weeks_after_first_receiving"
+  )
+
+  stove_monitored_day_plot_data <- make_stove_monitored_plot_data(
+    stove_composite_data,
+    "days_after_first_receiving"
+  ) %>%
+    mutate(months_after_first_receiving_plot = period_value / 30)
+  stove_monitored_week_plot_data <- make_stove_monitored_plot_data(
+    stove_composite_data,
+    "weeks_after_first_receiving"
+  ) %>%
+    mutate(months_after_first_receiving_plot = period_value * 7 / 30)
+  stove_minutes_day_plot_data <- make_stove_minutes_plot_data(
+    stove_composite_data,
+    "days_after_first_receiving"
+  ) %>%
+    mutate(months_after_first_receiving_plot = period_value / 30)
+  stove_minutes_week_plot_data <- make_stove_minutes_plot_data(
+    stove_composite_data,
+    "weeks_after_first_receiving"
+  ) %>%
+    mutate(months_after_first_receiving_plot = period_value * 7 / 30)
+
+  stove_exclusive_household_day_plot_data <- stove_composite_data %>%
+    filter(
+      valid_exclusive_use_denominator,
+      !is.na(exclusive_lpg_recalc),
+      !is.na(period30_after_first_receiving)
+    ) %>%
+    transmute(
+      days_after_first_receiving,
+      weeks_after_first_receiving,
+      months_after_first_receiving_display,
+      period30_after_first_receiving,
+      period30_midpoint_days,
+      period30_midpoint_weeks,
+      period30_midpoint_months,
+      exclusive_lpg_day = as.integer(exclusive_lpg_recalc),
+      percent_exclusive_lpg_day = 100 * exclusive_lpg_day
+    )
+
+  stove_exclusive_30day_summary <- stove_composite_data %>%
+    filter(
+      valid_exclusive_use_denominator,
+      !is.na(exclusive_lpg_recalc),
+      !is.na(period30_after_first_receiving)
+    ) %>%
+    group_by(
+      period30_after_first_receiving,
+      period30_midpoint_days,
+      period30_midpoint_weeks,
+      period30_midpoint_months
+    ) %>%
+    summarise(
+      n_daily_records = n(),
+      n_households = n_distinct(fcn_id),
+      n_exclusive_lpg_days = sum(exclusive_lpg_recalc, na.rm = TRUE),
+      percent_exclusive_lpg_days =
+        100 * n_exclusive_lpg_days / n_daily_records,
+      .groups = "drop"
+    ) %>%
+    add_prop_ci("n_exclusive_lpg_days", "n_daily_records") %>%
+    arrange(period30_after_first_receiving)
+
+  write_reviewed_csv(
+    stove_use_composite_day_summary,
+    "table_descriptive_stove_use_composite_day_summary.csv"
+  )
+  write_reviewed_csv(
+    stove_use_composite_week_summary,
+    "table_descriptive_stove_use_composite_week_summary.csv"
+  )
+  write_reviewed_csv(
+    stove_exclusive_30day_summary,
+    "table_descriptive_stove_use_composite_30day_exclusive_summary.csv"
+  )
+
+  # Constants carried forward from the prior RF105 energy figure calculation.
+  lpg_efficiency <- 0.67
+  biomass_efficiency <- 0.128
+  conv_mj <- 3.6
+  power_wood <- 6.824 / conv_mj
+  power_lpg <- 3.4 / conv_mj
+
+  stove_energy_method_plot_data <- bind_rows(
+    stove_composite_data %>%
+      mutate(
+        biomass_energy_mj =
+          (stove_on_min_sum_biomass_zero / 60) * power_wood,
+        lpg_energy_mj = (stove_on_min_sum_lpg_zero / 60) * power_lpg,
+        mixed_use_energy_mj = if_else(
+          mixed_use_recalc,
+          biomass_energy_mj + lpg_energy_mj,
+          NA_real_
+        )
+      ) %>%
+      transmute(
+        energy_metric = "Daily energy consumed",
+        biomass = biomass_energy_mj,
+        lpg = lpg_energy_mj,
+        `mixed use` = mixed_use_energy_mj
+      ),
+    stove_composite_data %>%
+      mutate(
+        biomass_energy_mj =
+          (stove_on_min_sum_biomass_zero / 60) *
+          power_wood * biomass_efficiency,
+        lpg_energy_mj =
+          (stove_on_min_sum_lpg_zero / 60) * power_lpg * lpg_efficiency,
+        mixed_use_energy_mj = if_else(
+          mixed_use_recalc,
+          biomass_energy_mj + lpg_energy_mj,
+          NA_real_
+        )
+      ) %>%
+      transmute(
+        energy_metric = "Daily energy reaching the pot",
+        biomass = biomass_energy_mj,
+        lpg = lpg_energy_mj,
+        `mixed use` = mixed_use_energy_mj
+      )
+  ) %>%
+    pivot_longer(
+      cols = c(biomass, lpg, `mixed use`),
+      names_to = "cooking_method",
+      values_to = "energy_mj"
+    ) %>%
+    filter(!is.na(energy_mj), energy_mj > 0) %>%
+    mutate(
+      energy_metric = factor(
+        energy_metric,
+        levels = c("Daily energy consumed", "Daily energy reaching the pot")
+      ),
+      cooking_method = factor(
+        cooking_method,
+        levels = c("biomass", "lpg", "mixed use")
+      )
+    )
+
+  write_reviewed_csv(
+    stove_energy_method_plot_data %>%
+      group_by(energy_metric, cooking_method) %>%
+      summarise(
+        n_household_days = n(),
+        mean_energy_mj = mean(energy_mj, na.rm = TRUE),
+        sd_energy_mj = if_else(n() > 1, sd(energy_mj, na.rm = TRUE), NA_real_),
+        se_energy_mj = if_else(
+          n() > 1,
+          sd_energy_mj / sqrt(n_household_days),
+          NA_real_
+        ),
+        ci_lower_energy_mj = if_else(
+          n_household_days > 1,
+          mean_energy_mj -
+            qt(0.975, df = n_household_days - 1) * se_energy_mj,
+          NA_real_
+        ),
+        ci_upper_energy_mj = if_else(
+          n_household_days > 1,
+          mean_energy_mj +
+            qt(0.975, df = n_household_days - 1) * se_energy_mj,
+          NA_real_
+        ),
+        median_energy_mj = median(energy_mj, na.rm = TRUE),
+        p25_energy_mj = quantile(
+          energy_mj, 0.25, na.rm = TRUE, names = FALSE
+        ),
+        p75_energy_mj = quantile(
+          energy_mj, 0.75, na.rm = TRUE, names = FALSE
+        ),
+        min_energy_mj = min(energy_mj, na.rm = TRUE),
+        max_energy_mj = max(energy_mj, na.rm = TRUE),
+        .groups = "drop"
+      ),
+    "table_descriptive_stove_energy_by_cooking_method_summary.csv"
+  )
+
+  make_stove_monitored_plot <- function(plot_data, x_breaks, x_label,
+                                        show_legend = TRUE) {
+    y_minor_breaks <- seq(
+      0,
+      max(
+        5,
+        ceiling(max(plot_data$number_stoves_monitored, na.rm = TRUE) / 5) * 5
+      ),
+      by = 5
+    )
+
+    ggplot(
+      plot_data,
+      aes(
+        x = months_after_first_receiving_plot,
+        y = number_stoves_monitored,
+        color = stove
+      )
+    ) +
+      geom_point(alpha = 0.55, size = 1.2) +
+      scale_x_continuous(breaks = x_breaks, name = x_label) +
+      scale_y_continuous(minor_breaks = y_minor_breaks) +
+      scale_color_manual(values = stove_composite_colors) +
+      labs(
+        x = x_label,
+        y = "Number of\nstoves monitored",
+        color = "Fuel type"
+      ) +
+      theme_bw(base_size = 9) +
+      theme(
+        legend.position = if (isTRUE(show_legend)) "top" else "none",
+        panel.grid.minor.y = element_line(color = "grey90", linewidth = 0.25),
+        panel.grid.minor.x = element_blank(),
+        plot.margin = margin(2, 5.5, 2, 5.5)
+      )
+  }
+
+  make_stove_minutes_plot <- function(plot_data, x_breaks, x_label) {
+    y_minor_breaks <- seq(
+      0,
+      max(
+        50,
+        ceiling(max(plot_data$average_minutes_of_use, na.rm = TRUE) / 50) * 50
+      ),
+      by = 50
+    )
+
+    ggplot(
+      plot_data,
+      aes(
+        x = months_after_first_receiving_plot,
+        y = average_minutes_of_use,
+        color = stove
+      )
+    ) +
+      geom_point(alpha = 0.55, size = 1.2) +
+      scale_x_continuous(breaks = x_breaks, name = x_label) +
+      scale_y_continuous(minor_breaks = y_minor_breaks) +
+      scale_color_manual(values = stove_composite_colors) +
+      labs(
+        x = x_label,
+        y = "Av. minutes\nstove use per day",
+        color = "Fuel type"
+      ) +
+      theme_bw(base_size = 9) +
+      theme(
+        legend.position = "none",
+        panel.grid.minor.y = element_line(color = "grey90", linewidth = 0.25),
+        panel.grid.minor.x = element_blank(),
+        plot.margin = margin(2, 5.5, 2, 5.5)
+      )
+  }
+
+  make_stove_exclusive_plot <- function(dot_data, summary_data, x_breaks,
+                                        x_label) {
+    ggplot() +
+      geom_jitter(
+        data = dot_data,
+        aes(
+          x = months_after_first_receiving_display,
+          y = percent_exclusive_lpg_day
+        ),
+        width = 0.01,
+        height = 0,
+        alpha = 0.22,
+        size = 0.55,
+        color = "#0072B2"
+      ) +
+      geom_errorbar(
+        data = summary_data,
+        aes(
+          x = period30_midpoint_months,
+          ymin = ci_lower,
+          ymax = ci_upper
+        ),
+        width = 0.15,
+        color = "black"
+      ) +
+      geom_point(
+        data = summary_data,
+        aes(
+          x = period30_midpoint_months,
+          y = percent_exclusive_lpg_days
+        ),
+        shape = 17,
+        size = 2.2,
+        color = "black"
+      ) +
+      scale_x_continuous(breaks = x_breaks, name = x_label) +
+      scale_y_continuous(
+        labels = scales::label_number(suffix = "%"),
+        limits = c(0, 100)
+      ) +
+      labs(
+        x = x_label,
+        y = "Percent of time household\ncooked exclusively with LPG"
+      ) +
+      theme_bw(base_size = 9) +
+      theme(
+        legend.position = "none",
+        panel.grid.minor = element_blank(),
+        plot.margin = margin(2, 5.5, 2, 5.5)
+      )
+  }
+
+  fig_stove_monitored_day <- make_stove_monitored_plot(
+    stove_monitored_day_plot_data,
+    stove_composite_month_breaks,
+    NULL,
+    show_legend = TRUE
+  )
+  fig_stove_minutes_day <- make_stove_minutes_plot(
+    stove_minutes_day_plot_data,
+    stove_composite_month_breaks,
+    NULL
+  )
+  fig_stove_exclusive_day <- make_stove_exclusive_plot(
+    stove_exclusive_household_day_plot_data,
+    stove_exclusive_30day_summary,
+    stove_composite_month_breaks,
+    stove_composite_x_label
+  )
+
+  fig_stove_monitored_week <- make_stove_monitored_plot(
+    stove_monitored_week_plot_data,
+    stove_composite_month_breaks,
+    NULL,
+    show_legend = TRUE
+  )
+  fig_stove_minutes_week <- make_stove_minutes_plot(
+    stove_minutes_week_plot_data,
+    stove_composite_month_breaks,
+    NULL
+  )
+  fig_stove_exclusive_week <- make_stove_exclusive_plot(
+    stove_exclusive_household_day_plot_data,
+    stove_exclusive_30day_summary,
+    stove_composite_month_breaks,
+    stove_composite_x_label
+  )
+
+  fig_energy_consumed_method <- ggplot(
+    stove_energy_method_plot_data %>%
+      filter(energy_metric == "Daily energy consumed"),
+    aes(x = cooking_method, y = energy_mj, color = cooking_method)
+  ) +
+    geom_boxplot(alpha = 0.5, outlier.alpha = 0.45) +
+    scale_color_manual(values = stove_energy_colors, drop = FALSE) +
+    scale_y_continuous(
+      breaks = seq(0, 20, by = 5),
+      minor_breaks = seq(0, 20, by = 1)
+    ) +
+    coord_cartesian(ylim = c(0, 20)) +
+    labs(
+      x = "cooking method",
+      y = "Daily energy consumed (MJ/hh/day)"
+    ) +
+    theme_bw(base_size = 9) +
+    theme(
+      legend.position = "none",
+      panel.grid.minor.y = element_line(color = "grey90", linewidth = 0.25),
+      panel.grid.minor.x = element_blank(),
+      plot.margin = margin(2, 5.5, 2, 5.5)
+    )
+
+  fig_energy_pot_method <- ggplot(
+    stove_energy_method_plot_data %>%
+      filter(energy_metric == "Daily energy reaching the pot"),
+    aes(x = cooking_method, y = energy_mj, color = cooking_method)
+  ) +
+    geom_boxplot(alpha = 0.5, outlier.alpha = 0.45) +
+    scale_color_manual(values = stove_energy_colors, drop = FALSE) +
+    scale_y_continuous(
+      breaks = seq(0, 20, by = 5),
+      minor_breaks = seq(0, 20, by = 1)
+    ) +
+    coord_cartesian(ylim = c(0, 20)) +
+    labs(
+      x = "cooking method",
+      y = "Daily energy that reached the pot (MJ/hh/day)"
+    ) +
+    theme_bw(base_size = 9) +
+    theme(
+      legend.position = "none",
+      panel.grid.minor.y = element_line(color = "grey90", linewidth = 0.25),
+      panel.grid.minor.x = element_blank(),
+      plot.margin = margin(2, 5.5, 2, 5.5)
+    )
+
+  make_stove_use_panel <- function(monitored_plot, minutes_plot, exclusive_plot) {
+    gridExtra::arrangeGrob(
+      grobs = align_ggplot_widths(
+        monitored_plot,
+        minutes_plot,
+        exclusive_plot
+      ),
+      ncol = 1,
+      heights = c(1.3, 1, 1.3)
+    )
+  }
+
+  make_stove_energy_composite <- function(stove_use_panel) {
+    energy_panel <- gridExtra::arrangeGrob(
+      grobs = align_ggplot_widths(
+        fig_energy_consumed_method,
+        fig_energy_pot_method
+      ),
+      ncol = 2
+    )
+
+    gridExtra::arrangeGrob(
+      gridExtra::arrangeGrob(
+        grid::textGrob(
+          "A", x = 0, hjust = 0,
+          gp = grid::gpar(fontface = "bold", fontsize = 12)
+        ),
+        stove_use_panel,
+        ncol = 1,
+        heights = c(0.08, 1)
+      ),
+      gridExtra::arrangeGrob(
+        grid::textGrob(
+          "B", x = 0, hjust = 0,
+          gp = grid::gpar(fontface = "bold", fontsize = 12)
+        ),
+        energy_panel,
+        ncol = 1,
+        heights = c(0.1, 1)
+      ),
+      ncol = 1,
+      heights = c(3, 2)
+    )
+  }
+
+  fig_stove_use_energy_composite_day <- make_stove_energy_composite(
+    make_stove_use_panel(
+      fig_stove_monitored_day,
+      fig_stove_minutes_day,
+      fig_stove_exclusive_day
+    )
+  )
+  fig_stove_use_energy_composite_week <- make_stove_energy_composite(
+    make_stove_use_panel(
+      fig_stove_monitored_week,
+      fig_stove_minutes_week,
+      fig_stove_exclusive_week
+    )
+  )
+
+  save_reviewed_plot(
+    fig_stove_use_energy_composite_day,
+    "fig_descriptive_stove_use_composite_panel.png",
+    width = 8,
+    height = 11
+  )
+  save_reviewed_plot(
+    fig_stove_use_energy_composite_day,
+    "fig_descriptive_stove_use_composite_panel_days.png",
+    width = 8,
+    height = 11
+  )
+  save_reviewed_plot(
+    fig_stove_use_energy_composite_week,
+    "fig_descriptive_stove_use_composite_panel_weeks.png",
+    width = 8,
+    height = 11
+  )
+} else {
+  message("Skipped composite stove-use energy panel: no eligible stove-use records.")
+}
 ################################################################################
 # Stove-use figures for the manuscript midline Geocene plots
 ################################################################################
@@ -8365,10 +9325,7 @@ fig_stove_minutes <- ggplot(
   ) +
   theme_bw() +
   labs(
-    x = month_axis_label(
-      "Days after first receiving LPG through free distribution program",
-      stove_midline_collection_years
-    ),
+    x = "Days after first receiving LPG through free distribution program",
     y = "Minutes of use"
   )
 
