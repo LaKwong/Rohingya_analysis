@@ -16,9 +16,10 @@
 #   1. Run household fcn_id/study-arm QA, including allocation-master reconciliation.
 #   2. Build reviewed Geocene stove-use daily analysis products.
 #   3. Build ambient-adjusted PM2.5 household-timepoint products.
-#   4. Fit and post-process all rDiD/XGBoost and GLM sensitivity models.
-#   5. Run the DRDID benchmark comparison for the reviewed rDiD estimates.
-#   6. Generate all descriptive tables and figures from one main descriptive file.
+#   4. Generate all descriptive tables, figures, and embedded descriptive QA.
+#      This includes the child physical-health panel sample-size diagnostic.
+#   5. Fit and post-process all rDiD/XGBoost and GLM sensitivity models.
+#   6. Run the DRDID benchmark comparison for the reviewed rDiD estimates.
 #
 # Outputs:
 #   Tables:  7_tables/RF105_reviewed_YYYYMMDD/
@@ -82,20 +83,45 @@ for (env_name in names(rf105_default_thread_env)) {
     do.call(Sys.setenv, as.list(setNames(rf105_default_thread_env[[env_name]], env_name)))
   }
 }
+
+config_path <- file.path(runner_script_dir, "0_RF105_config_20260805_2213.R")
+source(config_path, chdir = FALSE)
+message("Checking public reviewed table folder for restricted columns before workflow.")
+quarantine_restricted_public_csvs()
 reviewed_scripts <- c(
   "0.1_fcn_id_presence_by_arm_20260805_2213.R",
   "1_geocene_stove_use_20260805_2213.R",
   "2_pm25_ambient_adjusted_analysis_20260805_2213.R",
+  "3_descriptive_outcomes_20260805_2213.R",
   "4_rdid_xgboost_20260805_2213.R",
-  "5_drDiD_comparison_20260805_2213.R",
-  "3_descriptive_outcomes_20260805_2213.R"
+  "5_drDiD_comparison_20260805_2213.R"
 )
-
+geocene_script <- "1_geocene_stove_use_20260805_2213.R"
+descriptive_script <- "3_descriptive_outcomes_20260805_2213.R"
+geocene_pos <- match(geocene_script, reviewed_scripts)
+descriptive_pos <- match(descriptive_script, reviewed_scripts)
+if (is.na(geocene_pos) || is.na(descriptive_pos) || geocene_pos > descriptive_pos) {
+  stop(
+    "RF105 runner order error: the Geocene stove-use script must run before descriptive outputs.",
+    call. = FALSE
+  )
+}
+pm_script <- "2_pm25_ambient_adjusted_analysis_20260805_2213.R"
+pm_pos <- match(pm_script, reviewed_scripts)
+if (is.na(pm_pos) || pm_pos > descriptive_pos) {
+  stop(
+    "RF105 runner order error: the ambient-adjusted PM2.5 script must run before descriptive outputs.",
+    call. = FALSE
+  )
+}
 for (script in reviewed_scripts) {
   script_path <- if (is_absolute_path(script)) script else file.path(runner_script_dir, script)
   message("Running ", script_path)
   source(script_path, chdir = FALSE)
 }
+
+message("Checking public reviewed table folder for restricted columns after workflow.")
+quarantine_restricted_public_csvs()
 
 message("RF105 reviewed analyses complete.")
 

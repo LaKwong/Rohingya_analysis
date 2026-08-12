@@ -1,6 +1,6 @@
 # Cleaning fixes log
 
-Generated: 2026-08-06 21:49:13 PDT
+Generated: 2026-08-12 00:24:20 PDT
 
 ## Fixes implemented
 
@@ -24,8 +24,8 @@ Generated: 2026-08-06 21:49:13 PDT
 - `pm25_pats_refugee_indoor`: 1362519 rows,   52 columns; timepoints: baseline=559683; endline=529975; midline=272861
 - `pm25_pats_refugee_indoor_household_counts_by_arm_timepoint`:       6 rows,    7 columns; timepoints: baseline=2; endline=2; midline=2
 - `pm25_pats_refugee_qc_files`:      61 rows,    8 columns; timepoints: baseline=32; endline=19; midline=10
-- `stove_use_geocene_refugee_daily`:    2635 rows,   28 columns; timepoints: endline=1486; baseline=878; midline=271
-- `stove_use_geocene_refugee_monitor_days`:    2130 rows,   26 columns; timepoints: endline=965; baseline=718; midline=447
+- `stove_use_geocene_refugee_daily`:    2635 rows,   29 columns; timepoints: endline=1486; baseline=878; midline=271
+- `stove_use_geocene_refugee_monitor_days`:    2130 rows,   27 columns; timepoints: endline=965; baseline=718; midline=447
 - `survey_host_hh_members`:    1767 rows,   54 columns; timepoints: midline=1029; endline=738
 - `survey_host_household`:     513 rows, 2879 columns; timepoints: baseline=200; midline=181; endline=132
 - `survey_host_location`:    1029 rows,   40 columns; timepoints: midline=1029

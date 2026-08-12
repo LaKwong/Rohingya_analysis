@@ -1,0 +1,578 @@
+Wrote host raw survey imports:
+ - G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/imported_raw/survey_host_household_raw.rds
+ - G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/imported_raw/survey_host_hh_members_raw.rds
+ - G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/imported_raw/survey_host_symptoms_raw.rds
+ - G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/imported_raw/survey_host_location_raw.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/survey_host_household.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/survey_host_hh_members.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/survey_host_symptoms.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/survey_host_location.rds
+Warning message:
+Derived final host `hh_id` from T0#### tokens in `house_id` or `serial_id`; 239 host rows still have unresolved missing `hh_id` after baseline assignments and endline matching. 
+Host raw-first final clean-data pipeline complete.
+Wrote refugee raw survey imports:
+ - G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/imported_raw/survey_refugee_household_raw.rds
+ - G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/imported_raw/survey_refugee_hh_members_raw.rds
+ - G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/imported_raw/survey_refugee_symptoms_raw.rds
+ - G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/imported_raw/survey_refugee_location_raw.rds
+Importing 556 PATS+/outdoor raw CSV files.
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/imported_raw/pm25_pats_refugee_raw.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/imported_raw/stove_use_geocene_refugee_daily_raw.rds
+New names:
+• `` -> `...2`
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/survey_refugee_household.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/survey_refugee_hh_members.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/survey_refugee_symptoms.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/survey_refugee_location.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/pm25_pats_refugee_indoor.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/shareable/pm25_pats_refugee_indoor.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/pm25_pats_refugee_ambient.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/shareable/pm25_pats_refugee_ambient.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/pm25_pats_refugee_qc_files.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/shareable/pm25_pats_refugee_qc_files.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/pm25_pats_refugee_indoor_household_counts_by_arm_timepoint.csv
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/pm_pats_refugee_reviewed_cleaning_audit.csv
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/pm25_pats_refugee_exact_duplicate_rows_removed_internal.csv
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/pm25_pats_refugee_cleaning_all_rows_data_quality_by_file_internal.csv
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/pm25_pats_refugee_indoor_final_data_quality_by_file_internal.csv
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/pm25_pats_refugee_ambient_final_data_quality_by_file_internal.csv
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/stove_use_geocene_refugee_daily.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/shareable/stove_use_geocene_refugee_daily.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/stove_use_geocene_refugee_monitor_days.rds
+Wrote G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/4_data/clean_final/shareable/stove_use_geocene_refugee_monitor_days.rds
+Refugee raw-first final clean-data pipeline complete.
+Checking public reviewed table folder for restricted columns before workflow.
+Running G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/5_analysis_RF105/reviewed/0.1_fcn_id_presence_by_arm_20260805_2213.R
+Wrote restricted QA file: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/restricted_qa_fcn_duplicate_records.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_qa_fcn_arm_timepoint_counts.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_qa_fcn_allocation_master_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_qa_fcn_set_differences.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/release/table_release_restricted_qa_manifest.csv
+Wrote restricted QA file: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/restricted_qa_fcn_presence_long.csv
+Wrote restricted QA file: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/restricted_qa_fcn_presence_wide.csv
+Wrote restricted QA file: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/restricted_qa_fcn_allocation_reconciliation.csv
+Wrote restricted QA file: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/restricted_qa_fcn_intervention_endline_ids.csv
+Wrote restricted QA file: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/restricted_qa_fcn_comparison_midline_ids.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/release/table_release_checklist.csv
+fcn_id presence checks complete.
+Running G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/5_analysis_RF105/reviewed/1_geocene_stove_use_20260805_2213.R
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_pathway_notes.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_raw_paths.csv
+Restricted fields detected (fcn_id, hh_id); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_inclusion_audit_household.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_inclusion_audit_arm.csv
+Restricted fields detected (fcn_id, hh_id); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_analysis_inclusion_audit_household.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_analysis_inclusion_audit_arm.csv
+Restricted fields detected (fcn_id, raw_collection_round, raw_survey_version, raw_source_file, raw_source_path); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_lpg_date_correction_audit.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_variable_availability.csv
+Restricted fields detected (fcn_id, hh_id, date, collection_date, raw_collection_round, raw_source_file); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_unclassified_timepoints.csv
+Restricted fields detected (source_file); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_reconciliation_source_audit.csv
+Restricted fields detected (fcn_id, date, hh_id_event); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_monitor_denominator_unmatched_event_days.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_monitor_denominator_unmatched_arm.csv
+Restricted fields detected (fcn_id, hh_id_event); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_monitor_denominator_unmatched_household.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_denominator_sensitivity.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_monitor_window_source_summary.csv
+Restricted fields detected (fcn_id, hh_id, date, raw_collection_round, raw_source_file); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/identified_tables/table_descriptive_stove_daily_dataset.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_monitoring_scope_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_days_after_receipt_reconciliation.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_sensor_window_monitoring_scope_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_stoves_monitored_by_days_after_receipt.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_stoves_monitored_by_days_after_receipt_by_arm.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_sensor_window_stoves_by_days_after_receipt.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_sensor_window_stoves_by_days_after_receipt_by_arm.csv
+Restricted fields detected (fcn_id, hh_id, date, raw_collection_round, raw_source_file); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_duplicate_dates.csv
+Restricted fields detected (fcn_id, hh_id, date); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_lpg_unavailable_event_days.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_lpg_unavailable_event_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_lpg_unavailable_event_counts.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_quality_checks.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_sample_counts.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_daily_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_post_lpg_exclusive_use_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_post_lpg_exclusive_use_denominator_by_arm_timepoint.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_post_lpg_30day_exclusive_use_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_post_lpg_30day_exclusive_use_denominator_by_arm_timepoint.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_stove_composite_plot_data.csv
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_descriptive_stove_use_composite_panel.png
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_descriptive_stove_minutes_by_day.png
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_descriptive_stove_use_percent_by_day.png
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_descriptive_stoves_monitored_by_day.png
+Restricted fields detected (fcn_id); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/identified_tables/table_descriptive_stove_exclusive_household_month.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_stove_exclusive_month_summary.csv
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_descriptive_exclusive_lpg_by_month.png
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_stove_day_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_stove_lpg_distribution.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_stove_energy_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_stove_energy_plot_data.csv
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_descriptive_stove_energy_by_day.png
+RF105 reviewed combined Geocene stove-use analysis complete.
+Running G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/5_analysis_RF105/reviewed/2_pm25_ambient_adjusted_analysis_20260805_2213.R
+Loading required package: Matrix
+
+Attaching package: 'Matrix'
+
+The following objects are masked from 'package:tidyr':
+
+    expand, pack, unpack
+
+Reading cleaned PM2.5 inputs
+Summarizing indoor PM2.5 to household monitoring windows
+Matching household windows to concurrent ambient PM2.5
+Writing analysis-ready datasets and diagnostics
+Fitting primary and sensitivity models
+Running rDiD analyses for ambient-excess indoor PM2.5 outcomes
+Running rDiD primary_baseline_midline: indoor_minus_ambient_f025
+Running rDiD primary_baseline_midline: indoor_minus_ambient_f050
+Running rDiD primary_baseline_midline: indoor_minus_ambient_f075
+Running rDiD primary_baseline_midline: indoor_minus_ambient_f100
+Running rDiD secondary_baseline_endline: indoor_minus_ambient_f025
+Running rDiD secondary_baseline_endline: indoor_minus_ambient_f050
+Running rDiD secondary_baseline_endline: indoor_minus_ambient_f075
+Running rDiD secondary_baseline_endline: indoor_minus_ambient_f100
+Evaluating caregiver and child time-weighted PM2.5 exposure
+Writing diagnostic figures
+Done.
+Tables: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/pm25_ambient_adjusted_20260812
+Figures: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/pm25_ambient_adjusted_20260812
+Running G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/5_analysis_RF105/reviewed/4_rdid_xgboost_20260805_2213.R
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_package_versions.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_xgboost_tuning.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_member_timepoint_availability.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_unavailable_covariates.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_severe_asthma_coding_audit.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_structural_zero_coding_audit.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_income_derivation_audit.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_fcs_variable_availability.csv
+Restricted fields detected (fcn_id, KEY, collection_date); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/identified_tables/table_rDiD_fcs_household_scores.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_fcs_arm_summary.csv
+Restricted fields detected (fcn_id, KEY, collection_date); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_rDiD_cesd_item_missingness.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_outcome_variable_availability.csv
+Restricted fields detected (source_file); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_rDiD_outcome_code_audit.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_harassment_variable_audit.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_harassment_prevalence_audit.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_harassment_estimability.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_harassment_estimability.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_requested_outcome_coverage.csv
+Wrote QA summary: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_outcome_audit_summary.md
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_pm25_data_source.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_pm25_household_counts.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_pm25_missing_timepoints.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_covariate_missingness.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_pm25_paired_counts.csv
+Restricted fields detected (fcn_id); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_rDiD_pm25_paired_households.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_panel_diagnostics.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_small_panel_diagnostics.csv
+Running rDiD primary_baseline_midline: target_child_eye_itch_yn
+Running rDiD primary_baseline_midline: target_child_eye_red_yn
+Running rDiD primary_baseline_midline: target_child_clinic_resp_yn
+Running rDiD primary_baseline_midline: target_child_wheezing_yn
+Running rDiD primary_baseline_midline: target_child_distrubed_speech_yn
+Running rDiD primary_baseline_midline: target_child_cough_yn
+Running rDiD primary_baseline_midline: target_child_fever_yn
+Running rDiD primary_baseline_midline: target_child_resp_rate_yn
+Running rDiD primary_baseline_midline: target_child_lethargy_yn
+Running rDiD primary_baseline_midline: target_child_weight_loss_yn
+Running rDiD primary_baseline_midline: target_child_asthma
+Running rDiD primary_baseline_midline: target_child_severe_asthma
+Running rDiD primary_baseline_midline: target_child_severe_asthma_skip_as_no
+Running rDiD primary_baseline_midline: respondent_disturbed_speech_yn
+Running rDiD primary_baseline_midline: respondent_eye_red_yn
+Running rDiD primary_baseline_midline: respondent_eye_itch_yn
+Running rDiD primary_baseline_midline: respondent_eye_sore_yn
+Running rDiD primary_baseline_midline: respondent_wheezing_yn
+Running rDiD primary_baseline_midline: respondent_cough_yn
+Running rDiD primary_baseline_midline: respondent_disturbed_sleep_yn
+Running rDiD primary_baseline_midline: respondent_headache_yn
+Running rDiD primary_baseline_midline: respondent_backache_yn
+Running rDiD primary_baseline_midline: fcs
+Running rDiD primary_baseline_midline: fcs_binary
+Running rDiD primary_baseline_midline: hdds_assume_misc_1
+Running rDiD primary_baseline_midline: fuel_30_gather_scraps_yn
+Running rDiD primary_baseline_midline: fuel_30_collect_wood_yn
+Running rDiD primary_baseline_midline: fuel_30_buy_wood_yn
+Running rDiD primary_baseline_midline: fuel_30_receive_wood_yn
+Running rDiD primary_baseline_midline: fuel_30_receive_lpg_yn
+Running rDiD primary_baseline_midline: fuel_30_buy_lpg_yn
+Running rDiD primary_baseline_midline: fuel_30_receive_crh_yn
+Running rDiD primary_baseline_midline: fuel_30_buy_crh_yn
+Running rDiD primary_baseline_midline: fuel_30_other_yn
+Running rDiD primary_baseline_midline: plastic_burn_gt1_yn
+Running rDiD primary_baseline_midline: collect_wood_times_week
+Running rDiD primary_baseline_midline: collect_wood_walk_hr_clean
+Running rDiD primary_baseline_midline: boil_yesterday_times_clean
+Running rDiD primary_baseline_midline: spent_food_usd
+Running rDiD primary_baseline_midline: buy_wood_cost_usd
+Running rDiD primary_baseline_midline: spent_total_month_usd
+Running rDiD primary_baseline_midline: spent_tobacco_pan_usd
+Running rDiD primary_baseline_midline: spent_food_pct
+Running rDiD primary_baseline_midline: total_income_30_usd
+Running rDiD primary_baseline_midline: income_wage_labor_usd
+Running rDiD primary_baseline_midline: income_cash_ngo_usd
+Running rDiD primary_baseline_midline: food_cant_afford_2wk_yn
+Running rDiD primary_baseline_midline: food_coping_action_1
+Running rDiD primary_baseline_midline: food_coping_action_2
+Running rDiD primary_baseline_midline: food_coping_action_3
+Running rDiD primary_baseline_midline: food_coping_action_4
+Running rDiD primary_baseline_midline: food_coping_action_5
+Running rDiD primary_baseline_midline: food_coping_action_6
+Running rDiD primary_baseline_midline: food_coping_action_7
+Running rDiD primary_baseline_midline: food_coping_action_8
+Running rDiD primary_baseline_midline: food_coping_action_9
+Running rDiD primary_baseline_midline: food_coping_action_10
+Running rDiD primary_baseline_midline: food_coping_action_11
+Running rDiD primary_baseline_midline: food_coping_action_12
+Running rDiD primary_baseline_midline: food_coping_action_13
+Running rDiD primary_baseline_midline: food_coping_action_66
+Running rDiD primary_baseline_midline: fuel_cant_afford_2wk_yn
+Running rDiD primary_baseline_midline: fuel_coping_action_1
+Running rDiD primary_baseline_midline: fuel_coping_action_2
+Running rDiD primary_baseline_midline: fuel_coping_action_3
+Running rDiD primary_baseline_midline: fuel_coping_action_4
+Running rDiD primary_baseline_midline: fuel_coping_action_5
+Running rDiD primary_baseline_midline: fuel_coping_action_6
+Running rDiD primary_baseline_midline: fuel_coping_action_7
+Running rDiD primary_baseline_midline: fuel_coping_action_8
+Running rDiD primary_baseline_midline: fuel_coping_action_9
+Running rDiD primary_baseline_midline: fuel_coping_action_10
+Running rDiD primary_baseline_midline: fuel_coping_action_11
+Running rDiD primary_baseline_midline: fuel_coping_action_12
+Running rDiD primary_baseline_midline: fuel_coping_action_13
+Running rDiD primary_baseline_midline: fuel_coping_action_14
+Running rDiD primary_baseline_midline: fuel_coping_action_15
+Running rDiD primary_baseline_midline: fuel_coping_action_66
+Running rDiD primary_baseline_midline: income_skill_labor_any
+Running rDiD primary_baseline_midline: income_skill_labor_usd
+Running rDiD primary_baseline_midline: CES_D_o16_score
+Running rDiD primary_baseline_midline: suicidal_thoughts_30_yn
+Running rDiD secondary_baseline_endline: target_child_eye_itch_yn
+Running rDiD secondary_baseline_endline: target_child_eye_red_yn
+Running rDiD secondary_baseline_endline: target_child_clinic_resp_yn
+Running rDiD secondary_baseline_endline: target_child_wheezing_yn
+Running rDiD secondary_baseline_endline: target_child_distrubed_speech_yn
+Running rDiD secondary_baseline_endline: target_child_cough_yn
+Running rDiD secondary_baseline_endline: target_child_fever_yn
+Running rDiD secondary_baseline_endline: target_child_resp_rate_yn
+Running rDiD secondary_baseline_endline: target_child_lethargy_yn
+Running rDiD secondary_baseline_endline: target_child_weight_loss_yn
+Running rDiD secondary_baseline_endline: target_child_asthma
+Running rDiD secondary_baseline_endline: target_child_severe_asthma
+Running rDiD secondary_baseline_endline: target_child_severe_asthma_skip_as_no
+Running rDiD secondary_baseline_endline: respondent_disturbed_speech_yn
+Running rDiD secondary_baseline_endline: respondent_eye_red_yn
+Running rDiD secondary_baseline_endline: respondent_eye_itch_yn
+Running rDiD secondary_baseline_endline: respondent_eye_sore_yn
+Running rDiD secondary_baseline_endline: respondent_wheezing_yn
+Running rDiD secondary_baseline_endline: respondent_cough_yn
+Running rDiD secondary_baseline_endline: respondent_disturbed_sleep_yn
+Running rDiD secondary_baseline_endline: respondent_headache_yn
+Running rDiD secondary_baseline_endline: respondent_backache_yn
+Running rDiD secondary_baseline_endline: fcs
+Running rDiD secondary_baseline_endline: fcs_binary
+Running rDiD secondary_baseline_endline: hdds_assume_misc_1
+Running rDiD secondary_baseline_endline: fuel_30_gather_scraps_yn
+Running rDiD secondary_baseline_endline: fuel_30_collect_wood_yn
+Running rDiD secondary_baseline_endline: fuel_30_buy_wood_yn
+Running rDiD secondary_baseline_endline: fuel_30_receive_wood_yn
+Running rDiD secondary_baseline_endline: fuel_30_receive_lpg_yn
+Running rDiD secondary_baseline_endline: fuel_30_buy_lpg_yn
+Running rDiD secondary_baseline_endline: fuel_30_receive_crh_yn
+Running rDiD secondary_baseline_endline: fuel_30_buy_crh_yn
+Running rDiD secondary_baseline_endline: fuel_30_other_yn
+Running rDiD secondary_baseline_endline: plastic_burn_gt1_yn
+Running rDiD secondary_baseline_endline: collect_wood_times_week
+Running rDiD secondary_baseline_endline: collect_wood_walk_hr_clean
+Running rDiD secondary_baseline_endline: boil_yesterday_times_clean
+Running rDiD secondary_baseline_endline: spent_food_usd
+Running rDiD secondary_baseline_endline: buy_wood_cost_usd
+Running rDiD secondary_baseline_endline: spent_total_month_usd
+Running rDiD secondary_baseline_endline: spent_tobacco_pan_usd
+Running rDiD secondary_baseline_endline: spent_food_pct
+Running rDiD secondary_baseline_endline: total_income_30_usd
+Running rDiD secondary_baseline_endline: income_wage_labor_usd
+Running rDiD secondary_baseline_endline: income_cash_ngo_usd
+Running rDiD secondary_baseline_endline: food_cant_afford_2wk_yn
+Running rDiD secondary_baseline_endline: food_coping_action_1
+Running rDiD secondary_baseline_endline: food_coping_action_2
+Running rDiD secondary_baseline_endline: food_coping_action_3
+Running rDiD secondary_baseline_endline: food_coping_action_4
+Running rDiD secondary_baseline_endline: food_coping_action_5
+Running rDiD secondary_baseline_endline: food_coping_action_6
+Running rDiD secondary_baseline_endline: food_coping_action_7
+Running rDiD secondary_baseline_endline: food_coping_action_8
+Running rDiD secondary_baseline_endline: food_coping_action_9
+Running rDiD secondary_baseline_endline: food_coping_action_10
+Running rDiD secondary_baseline_endline: food_coping_action_11
+Running rDiD secondary_baseline_endline: food_coping_action_12
+Running rDiD secondary_baseline_endline: food_coping_action_13
+Running rDiD secondary_baseline_endline: food_coping_action_66
+Running rDiD secondary_baseline_endline: fuel_cant_afford_2wk_yn
+Running rDiD secondary_baseline_endline: fuel_coping_action_1
+Running rDiD secondary_baseline_endline: fuel_coping_action_2
+Running rDiD secondary_baseline_endline: fuel_coping_action_3
+Running rDiD secondary_baseline_endline: fuel_coping_action_4
+Running rDiD secondary_baseline_endline: fuel_coping_action_5
+Running rDiD secondary_baseline_endline: fuel_coping_action_6
+Running rDiD secondary_baseline_endline: fuel_coping_action_7
+Running rDiD secondary_baseline_endline: fuel_coping_action_8
+Running rDiD secondary_baseline_endline: fuel_coping_action_9
+Running rDiD secondary_baseline_endline: fuel_coping_action_10
+Running rDiD secondary_baseline_endline: fuel_coping_action_11
+Running rDiD secondary_baseline_endline: fuel_coping_action_12
+Running rDiD secondary_baseline_endline: fuel_coping_action_13
+Running rDiD secondary_baseline_endline: fuel_coping_action_14
+Running rDiD secondary_baseline_endline: fuel_coping_action_15
+Running rDiD secondary_baseline_endline: fuel_coping_action_66
+Running rDiD secondary_baseline_endline: income_skill_labor_any
+Running rDiD secondary_baseline_endline: income_skill_labor_usd
+Running rDiD secondary_baseline_endline: CES_D_o16_score
+Running rDiD secondary_baseline_endline: suicidal_thoughts_30_yn
+Running rDiD primary_baseline_midline: pm25_ambient_excess_default
+Running rDiD primary_baseline_midline: pm25_ambient_excess_f025
+Running rDiD primary_baseline_midline: pm25_ambient_excess_f050
+Running rDiD primary_baseline_midline: pm25_ambient_excess_f100
+Running rDiD secondary_baseline_endline: pm25_ambient_excess_default
+Running rDiD secondary_baseline_endline: pm25_ambient_excess_f025
+Running rDiD secondary_baseline_endline: pm25_ambient_excess_f050
+Running rDiD secondary_baseline_endline: pm25_ambient_excess_f100
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_severe_asthma_coding_sensitivity_results.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_xgboost_all_results.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_glm_sensitivity_results.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_primary_xgboost_results.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_secondary_xgboost_results.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_primary_secondary_comparison.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_primary_glm_sensitivity.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_secondary_glm_sensitivity.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_outcome_sample_counts.csv
+Wrote QA summary: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_pm25_panel_audit.md
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_rDiD_primary_binary_estimates.png
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_rDiD_primary_continuous_estimates.png
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_rDiD_secondary_binary_estimates.png
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_rDiD_secondary_continuous_estimates.png
+Using previous rDiD results for significance-change audit: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260811/table_rDiD_xgboost_all_results.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_significance_change_audit.csv
+Wrote summary document: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_results_comparison_summary.md
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_primary_xgboost_results.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_secondary_xgboost_results.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_primary_glm_sensitivity.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_secondary_glm_sensitivity.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_primary_secondary_comparison.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_rDiD_outcome_sample_counts.csv
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_rDiD_primary_binary_estimates.png
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_rDiD_primary_continuous_estimates.png
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_rDiD_secondary_binary_estimates.png
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_rDiD_secondary_continuous_estimates.png
+Using previous rDiD results for significance-change audit: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260811/table_rDiD_xgboost_all_results.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_significance_change_audit.csv
+Wrote summary document: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_rDiD_results_comparison_summary.md
+RF105 reviewed rDiD/XGBoost result post-processing complete.
+Running G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/5_analysis_RF105/reviewed/5_drDiD_comparison_20260805_2213.R
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_DRDID_package_versions.csv
+Running DRDID primary_baseline_midline: target_child_asthma
+Running DRDID primary_baseline_midline: target_child_clinic_resp_yn
+Running DRDID primary_baseline_midline: target_child_cough_yn
+Running DRDID primary_baseline_midline: target_child_distrubed_speech_yn
+Running DRDID primary_baseline_midline: target_child_eye_itch_yn
+Running DRDID primary_baseline_midline: target_child_eye_red_yn
+Running DRDID primary_baseline_midline: target_child_fever_yn
+Running DRDID primary_baseline_midline: target_child_lethargy_yn
+Running DRDID primary_baseline_midline: target_child_resp_rate_yn
+Running DRDID primary_baseline_midline: target_child_severe_asthma
+Running DRDID primary_baseline_midline: target_child_weight_loss_yn
+Running DRDID primary_baseline_midline: target_child_wheezing_yn
+Running DRDID primary_baseline_midline: target_child_severe_asthma_skip_as_no
+Running DRDID primary_baseline_midline: buy_wood_cost_usd
+Running DRDID primary_baseline_midline: spent_food_pct
+Running DRDID primary_baseline_midline: spent_food_usd
+Running DRDID primary_baseline_midline: spent_tobacco_pan_usd
+Running DRDID primary_baseline_midline: spent_total_month_usd
+Running DRDID primary_baseline_midline: food_cant_afford_2wk_yn
+Running DRDID primary_baseline_midline: food_coping_action_1
+Running DRDID primary_baseline_midline: food_coping_action_10
+Running DRDID primary_baseline_midline: food_coping_action_11
+Running DRDID primary_baseline_midline: food_coping_action_12
+Running DRDID primary_baseline_midline: food_coping_action_13
+Running DRDID primary_baseline_midline: food_coping_action_2
+Running DRDID primary_baseline_midline: food_coping_action_3
+Running DRDID primary_baseline_midline: food_coping_action_4
+Running DRDID primary_baseline_midline: food_coping_action_5
+Running DRDID primary_baseline_midline: food_coping_action_6
+Running DRDID primary_baseline_midline: food_coping_action_66
+Running DRDID primary_baseline_midline: food_coping_action_7
+Running DRDID primary_baseline_midline: food_coping_action_8
+Running DRDID primary_baseline_midline: food_coping_action_9
+Running DRDID primary_baseline_midline: fcs
+Running DRDID primary_baseline_midline: fcs_binary
+Running DRDID primary_baseline_midline: hdds_assume_misc_1
+Running DRDID primary_baseline_midline: fuel_cant_afford_2wk_yn
+Running DRDID primary_baseline_midline: fuel_coping_action_1
+Running DRDID primary_baseline_midline: fuel_coping_action_10
+Running DRDID primary_baseline_midline: fuel_coping_action_11
+Running DRDID primary_baseline_midline: fuel_coping_action_12
+Running DRDID primary_baseline_midline: fuel_coping_action_13
+Running DRDID primary_baseline_midline: fuel_coping_action_14
+Running DRDID primary_baseline_midline: fuel_coping_action_15
+Running DRDID primary_baseline_midline: fuel_coping_action_2
+Running DRDID primary_baseline_midline: fuel_coping_action_3
+Running DRDID primary_baseline_midline: fuel_coping_action_4
+Running DRDID primary_baseline_midline: fuel_coping_action_5
+Running DRDID primary_baseline_midline: fuel_coping_action_6
+Running DRDID primary_baseline_midline: fuel_coping_action_66
+Running DRDID primary_baseline_midline: fuel_coping_action_7
+Running DRDID primary_baseline_midline: fuel_coping_action_8
+Running DRDID primary_baseline_midline: fuel_coping_action_9
+Running DRDID primary_baseline_midline: collect_wood_times_week
+Running DRDID primary_baseline_midline: fuel_30_buy_crh_yn
+Running DRDID primary_baseline_midline: fuel_30_buy_lpg_yn
+Running DRDID primary_baseline_midline: fuel_30_buy_wood_yn
+Running DRDID primary_baseline_midline: fuel_30_collect_wood_yn
+Running DRDID primary_baseline_midline: fuel_30_gather_scraps_yn
+Running DRDID primary_baseline_midline: fuel_30_other_yn
+Running DRDID primary_baseline_midline: fuel_30_receive_crh_yn
+Running DRDID primary_baseline_midline: fuel_30_receive_lpg_yn
+Running DRDID primary_baseline_midline: fuel_30_receive_wood_yn
+Running DRDID primary_baseline_midline: plastic_burn_gt1_yn
+Running DRDID primary_baseline_midline: income_cash_ngo_usd
+Running DRDID primary_baseline_midline: income_wage_labor_usd
+Running DRDID primary_baseline_midline: total_income_30_usd
+Running DRDID primary_baseline_midline: income_skill_labor_any
+Running DRDID primary_baseline_midline: income_skill_labor_usd
+Running DRDID primary_baseline_midline: CES_D_o16_score
+Running DRDID primary_baseline_midline: suicidal_thoughts_30_yn
+Running DRDID primary_baseline_midline: pm25_ambient_excess_default
+Running DRDID primary_baseline_midline: pm25_ambient_excess_f025
+Running DRDID primary_baseline_midline: pm25_ambient_excess_f050
+Running DRDID primary_baseline_midline: pm25_ambient_excess_f100
+Running DRDID primary_baseline_midline: respondent_backache_yn
+Running DRDID primary_baseline_midline: respondent_cough_yn
+Running DRDID primary_baseline_midline: respondent_disturbed_sleep_yn
+Running DRDID primary_baseline_midline: respondent_disturbed_speech_yn
+Running DRDID primary_baseline_midline: respondent_eye_itch_yn
+Running DRDID primary_baseline_midline: respondent_eye_red_yn
+Running DRDID primary_baseline_midline: respondent_eye_sore_yn
+Running DRDID primary_baseline_midline: respondent_headache_yn
+Running DRDID primary_baseline_midline: respondent_wheezing_yn
+Running DRDID primary_baseline_midline: boil_yesterday_times_clean
+Running DRDID primary_baseline_midline: collect_wood_walk_hr_clean
+Running DRDID secondary_baseline_endline: target_child_asthma
+Running DRDID secondary_baseline_endline: target_child_clinic_resp_yn
+Running DRDID secondary_baseline_endline: target_child_cough_yn
+Running DRDID secondary_baseline_endline: target_child_distrubed_speech_yn
+Running DRDID secondary_baseline_endline: target_child_eye_itch_yn
+Running DRDID secondary_baseline_endline: target_child_eye_red_yn
+Running DRDID secondary_baseline_endline: target_child_fever_yn
+Running DRDID secondary_baseline_endline: target_child_lethargy_yn
+Running DRDID secondary_baseline_endline: target_child_resp_rate_yn
+Running DRDID secondary_baseline_endline: target_child_severe_asthma
+Running DRDID secondary_baseline_endline: target_child_weight_loss_yn
+Running DRDID secondary_baseline_endline: target_child_wheezing_yn
+Running DRDID secondary_baseline_endline: target_child_severe_asthma_skip_as_no
+Running DRDID secondary_baseline_endline: buy_wood_cost_usd
+Running DRDID secondary_baseline_endline: spent_food_pct
+Running DRDID secondary_baseline_endline: spent_food_usd
+Running DRDID secondary_baseline_endline: spent_tobacco_pan_usd
+Running DRDID secondary_baseline_endline: spent_total_month_usd
+Running DRDID secondary_baseline_endline: food_cant_afford_2wk_yn
+Running DRDID secondary_baseline_endline: food_coping_action_1
+Running DRDID secondary_baseline_endline: food_coping_action_10
+Running DRDID secondary_baseline_endline: food_coping_action_11
+Running DRDID secondary_baseline_endline: food_coping_action_12
+Running DRDID secondary_baseline_endline: food_coping_action_13
+Running DRDID secondary_baseline_endline: food_coping_action_2
+Running DRDID secondary_baseline_endline: food_coping_action_3
+Running DRDID secondary_baseline_endline: food_coping_action_4
+Running DRDID secondary_baseline_endline: food_coping_action_5
+Running DRDID secondary_baseline_endline: food_coping_action_6
+Running DRDID secondary_baseline_endline: food_coping_action_66
+Running DRDID secondary_baseline_endline: food_coping_action_7
+Running DRDID secondary_baseline_endline: food_coping_action_8
+Running DRDID secondary_baseline_endline: food_coping_action_9
+Running DRDID secondary_baseline_endline: fcs
+Running DRDID secondary_baseline_endline: fcs_binary
+Running DRDID secondary_baseline_endline: hdds_assume_misc_1
+Running DRDID secondary_baseline_endline: fuel_cant_afford_2wk_yn
+Running DRDID secondary_baseline_endline: fuel_coping_action_1
+Running DRDID secondary_baseline_endline: fuel_coping_action_10
+Running DRDID secondary_baseline_endline: fuel_coping_action_11
+Running DRDID secondary_baseline_endline: fuel_coping_action_12
+Running DRDID secondary_baseline_endline: fuel_coping_action_13
+Running DRDID secondary_baseline_endline: fuel_coping_action_14
+Running DRDID secondary_baseline_endline: fuel_coping_action_15
+Running DRDID secondary_baseline_endline: fuel_coping_action_2
+Running DRDID secondary_baseline_endline: fuel_coping_action_3
+Running DRDID secondary_baseline_endline: fuel_coping_action_4
+Running DRDID secondary_baseline_endline: fuel_coping_action_5
+Running DRDID secondary_baseline_endline: fuel_coping_action_6
+Running DRDID secondary_baseline_endline: fuel_coping_action_66
+Running DRDID secondary_baseline_endline: fuel_coping_action_7
+Running DRDID secondary_baseline_endline: fuel_coping_action_8
+Running DRDID secondary_baseline_endline: fuel_coping_action_9
+Running DRDID secondary_baseline_endline: collect_wood_times_week
+Running DRDID secondary_baseline_endline: fuel_30_buy_crh_yn
+Running DRDID secondary_baseline_endline: fuel_30_buy_lpg_yn
+Running DRDID secondary_baseline_endline: fuel_30_buy_wood_yn
+Running DRDID secondary_baseline_endline: fuel_30_collect_wood_yn
+Running DRDID secondary_baseline_endline: fuel_30_gather_scraps_yn
+Running DRDID secondary_baseline_endline: fuel_30_other_yn
+Running DRDID secondary_baseline_endline: fuel_30_receive_crh_yn
+Running DRDID secondary_baseline_endline: fuel_30_receive_lpg_yn
+Running DRDID secondary_baseline_endline: fuel_30_receive_wood_yn
+Running DRDID secondary_baseline_endline: plastic_burn_gt1_yn
+Running DRDID secondary_baseline_endline: income_cash_ngo_usd
+Running DRDID secondary_baseline_endline: income_wage_labor_usd
+Running DRDID secondary_baseline_endline: total_income_30_usd
+Running DRDID secondary_baseline_endline: income_skill_labor_any
+Running DRDID secondary_baseline_endline: income_skill_labor_usd
+Running DRDID secondary_baseline_endline: CES_D_o16_score
+Running DRDID secondary_baseline_endline: suicidal_thoughts_30_yn
+Running DRDID secondary_baseline_endline: pm25_ambient_excess_default
+Running DRDID secondary_baseline_endline: pm25_ambient_excess_f025
+Running DRDID secondary_baseline_endline: pm25_ambient_excess_f050
+Running DRDID secondary_baseline_endline: pm25_ambient_excess_f100
+Running DRDID secondary_baseline_endline: respondent_backache_yn
+Running DRDID secondary_baseline_endline: respondent_cough_yn
+Running DRDID secondary_baseline_endline: respondent_disturbed_sleep_yn
+Running DRDID secondary_baseline_endline: respondent_disturbed_speech_yn
+Running DRDID secondary_baseline_endline: respondent_eye_itch_yn
+Running DRDID secondary_baseline_endline: respondent_eye_red_yn
+Running DRDID secondary_baseline_endline: respondent_eye_sore_yn
+Running DRDID secondary_baseline_endline: respondent_headache_yn
+Running DRDID secondary_baseline_endline: respondent_wheezing_yn
+Running DRDID secondary_baseline_endline: boil_yesterday_times_clean
+Running DRDID secondary_baseline_endline: collect_wood_walk_hr_clean
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_DRDID_all_results.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_DRDID_rDID_benchmark.csv
+Wrote QA note: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_DRDID_estimand_target_note.md
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_DRDID_rDID_benchmark_summary.csv
+DRDID benchmark complete.
+Running G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/5_analysis_RF105/reviewed/3_descriptive_outcomes_20260805_2213.R
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_population_counts.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_requested_population_counts.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_requested_binary_outcomes.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_requested_multiselect_outcomes.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_requested_categorical_outcomes.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_requested_continuous_outcomes.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_requested_text_response_presence.csv
+Wrote restricted free-text QA file: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_requested_text_response_counts_internal.csv
+Error in `mutate()`:
+ℹ In argument: `generated_by = requested_descriptive_script_label`.
+Caused by error:
+! object 'requested_descriptive_script_label' not found
+Backtrace:
+     ▆
+  1. ├─base::source(script_path, chdir = FALSE)
+  2. │ ├─base::withVisible(eval(ei, envir))
+  3. │ └─base::eval(ei, envir)
+  4. │   └─base::eval(ei, envir)
+  5. ├─... %>% arrange(outcome_group, requested_variable)
+  6. ├─dplyr::arrange(., outcome_group, requested_variable)
+  7. ├─dplyr::mutate(...)
+  8. ├─dplyr:::mutate.data.frame(...)
+  9. │ └─dplyr:::mutate_cols(.data, dplyr_quosures(...), by)
+ 10. │   ├─base::withCallingHandlers(...)
+ 11. │   └─dplyr:::mutate_col(dots[[i]], data, mask, new_columns)
+ 12. │     └─mask$eval_all_mutate(quo)
+ 13. │       └─dplyr (local) eval()
+ 14. └─base::.handleSimpleError(...)
+ 15.   └─dplyr (local) h(simpleError(msg, call))
+ 16.     └─rlang::abort(message, class = error_class, parent = parent, call = error_call)
+Warning message:
+Allocation-master reconciliation found 1 cleaned fcn_id value(s) not present in the allocation master; see QA output. 
+Execution halted

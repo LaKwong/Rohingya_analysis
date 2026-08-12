@@ -57,6 +57,17 @@ if (!file.exists(config_file)) {
 }
 source(config_file)
 
+add_all_arms_rows <- function(df) {
+  df_arm <- df %>%
+    mutate(study_arm_overall = as.character(study_arm_overall))
+
+  df_all_arms <- df_arm %>%
+    filter(!is.na(study_arm_overall), study_arm_overall %in% arm_levels) %>%
+    mutate(study_arm_overall = "all_arms")
+
+  bind_rows(df_arm, df_all_arms)
+}
+
 if (!requireNamespace("gridExtra", quietly = TRUE)) {
   stop("Install the gridExtra package before running this combined Geocene script.")
 }
@@ -123,6 +134,9 @@ geocene_import_inclusion_audit_analysis_eligible_by_arm <-
   read_imported_raw_csv(
     "geocene_refugee_import_inclusion_audit_analysis_eligible_by_arm.csv"
   )
+geocene_lpg_date_correction_audit <- read_imported_raw_csv(
+  "geocene_refugee_lpg_date_correction_audit.csv"
+)
 
 write_reviewed_csv(
   geocene_import_inclusion_audit_by_household,
@@ -143,7 +157,14 @@ write_reviewed_csv(
   geocene_import_inclusion_audit_analysis_eligible_by_arm,
   "table_descriptive_geocene_analysis_inclusion_audit_arm.csv",
   subfolder = "qa"
-)################################################################################
+)
+write_reviewed_csv(
+  geocene_lpg_date_correction_audit,
+  "table_descriptive_geocene_lpg_date_correction_audit.csv",
+  subfolder = "qa"
+)
+
+################################################################################
 # Load and check the reviewed daily stove-use input
 ################################################################################
 
@@ -166,6 +187,7 @@ stove_required_vars <- c(
   "stove_on_min_pc_lpg",
   "days_after_first_receiving",
   "months_after_first_receiving_numeric",
+  "lpg_available_for_analysis",
   "exclusive_biomass",
   "exclusive_lpg",
   "mixed_use"
@@ -228,6 +250,7 @@ stove_daily <- stove_daily_raw %>%
       suppressWarnings(as.numeric(stove_on_min_pc_lpg)),
     stove_on_min_pc_biomass =
       suppressWarnings(as.numeric(stove_on_min_pc_biomass)),
+    lpg_available_for_analysis = as.logical(lpg_available_for_analysis),
     exclusive_biomass = as.logical(exclusive_biomass),
     exclusive_lpg = as.logical(exclusive_lpg),
     mixed_use = as.logical(mixed_use)
@@ -333,6 +356,21 @@ geocene_timepoint_from_date_reviewed <- function(x) {
   as_ordered_timepoint(out)
 }
 
+derive_lpg_available_for_analysis <- function(study_arm_overall, timepoint, date, first_receive_lpg_ymd) {
+  arm <- str_squish(str_to_lower(as.character(study_arm_overall)))
+  tp <- as.character(timepoint)
+  date <- as.Date(date)
+  first_receive <- as.Date(first_receive_lpg_ymd)
+  case_when(
+    arm == "comparison" ~ TRUE,
+    arm == "intervention" & tp == "baseline" ~ FALSE,
+    arm == "intervention" &
+      tp %in% c("midline", "endline") &
+      !is.na(first_receive) & !is.na(date) & date >= first_receive ~ TRUE,
+    TRUE ~ FALSE
+  )
+}
+
 parse_mission_date_raw <- function(x) {
   suppressWarnings(lubridate::ymd(as.character(x)))
 }
@@ -418,7 +456,7 @@ analysis_event_day_fuel_keys <- bind_rows(
   filter(!is.na(fcn_id), fcn_id != "", !is.na(event_date)) %>%
   distinct()
 
-stove_events_clean <- stove_events_raw %>%
+stove_events_clean_all <- stove_events_raw %>%
   mutate(
     mission_id = str_squish(as.character(mission_id)),
     fcn_id = str_squish(as.character(fcn_id)),
@@ -435,19 +473,32 @@ stove_events_clean <- stove_events_raw %>%
   left_join(geocene_baseline_arm_lookup, by = "fcn_id") %>%
   mutate(
     study_arm_overall = coalesce(baseline_study_arm_overall, study_arm_overall),
-    hh_id = coalesce(baseline_hh_id, hh_id)
+    hh_id = coalesce(baseline_hh_id, hh_id),
+    lpg_available_for_analysis = derive_lpg_available_for_analysis(
+      study_arm_overall,
+      geocene_timepoint_from_date_reviewed(event_date),
+      event_date,
+      first_receive_lpg_ymd
+    )
   ) %>%
   select(-baseline_study_arm_overall, -baseline_hh_id) %>%
   filter(
     !is.na(fcn_id), fcn_id != "",
     !is.na(event_date),
-    fuel_type %in% c("lpg", "biomass"),
-    lpg_enrolled_and_receiving == "receiving LPG through distribution program"
+    fuel_type %in% c("lpg", "biomass")
   ) %>%
   semi_join(
     analysis_event_day_fuel_keys,
     by = c("fcn_id", "event_date", "fuel_type")
   )
+
+geocene_lpg_unavailable_event_rows <- stove_events_clean_all %>%
+  filter(fuel_type == "lpg", !lpg_available_for_analysis) %>%
+  mutate(timepoint = geocene_timepoint_from_date_reviewed(event_date)) %>%
+  arrange(timepoint, study_arm_overall, fcn_id, event_date)
+
+stove_events_clean <- stove_events_clean_all %>%
+  filter(fuel_type != "lpg" | lpg_available_for_analysis)
 
 stove_event_bounds_by_source_mission <- stove_events_clean %>%
   group_by(mission_id, fcn_id, fuel_type) %>%
@@ -464,6 +515,7 @@ stove_event_day_fuel <- stove_events_clean %>%
     hh_id_event = first(hh_id[!is.na(hh_id) & hh_id != ""], default = NA_character_),
     study_arm_event = first(study_arm_overall[!is.na(study_arm_overall) & study_arm_overall != ""], default = NA_character_),
     first_receive_lpg_ymd_event = first(first_receive_lpg_ymd[!is.na(first_receive_lpg_ymd)], default = as.Date(NA)),
+    lpg_available_for_analysis_event = any(lpg_available_for_analysis, na.rm = TRUE),
     n_source_missions_with_events = n_distinct(mission_id),
     source_mission_ids_with_events = paste(sort(unique(mission_id)), collapse = "; "),
     cooking_events = n(),
@@ -589,6 +641,7 @@ monitor_denominator_event_day_long <- stove_event_day_fuel %>%
     study_arm_overall = factor(study_arm_event, levels = arm_levels),
     first_receive_lpg_ymd = first_receive_lpg_ymd_event,
     lpg_enrolled_and_receiving = "receiving LPG through distribution program",
+    lpg_available_for_analysis = lpg_available_for_analysis_event,
     raw_collection_round = "geocene_event_day_sensitivity",
     raw_source_file = "events_22.csv; missions_22.csv; tags_22.csv",
     num_samples = NA_real_,
@@ -624,6 +677,12 @@ make_monitor_day_wide <- function(monitor_day_long) {
       .groups = "drop"
     ) %>%
     mutate(
+      lpg_available_for_analysis = derive_lpg_available_for_analysis(
+        study_arm_overall,
+        timepoint,
+        date,
+        first_receive_lpg_ymd
+      ),
       days_after_first_receiving =
         suppressWarnings(as.numeric(as.Date(date) - first_receive_lpg_ymd)),
       months_after_first_receiving = cut(
@@ -754,10 +813,17 @@ make_denominator_variant_summary <- function(monitor_day_long, variant_label) {
         replace_na(suppressWarnings(as.numeric(cooking_events_with_biomass)), 0),
         NA_real_
       ),
-      lpg_recorded = lpg_monitored & cooking_events_with_lpg > 0,
+      lpg_available_for_analysis = replace_na(lpg_available_for_analysis, FALSE),
+      lpg_recorded_raw = lpg_monitored & replace_na(cooking_events_with_lpg > 0, FALSE),
+      lpg_recorded = lpg_available_for_analysis & lpg_recorded_raw,
       biomass_recorded = biomass_monitored & cooking_events_with_biomass > 0,
-      valid_exclusive_use_denominator = lpg_monitored & biomass_monitored,
-      exclusive_lpg_recalc = valid_exclusive_use_denominator & lpg_recorded & !biomass_recorded,
+      observed_stove_use_day = lpg_recorded | biomass_recorded,
+      n_stoves_with_recorded_use =
+        replace_na(as.integer(lpg_recorded), 0L) +
+        replace_na(as.integer(biomass_recorded), 0L),
+      valid_exclusive_use_denominator =
+        lpg_available_for_analysis & observed_stove_use_day,
+      exclusive_lpg_recalc = lpg_available_for_analysis & valid_exclusive_use_denominator & lpg_recorded & !biomass_recorded,
       exclusive_biomass_recalc = valid_exclusive_use_denominator & biomass_recorded & !lpg_recorded,
       mixed_use_recalc = valid_exclusive_use_denominator & biomass_recorded & lpg_recorded,
       denominator_variant = variant_label
@@ -836,9 +902,12 @@ write_reviewed_csv(
 stove_daily <- stove_monitor_day_wide %>%
   left_join(event_day_for_join, by = c("fcn_id", "date")) %>%
   mutate(
+    lpg_available_for_analysis = replace_na(lpg_available_for_analysis, FALSE),
+    cooking_events_with_lpg_raw = suppressWarnings(as.numeric(cooking_events_with_lpg)),
+    stove_on_min_sum_lpg_raw = suppressWarnings(as.numeric(stove_on_min_sum_lpg)),
     cooking_events_with_lpg = if_else(
       lpg_monitored,
-      replace_na(suppressWarnings(as.numeric(cooking_events_with_lpg)), 0),
+      if_else(lpg_available_for_analysis, replace_na(cooking_events_with_lpg_raw, 0), 0),
       NA_real_
     ),
     cooking_events_with_biomass = if_else(
@@ -848,7 +917,7 @@ stove_daily <- stove_monitor_day_wide %>%
     ),
     stove_on_min_sum_lpg = if_else(
       lpg_monitored,
-      replace_na(suppressWarnings(as.numeric(stove_on_min_sum_lpg)), 0),
+      if_else(lpg_available_for_analysis, replace_na(stove_on_min_sum_lpg_raw, 0), 0),
       NA_real_
     ),
     stove_on_min_sum_biomass = if_else(
@@ -856,8 +925,17 @@ stove_daily <- stove_monitor_day_wide %>%
       replace_na(suppressWarnings(as.numeric(stove_on_min_sum_biomass)), 0),
       NA_real_
     ),
-    lpg_recorded = lpg_monitored & cooking_events_with_lpg > 0,
+    lpg_recorded_raw = lpg_monitored & replace_na(cooking_events_with_lpg_raw > 0, FALSE),
+    lpg_recorded_unavailable_for_analysis = lpg_recorded_raw & !lpg_available_for_analysis,
+    lpg_recorded = lpg_available_for_analysis & lpg_recorded_raw,
     biomass_recorded = biomass_monitored & cooking_events_with_biomass > 0,
+    observed_stove_use_day = lpg_recorded | biomass_recorded,
+    n_stoves_with_recorded_use =
+      replace_na(as.integer(lpg_recorded), 0L) +
+      replace_na(as.integer(biomass_recorded), 0L),
+    n_sensor_window_stove_days =
+      replace_na(as.integer(lpg_monitored), 0L) +
+      replace_na(as.integer(biomass_monitored), 0L),
     stove_on_min_sum_lpg_na = if_else(lpg_monitored, stove_on_min_sum_lpg, NA_real_),
     stove_on_min_sum_biomass_na = if_else(biomass_monitored, stove_on_min_sum_biomass, NA_real_),
     cooking_events_with_lpg_na = if_else(lpg_monitored, cooking_events_with_lpg, NA_real_),
@@ -878,7 +956,8 @@ stove_daily <- stove_monitor_day_wide %>%
       100 * stove_on_min_sum_biomass_zero / stove_on_min_sum_total_zero,
       NA_real_
     ),
-    valid_exclusive_use_denominator = lpg_monitored & biomass_monitored,
+    valid_exclusive_use_denominator =
+      lpg_available_for_analysis & observed_stove_use_day,
     exclusive_lpg_recalc = valid_exclusive_use_denominator &
       lpg_recorded & !biomass_recorded,
     exclusive_biomass_recalc = valid_exclusive_use_denominator &
@@ -902,9 +981,12 @@ geocene_stove_use_daily_analysis_dataset <- stove_daily %>%
     "fcn_id", "hh_id", "timepoint", "study_arm_overall", "date",
     "first_receive_lpg_ymd", "days_after_first_receiving",
     "months_after_first_receiving_numeric", "lpg_enrolled_and_receiving",
-    "lpg_monitored", "biomass_monitored", "valid_exclusive_use_denominator",
-    "n_monitor_stove_days", "monitor_denominator_source",
-    "lpg_recorded", "biomass_recorded",
+    "lpg_available_for_analysis", "lpg_monitored", "biomass_monitored",
+    "observed_stove_use_day", "n_stoves_with_recorded_use",
+    "valid_exclusive_use_denominator", "n_monitor_stove_days", "n_sensor_window_stove_days",
+    "monitor_denominator_source", "lpg_recorded", "lpg_recorded_raw",
+    "lpg_recorded_unavailable_for_analysis", "biomass_recorded",
+    "cooking_events_with_lpg_raw", "stove_on_min_sum_lpg_raw",
     "cooking_events_with_lpg_zero", "cooking_events_with_biomass_zero",
     "stove_on_min_sum_lpg_zero", "stove_on_min_sum_biomass_zero",
     "stove_on_min_sum_total_zero", "stove_on_min_pc_lpg_zero",
@@ -919,6 +1001,327 @@ write_reviewed_csv(
   "table_descriptive_stove_daily_dataset.csv"
 )
 
+################################################################################
+# Monitoring scope summary
+################################################################################
+
+safe_min_positive <- function(x) {
+  x <- suppressWarnings(as.numeric(x))
+  x <- x[!is.na(x) & x > 0]
+  if (length(x) == 0) NA_real_ else min(x)
+}
+
+safe_max_numeric <- function(x) {
+  x <- suppressWarnings(as.numeric(x))
+  x <- x[!is.na(x)]
+  if (length(x) == 0) NA_real_ else max(x)
+}
+
+stove_daily_monitoring_scope_data <- stove_daily %>%
+  mutate(
+    n_sensor_window_stoves_household_day =
+      replace_na(as.integer(n_sensor_window_stove_days), 0L),
+    n_stoves_monitored_household_day =
+      replace_na(as.integer(n_stoves_with_recorded_use), 0L),
+    days_after_first_receiving =
+      suppressWarnings(as.numeric(days_after_first_receiving))
+  )
+
+stove_daily_monitoring_scope_observed <- stove_daily_monitoring_scope_data %>%
+  filter(observed_stove_use_day)
+
+stove_daily_monitoring_scope_sensor_window <- stove_daily_monitoring_scope_data %>%
+  filter(n_sensor_window_stoves_household_day > 0)
+
+geocene_stoves_monitored_by_days_after_receipt <-
+  stove_daily_monitoring_scope_observed %>%
+  group_by(days_after_first_receiving) %>%
+  summarise(
+    n_stoves_monitored = sum(n_stoves_monitored_household_day, na.rm = TRUE),
+    n_household_days_monitored = n(),
+    n_households_monitored = n_distinct(fcn_id),
+    .groups = "drop"
+  ) %>%
+  filter(n_stoves_monitored > 0) %>%
+  arrange(is.na(days_after_first_receiving), days_after_first_receiving)
+
+geocene_stoves_monitored_by_days_after_receipt_by_arm <-
+  stove_daily_monitoring_scope_observed %>%
+  add_all_arms_rows() %>%
+  group_by(timepoint, study_arm_overall, days_after_first_receiving) %>%
+  summarise(
+    n_stoves_monitored = sum(n_stoves_monitored_household_day, na.rm = TRUE),
+    n_household_days_monitored = n(),
+    n_households_monitored = n_distinct(fcn_id),
+    .groups = "drop"
+  ) %>%
+  filter(n_stoves_monitored > 0) %>%
+  arrange(timepoint, study_arm_overall, is.na(days_after_first_receiving), days_after_first_receiving)
+
+geocene_sensor_window_stoves_by_days_after_receipt <-
+  stove_daily_monitoring_scope_sensor_window %>%
+  group_by(days_after_first_receiving) %>%
+  summarise(
+    n_sensor_window_stoves_monitored = sum(n_sensor_window_stoves_household_day, na.rm = TRUE),
+    n_household_days_sensor_window = n(),
+    n_household_days_without_recorded_stove_use = sum(!observed_stove_use_day, na.rm = TRUE),
+    n_households_sensor_window = n_distinct(fcn_id),
+    .groups = "drop"
+  ) %>%
+  arrange(is.na(days_after_first_receiving), days_after_first_receiving)
+
+geocene_sensor_window_stoves_by_days_after_receipt_by_arm <-
+  stove_daily_monitoring_scope_sensor_window %>%
+  add_all_arms_rows() %>%
+  group_by(timepoint, study_arm_overall, days_after_first_receiving) %>%
+  summarise(
+    n_sensor_window_stoves_monitored = sum(n_sensor_window_stoves_household_day, na.rm = TRUE),
+    n_household_days_sensor_window = n(),
+    n_household_days_without_recorded_stove_use = sum(!observed_stove_use_day, na.rm = TRUE),
+    n_households_sensor_window = n_distinct(fcn_id),
+    .groups = "drop"
+  ) %>%
+  arrange(timepoint, study_arm_overall, is.na(days_after_first_receiving), days_after_first_receiving)
+
+monitoring_scope_relative_overall <-
+  geocene_stoves_monitored_by_days_after_receipt %>%
+  filter(!is.na(days_after_first_receiving)) %>%
+  summarise(
+    min_n_stoves_monitored_per_days_after_receipt_gt0 =
+      safe_min_positive(n_stoves_monitored),
+    max_n_stoves_monitored_per_days_after_receipt_gt0 =
+      safe_max_numeric(n_stoves_monitored),
+    n_days_after_receipt_with_gt0_stoves_monitored = n(),
+    .groups = "drop"
+  )
+
+monitoring_scope_relative_by_arm <-
+  geocene_stoves_monitored_by_days_after_receipt_by_arm %>%
+  filter(!is.na(days_after_first_receiving)) %>%
+  group_by(timepoint, study_arm_overall) %>%
+  summarise(
+    min_n_stoves_monitored_per_days_after_receipt_gt0 =
+      safe_min_positive(n_stoves_monitored),
+    max_n_stoves_monitored_per_days_after_receipt_gt0 =
+      safe_max_numeric(n_stoves_monitored),
+    n_days_after_receipt_with_gt0_stoves_monitored = n(),
+    .groups = "drop"
+  )
+
+monitoring_scope_overall <- stove_daily_monitoring_scope_observed %>%
+  summarise(
+    summary_scope = "overall",
+    timepoint = NA_character_,
+    study_arm_overall = NA_character_,
+    n_refugee_households_monitored = n_distinct(fcn_id),
+    n_household_days_monitored = n(),
+    n_household_days_with_days_after_first_receiving =
+      sum(!is.na(days_after_first_receiving)),
+    n_household_days_missing_days_after_first_receiving =
+      sum(is.na(days_after_first_receiving)),
+    min_n_stoves_monitored_per_household_day_gt0 =
+      safe_min_positive(n_stoves_monitored_household_day),
+    max_n_stoves_monitored_per_household_day_gt0 =
+      safe_max_numeric(n_stoves_monitored_household_day),
+    max_days_after_first_receiving_to_monitoring =
+      safe_max_numeric(days_after_first_receiving),
+    max_days_after_first_receiving_to_lpg_available_monitoring =
+      safe_max_numeric(days_after_first_receiving[lpg_available_for_analysis]),
+    .groups = "drop"
+  ) %>%
+  bind_cols(monitoring_scope_relative_overall)
+
+monitoring_scope_by_arm <- stove_daily_monitoring_scope_observed %>%
+  add_all_arms_rows() %>%
+  group_by(timepoint, study_arm_overall) %>%
+  summarise(
+    n_refugee_households_monitored = n_distinct(fcn_id),
+    n_household_days_monitored = n(),
+    n_household_days_with_days_after_first_receiving =
+      sum(!is.na(days_after_first_receiving)),
+    n_household_days_missing_days_after_first_receiving =
+      sum(is.na(days_after_first_receiving)),
+    min_n_stoves_monitored_per_household_day_gt0 =
+      safe_min_positive(n_stoves_monitored_household_day),
+    max_n_stoves_monitored_per_household_day_gt0 =
+      safe_max_numeric(n_stoves_monitored_household_day),
+    max_days_after_first_receiving_to_monitoring =
+      safe_max_numeric(days_after_first_receiving),
+    max_days_after_first_receiving_to_lpg_available_monitoring =
+      safe_max_numeric(days_after_first_receiving[lpg_available_for_analysis]),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    summary_scope = if_else(study_arm_overall == "all_arms", "timepoint_all_arms", "timepoint_arm"),
+    timepoint = as.character(timepoint),
+    study_arm_overall = as.character(study_arm_overall)
+  ) %>%
+  left_join(
+    monitoring_scope_relative_by_arm %>%
+      mutate(
+        timepoint = as.character(timepoint),
+        study_arm_overall = as.character(study_arm_overall)
+      ),
+    by = c("timepoint", "study_arm_overall")
+  ) %>%
+  select(names(monitoring_scope_overall))
+
+geocene_monitoring_scope_summary <- bind_rows(
+  monitoring_scope_overall,
+  monitoring_scope_by_arm
+) %>%
+  mutate(
+    monitoring_denominator_note =
+      "Household-days are counted as monitored only when LPG or biomass stove use was recorded.",
+    stove_count_note =
+      "Household-day stove counts sum LPG and biomass stoves with recorded use. Sensor-window days without recorded stove use are retained only in QA/sensitivity outputs."
+  ) %>%
+  arrange(summary_scope, timepoint, study_arm_overall)
+
+sensor_window_monitoring_scope_overall <- stove_daily_monitoring_scope_sensor_window %>%
+  summarise(
+    summary_scope = "overall",
+    timepoint = NA_character_,
+    study_arm_overall = NA_character_,
+    n_household_days_sensor_window = n(),
+    n_household_days_with_recorded_stove_use = sum(observed_stove_use_day, na.rm = TRUE),
+    n_household_days_without_recorded_stove_use = sum(!observed_stove_use_day, na.rm = TRUE),
+    n_sensor_window_stove_days = sum(n_sensor_window_stoves_household_day, na.rm = TRUE),
+    pct_sensor_window_household_days_without_recorded_stove_use = if_else(
+      n_household_days_sensor_window > 0,
+      100 * n_household_days_without_recorded_stove_use / n_household_days_sensor_window,
+      NA_real_
+    ),
+    .groups = "drop"
+  )
+
+sensor_window_monitoring_scope_by_arm <- stove_daily_monitoring_scope_sensor_window %>%
+  add_all_arms_rows() %>%
+  group_by(timepoint, study_arm_overall) %>%
+  summarise(
+    n_household_days_sensor_window = n(),
+    n_household_days_with_recorded_stove_use = sum(observed_stove_use_day, na.rm = TRUE),
+    n_household_days_without_recorded_stove_use = sum(!observed_stove_use_day, na.rm = TRUE),
+    n_sensor_window_stove_days = sum(n_sensor_window_stoves_household_day, na.rm = TRUE),
+    pct_sensor_window_household_days_without_recorded_stove_use = if_else(
+      n_household_days_sensor_window > 0,
+      100 * n_household_days_without_recorded_stove_use / n_household_days_sensor_window,
+      NA_real_
+    ),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    summary_scope = if_else(study_arm_overall == "all_arms", "timepoint_all_arms", "timepoint_arm"),
+    timepoint = as.character(timepoint),
+    study_arm_overall = as.character(study_arm_overall)
+  ) %>%
+  select(names(sensor_window_monitoring_scope_overall))
+
+geocene_sensor_window_monitoring_scope_summary <- bind_rows(
+  sensor_window_monitoring_scope_overall,
+  sensor_window_monitoring_scope_by_arm
+) %>%
+  mutate(
+    denominator_note =
+      "QA only: mission-log window-expanded household-days before excluding days with no recorded LPG or biomass stove use."
+  ) %>%
+  arrange(summary_scope, timepoint, study_arm_overall)
+
+geocene_days_after_receipt_reconciliation_overall <- tibble(
+  summary_scope = "overall",
+  timepoint = NA_character_,
+  study_arm_overall = NA_character_,
+  n_household_days_monitoring_scope = nrow(stove_daily_monitoring_scope_observed),
+  n_household_days_days_after_receipt_table =
+    sum(geocene_stoves_monitored_by_days_after_receipt$n_household_days_monitored, na.rm = TRUE),
+  n_household_days_with_days_after_first_receiving =
+    sum(!is.na(stove_daily_monitoring_scope_observed$days_after_first_receiving)),
+  n_household_days_missing_days_after_first_receiving =
+    sum(is.na(stove_daily_monitoring_scope_observed$days_after_first_receiving))
+)
+
+geocene_days_after_receipt_reconciliation_by_arm <-
+  stove_daily_monitoring_scope_observed %>%
+  add_all_arms_rows() %>%
+  group_by(timepoint, study_arm_overall) %>%
+  summarise(
+    n_household_days_monitoring_scope = n(),
+    n_household_days_with_days_after_first_receiving =
+      sum(!is.na(days_after_first_receiving)),
+    n_household_days_missing_days_after_first_receiving =
+      sum(is.na(days_after_first_receiving)),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    summary_scope = if_else(study_arm_overall == "all_arms", "timepoint_all_arms", "timepoint_arm"),
+    timepoint = as.character(timepoint),
+    study_arm_overall = as.character(study_arm_overall)
+  ) %>%
+  left_join(
+    geocene_stoves_monitored_by_days_after_receipt_by_arm %>%
+      group_by(timepoint, study_arm_overall) %>%
+      summarise(
+        n_household_days_days_after_receipt_table =
+          sum(n_household_days_monitored, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      mutate(
+        timepoint = as.character(timepoint),
+        study_arm_overall = as.character(study_arm_overall)
+      ),
+    by = c("timepoint", "study_arm_overall")
+  ) %>%
+  mutate(
+    n_household_days_days_after_receipt_table =
+      replace_na(n_household_days_days_after_receipt_table, 0L)
+  ) %>%
+  select(names(geocene_days_after_receipt_reconciliation_overall))
+
+geocene_days_after_receipt_reconciliation <- bind_rows(
+  geocene_days_after_receipt_reconciliation_overall,
+  geocene_days_after_receipt_reconciliation_by_arm
+) %>%
+  mutate(
+    n_household_days_difference =
+      n_household_days_monitoring_scope - n_household_days_days_after_receipt_table,
+    tables_reconcile = n_household_days_difference == 0,
+    reconciliation_note =
+      "Days-after-receipt tables include observed stove-use household-days with missing first_receive_lpg_ymd as a blank days_after_first_receiving row so n_household_days_monitored sums to the public monitoring-scope denominator."
+  ) %>%
+  arrange(summary_scope, timepoint, study_arm_overall)
+
+write_reviewed_csv(
+  geocene_monitoring_scope_summary,
+  "table_descriptive_geocene_monitoring_scope_summary.csv"
+)
+write_reviewed_csv(
+  geocene_days_after_receipt_reconciliation,
+  "table_descriptive_geocene_days_after_receipt_reconciliation.csv",
+  subfolder = "qa"
+)
+write_reviewed_csv(
+  geocene_sensor_window_monitoring_scope_summary,
+  "table_descriptive_geocene_sensor_window_monitoring_scope_summary.csv",
+  subfolder = "qa"
+)
+write_reviewed_csv(
+  geocene_stoves_monitored_by_days_after_receipt,
+  "table_descriptive_geocene_stoves_monitored_by_days_after_receipt.csv"
+)
+write_reviewed_csv(
+  geocene_stoves_monitored_by_days_after_receipt_by_arm,
+  "table_descriptive_geocene_stoves_monitored_by_days_after_receipt_by_arm.csv"
+)
+write_reviewed_csv(
+  geocene_sensor_window_stoves_by_days_after_receipt,
+  "table_descriptive_geocene_sensor_window_stoves_by_days_after_receipt.csv",
+  subfolder = "qa"
+)
+write_reviewed_csv(
+  geocene_sensor_window_stoves_by_days_after_receipt_by_arm,
+  "table_descriptive_geocene_sensor_window_stoves_by_days_after_receipt_by_arm.csv",
+  subfolder = "qa"
+)
 ################################################################################
 # Data QA checks
 ################################################################################
@@ -935,6 +1338,66 @@ stove_duplicate_fcn_date <- stove_daily %>%
 write_reviewed_csv(
   stove_duplicate_fcn_date,
   "table_descriptive_geocene_duplicate_dates.csv",
+  subfolder = "qa"
+)
+
+geocene_lpg_unavailable_event_days <- geocene_lpg_unavailable_event_rows %>%
+  distinct(fcn_id, event_date, .keep_all = TRUE) %>%
+  mutate(
+    date = event_date,
+    timepoint = as_ordered_timepoint(timepoint),
+    study_arm_overall = as.character(study_arm_overall),
+    days_after_first_receiving = as.numeric(event_date - first_receive_lpg_ymd),
+    exclusion_reason = "Program LPG was not available for this arm/timepoint under the analysis rule."
+  ) %>%
+  select(any_of(c(
+    "fcn_id", "hh_id", "date", "timepoint", "study_arm_overall",
+    "first_receive_lpg_ymd", "days_after_first_receiving",
+    "lpg_enrolled_and_receiving", "lpg_available_for_analysis",
+    "fuel_type", "mission_id", "stove_on_min", "start_time", "stop_time",
+    "raw_collection_round", "raw_source_file", "exclusion_reason"
+  ))) %>%
+  arrange(timepoint, study_arm_overall, fcn_id, date)
+
+geocene_lpg_unavailable_event_counts <- geocene_lpg_unavailable_event_rows %>%
+  mutate(
+    timepoint = as_ordered_timepoint(timepoint),
+    study_arm_overall = as.character(study_arm_overall)
+  ) %>%
+  add_all_arms_rows() %>%
+  group_by(timepoint, study_arm_overall) %>%
+  summarise(
+    n_lpg_event_days_not_available_for_analysis = n_distinct(fcn_id, event_date),
+    n_lpg_event_rows_not_available_for_analysis = n(),
+    n_households_with_lpg_event_days_not_available_for_analysis = n_distinct(fcn_id),
+    exclusion_reason = "Program LPG was not available for this arm/timepoint under the analysis rule.",
+    .groups = "drop"
+  ) %>%
+  arrange(timepoint, study_arm_overall)
+
+geocene_lpg_unavailable_event_summary <- geocene_lpg_unavailable_event_counts %>%
+  select(
+    timepoint,
+    study_arm_overall,
+    n_lpg_event_days_not_available_for_analysis,
+    n_lpg_event_rows_not_available_for_analysis,
+    n_households_with_lpg_event_days_not_available_for_analysis,
+    exclusion_reason
+  )
+
+write_reviewed_csv(
+  geocene_lpg_unavailable_event_days,
+  "table_descriptive_geocene_lpg_unavailable_event_days.csv",
+  subfolder = "qa"
+)
+write_reviewed_csv(
+  geocene_lpg_unavailable_event_summary,
+  "table_descriptive_geocene_lpg_unavailable_event_summary.csv",
+  subfolder = "qa"
+)
+write_reviewed_csv(
+  geocene_lpg_unavailable_event_counts,
+  "table_descriptive_geocene_lpg_unavailable_event_counts.csv",
   subfolder = "qa"
 )
 
@@ -960,7 +1423,13 @@ qa_checks <- tibble(
     "rows before first receiving LPG",
     "rows missing first_receive_lpg_ymd",
     "reviewed raw Geocene_220705 import files missing",
-    "event household-days without matching monitor-day denominator"
+    "event household-days without matching monitor-day denominator",
+    "exclusive-use denominator rows without recorded stove use",
+    "exclusive LPG rows when LPG unavailable for analysis",
+    "baseline intervention rows marked LPG available for analysis",
+    "baseline intervention exclusive LPG days",
+    "baseline intervention biomass event-days retained",
+    "LPG event-days excluded because LPG unavailable for analysis"
   ),
   n_records = c(
     nrow(stove_daily),
@@ -988,7 +1457,31 @@ qa_checks <- tibble(
     sum(stove_daily$days_after_first_receiving < 0, na.rm = TRUE),
     sum(is.na(stove_daily$first_receive_lpg_ymd)),
     sum(!raw_paths_used_by_reviewed_import$exists),
-    nrow(stove_events_without_monitor_day_distinct)
+    nrow(stove_events_without_monitor_day_distinct),
+    sum(stove_daily$valid_exclusive_use_denominator & !stove_daily$observed_stove_use_day, na.rm = TRUE),
+    sum(
+      stove_daily$exclusive_lpg_recalc & !stove_daily$lpg_available_for_analysis,
+      na.rm = TRUE
+    ),
+    sum(
+      stove_daily$timepoint == "baseline" &
+        stove_daily$study_arm_overall == "intervention" &
+        stove_daily$lpg_available_for_analysis,
+      na.rm = TRUE
+    ),
+    sum(
+      stove_daily$timepoint == "baseline" &
+        stove_daily$study_arm_overall == "intervention" &
+        stove_daily$exclusive_lpg_recalc,
+      na.rm = TRUE
+    ),
+    sum(
+      stove_daily$timepoint == "baseline" &
+        stove_daily$study_arm_overall == "intervention" &
+        stove_daily$biomass_recorded,
+      na.rm = TRUE
+    ),
+    nrow(geocene_lpg_unavailable_event_days)
   )
 )
 
@@ -999,9 +1492,12 @@ write_reviewed_csv(
 )
 
 sample_counts <- stove_daily %>%
+  filter(observed_stove_use_day) %>%
+  add_all_arms_rows() %>%
   group_by(timepoint, study_arm_overall) %>%
   summarise(
     n_daily_records = n(),
+    n_household_days_monitored = n(),
     n_households = n_distinct(fcn_id),
     first_monitoring_date = min(date, na.rm = TRUE),
     last_monitoring_date = max(date, na.rm = TRUE),
@@ -1015,12 +1511,16 @@ write_reviewed_csv(
 )
 
 daily_summary <- stove_daily %>%
+  filter(observed_stove_use_day) %>%
+  add_all_arms_rows() %>%
   group_by(timepoint, study_arm_overall) %>%
   summarise(
     n_daily_records = n(),
+    n_household_days_monitored = n(),
     n_households = n_distinct(fcn_id),
     n_days_exclusive_denominator =
       sum(valid_exclusive_use_denominator, na.rm = TRUE),
+    n_lpg_available_days = sum(lpg_available_for_analysis, na.rm = TRUE),
     n_exclusive_lpg_days = sum(exclusive_lpg_recalc, na.rm = TRUE),
     pct_exclusive_lpg_days = if_else(
       n_days_exclusive_denominator > 0,
@@ -1050,12 +1550,291 @@ daily_summary <- stove_daily %>%
       mean(stove_on_min_sum_total_zero, na.rm = TRUE),
     .groups = "drop"
   ) %>%
+  left_join(
+    geocene_lpg_unavailable_event_counts %>%
+      select(timepoint, study_arm_overall, n_lpg_event_days_not_available_for_analysis),
+    by = c("timepoint", "study_arm_overall")
+  ) %>%
+  mutate(
+    n_lpg_event_days_not_available_for_analysis =
+      replace_na(n_lpg_event_days_not_available_for_analysis, 0L),
+    lpg_availability_note = case_when(
+      study_arm_overall == "intervention" & timepoint == "baseline" ~
+        "Program LPG structurally unavailable to intervention households at baseline; exclusive LPG percentage is not applicable.",
+      n_lpg_available_days == 0 ~
+        "No household-days with program LPG available for analysis.",
+      TRUE ~ NA_character_
+    )
+  ) %>%
   arrange(timepoint, study_arm_overall)
 
 write_reviewed_csv(
   daily_summary,
   "table_descriptive_geocene_daily_summary.csv"
 )
+
+post_lpg_exclusive_use_denominator <- stove_daily %>%
+  filter(
+    lpg_available_for_analysis,
+    !is.na(days_after_first_receiving),
+    days_after_first_receiving >= 0,
+    observed_stove_use_day,
+    valid_exclusive_use_denominator
+  )
+
+post_lpg_exclusive_use_summary <- post_lpg_exclusive_use_denominator %>%
+  summarise(
+    summary_scope = "all_arms_all_timepoints_after_lpg_receipt",
+    included_arms = paste(
+      arm_levels[arm_levels %in% unique(as.character(study_arm_overall))],
+      collapse = "; "
+    ),
+    included_timepoints = paste(
+      timepoint_levels[timepoint_levels %in% unique(as.character(timepoint))],
+      collapse = "; "
+    ),
+    n_household_days = n(),
+    n_households = n_distinct(fcn_id),
+    n_exclusive_lpg_days = sum(exclusive_lpg_recalc, na.rm = TRUE),
+    pct_exclusive_lpg_days = if_else(
+      n_household_days > 0,
+      100 * n_exclusive_lpg_days / n_household_days,
+      NA_real_
+    ),
+    n_exclusive_biomass_days = sum(exclusive_biomass_recalc, na.rm = TRUE),
+    pct_exclusive_biomass_days = if_else(
+      n_household_days > 0,
+      100 * n_exclusive_biomass_days / n_household_days,
+      NA_real_
+    ),
+    n_mixed_use_days = sum(mixed_use_recalc, na.rm = TRUE),
+    pct_mixed_use_days = if_else(
+      n_household_days > 0,
+      100 * n_mixed_use_days / n_household_days,
+      NA_real_
+    ),
+    denominator_note = paste(
+      "Denominator is observed stove-use household-days from both study arms and all survey timepoints",
+      "on or after the household's recorded first LPG receipt date, restricted to days when",
+      "program LPG was available for analysis."
+    ),
+    .groups = "drop"
+  )
+
+post_lpg_exclusive_use_denominator_by_arm_timepoint <-
+  post_lpg_exclusive_use_denominator %>%
+  add_all_arms_rows() %>%
+  group_by(timepoint, study_arm_overall) %>%
+  summarise(
+    n_household_days = n(),
+    n_households = n_distinct(fcn_id),
+    n_exclusive_lpg_days = sum(exclusive_lpg_recalc, na.rm = TRUE),
+    n_exclusive_biomass_days = sum(exclusive_biomass_recalc, na.rm = TRUE),
+    n_mixed_use_days = sum(mixed_use_recalc, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(timepoint, study_arm_overall)
+
+write_reviewed_csv(
+  post_lpg_exclusive_use_summary,
+  "table_descriptive_geocene_post_lpg_exclusive_use_summary.csv"
+)
+write_reviewed_csv(
+  post_lpg_exclusive_use_denominator_by_arm_timepoint,
+  "table_descriptive_geocene_post_lpg_exclusive_use_denominator_by_arm_timepoint.csv",
+  subfolder = "qa"
+)
+
+if (nrow(post_lpg_exclusive_use_summary) != 1 ||
+    post_lpg_exclusive_use_summary$n_household_days[[1]] <= 0) {
+  stop("Post-LPG exclusive-use summary has no eligible monitored household-days.", call. = FALSE)
+}
+
+if (post_lpg_exclusive_use_summary$n_household_days[[1]] !=
+    post_lpg_exclusive_use_denominator_by_arm_timepoint %>%
+      filter(study_arm_overall %in% arm_levels) %>%
+      pull(n_household_days) %>%
+      sum(na.rm = TRUE)) {
+  stop("Post-LPG exclusive-use denominator does not reconcile across arm/timepoint QA rows.", call. = FALSE)
+}
+
+if (any(!post_lpg_exclusive_use_denominator$observed_stove_use_day, na.rm = TRUE)) {
+  stop("Post-LPG exclusive-use denominator includes household-days without recorded stove use.", call. = FALSE)
+}
+
+if (any(
+  post_lpg_exclusive_use_summary$n_household_days !=
+    post_lpg_exclusive_use_summary$n_exclusive_lpg_days +
+    post_lpg_exclusive_use_summary$n_exclusive_biomass_days +
+    post_lpg_exclusive_use_summary$n_mixed_use_days,
+  na.rm = TRUE
+)) {
+  stop("Post-LPG exclusive-use categories do not sum to the monitored household-day denominator.", call. = FALSE)
+}
+
+if (any(
+  post_lpg_exclusive_use_denominator_by_arm_timepoint$n_household_days !=
+    post_lpg_exclusive_use_denominator_by_arm_timepoint$n_exclusive_lpg_days +
+    post_lpg_exclusive_use_denominator_by_arm_timepoint$n_exclusive_biomass_days +
+    post_lpg_exclusive_use_denominator_by_arm_timepoint$n_mixed_use_days,
+  na.rm = TRUE
+)) {
+  stop("Post-LPG exclusive-use arm/timepoint categories do not sum to the monitored household-day denominator.", call. = FALSE)
+}
+
+post_lpg_30day_exclusive_use_denominator <- stove_daily %>%
+  filter(
+    lpg_available_for_analysis,
+    !is.na(days_after_first_receiving),
+    days_after_first_receiving >= 30,
+    observed_stove_use_day,
+    valid_exclusive_use_denominator
+  )
+
+post_lpg_30day_exclusive_use_summary <-
+  post_lpg_30day_exclusive_use_denominator %>%
+  summarise(
+    summary_scope = "all_arms_all_timepoints_30plus_days_after_lpg_receipt",
+    included_arms = paste(
+      arm_levels[arm_levels %in% unique(as.character(study_arm_overall))],
+      collapse = "; "
+    ),
+    included_timepoints = paste(
+      timepoint_levels[timepoint_levels %in% unique(as.character(timepoint))],
+      collapse = "; "
+    ),
+    minimum_days_after_first_receiving = 30L,
+    n_household_days = n(),
+    n_households = n_distinct(fcn_id),
+    n_exclusive_lpg_days = sum(exclusive_lpg_recalc, na.rm = TRUE),
+    pct_exclusive_lpg_days = if_else(
+      n_household_days > 0,
+      100 * n_exclusive_lpg_days / n_household_days,
+      NA_real_
+    ),
+    n_exclusive_biomass_days = sum(exclusive_biomass_recalc, na.rm = TRUE),
+    pct_exclusive_biomass_days = if_else(
+      n_household_days > 0,
+      100 * n_exclusive_biomass_days / n_household_days,
+      NA_real_
+    ),
+    n_mixed_use_days = sum(mixed_use_recalc, na.rm = TRUE),
+    pct_mixed_use_days = if_else(
+      n_household_days > 0,
+      100 * n_mixed_use_days / n_household_days,
+      NA_real_
+    ),
+    denominator_note = paste(
+      "Denominator is observed stove-use household-days from both study arms and all survey timepoints",
+      "at least 30 days after the household's recorded first LPG receipt date, restricted to days when",
+      "program LPG was available for analysis."
+    ),
+    .groups = "drop"
+  )
+
+post_lpg_30day_exclusive_use_denominator_by_arm_timepoint <-
+  post_lpg_30day_exclusive_use_denominator %>%
+  add_all_arms_rows() %>%
+  group_by(timepoint, study_arm_overall) %>%
+  summarise(
+    n_household_days = n(),
+    n_households = n_distinct(fcn_id),
+    n_exclusive_lpg_days = sum(exclusive_lpg_recalc, na.rm = TRUE),
+    n_exclusive_biomass_days = sum(exclusive_biomass_recalc, na.rm = TRUE),
+    n_mixed_use_days = sum(mixed_use_recalc, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(timepoint, study_arm_overall)
+
+write_reviewed_csv(
+  post_lpg_30day_exclusive_use_summary,
+  "table_descriptive_geocene_post_lpg_30day_exclusive_use_summary.csv"
+)
+write_reviewed_csv(
+  post_lpg_30day_exclusive_use_denominator_by_arm_timepoint,
+  "table_descriptive_geocene_post_lpg_30day_exclusive_use_denominator_by_arm_timepoint.csv",
+  subfolder = "qa"
+)
+
+if (nrow(post_lpg_30day_exclusive_use_summary) != 1 ||
+    post_lpg_30day_exclusive_use_summary$n_household_days[[1]] <= 0) {
+  stop("Post-LPG 30-day exclusive-use summary has no eligible monitored household-days.", call. = FALSE)
+}
+
+if (post_lpg_30day_exclusive_use_summary$n_household_days[[1]] !=
+    post_lpg_30day_exclusive_use_denominator_by_arm_timepoint %>%
+      filter(study_arm_overall %in% arm_levels) %>%
+      pull(n_household_days) %>%
+      sum(na.rm = TRUE)) {
+  stop("Post-LPG 30-day exclusive-use denominator does not reconcile across arm/timepoint QA rows.", call. = FALSE)
+}
+
+if (any(!post_lpg_30day_exclusive_use_denominator$observed_stove_use_day, na.rm = TRUE)) {
+  stop("Post-LPG 30-day exclusive-use denominator includes household-days without recorded stove use.", call. = FALSE)
+}
+
+if (any(
+  post_lpg_30day_exclusive_use_summary$n_household_days !=
+    post_lpg_30day_exclusive_use_summary$n_exclusive_lpg_days +
+    post_lpg_30day_exclusive_use_summary$n_exclusive_biomass_days +
+    post_lpg_30day_exclusive_use_summary$n_mixed_use_days,
+  na.rm = TRUE
+)) {
+  stop("Post-LPG 30-day exclusive-use categories do not sum to the monitored household-day denominator.", call. = FALSE)
+}
+
+if (any(
+  post_lpg_30day_exclusive_use_denominator_by_arm_timepoint$n_household_days !=
+    post_lpg_30day_exclusive_use_denominator_by_arm_timepoint$n_exclusive_lpg_days +
+    post_lpg_30day_exclusive_use_denominator_by_arm_timepoint$n_exclusive_biomass_days +
+    post_lpg_30day_exclusive_use_denominator_by_arm_timepoint$n_mixed_use_days,
+  na.rm = TRUE
+)) {
+  stop("Post-LPG 30-day exclusive-use arm/timepoint categories do not sum to the monitored household-day denominator.", call. = FALSE)
+}
+
+baseline_intervention_summary <- daily_summary %>%
+  filter(timepoint == "baseline", study_arm_overall == "intervention")
+
+if (nrow(baseline_intervention_summary) != 1 ||
+    baseline_intervention_summary$n_exclusive_lpg_days[[1]] != 0) {
+  stop(
+    "Baseline intervention Geocene summary must have zero exclusive-LPG days.",
+    call. = FALSE
+  )
+}
+
+if (any(stove_daily$exclusive_lpg_recalc & !stove_daily$lpg_available_for_analysis, na.rm = TRUE)) {
+  stop("Exclusive LPG was counted on a day when program LPG was unavailable for analysis.", call. = FALSE)
+}
+
+if (any(
+  stove_daily$timepoint == "baseline" &
+    stove_daily$study_arm_overall == "intervention" &
+    stove_daily$lpg_available_for_analysis,
+  na.rm = TRUE
+)) {
+  stop("Baseline intervention rows must not be marked LPG-available for analysis.", call. = FALSE)
+}
+
+baseline_intervention_biomass_event_days_raw <- stove_event_day_fuel %>%
+  filter(
+    fuel_type == "biomass",
+    study_arm_event == "intervention",
+    geocene_timepoint_from_date_reviewed(date) == "baseline"
+  ) %>%
+  summarise(n = n_distinct(fcn_id, date), .groups = "drop") %>%
+  pull(n)
+
+baseline_intervention_biomass_event_days_retained <- stove_daily %>%
+  filter(timepoint == "baseline", study_arm_overall == "intervention", biomass_recorded) %>%
+  summarise(n = n_distinct(fcn_id, date), .groups = "drop") %>%
+  pull(n)
+
+if (baseline_intervention_biomass_event_days_raw > 0 &&
+    baseline_intervention_biomass_event_days_retained == 0) {
+  stop("Baseline intervention biomass event-days were dropped during LPG availability correction.", call. = FALSE)
+}
 
 ################################################################################
 # RF105 Figure 2-style daily stove-use panels
@@ -1076,6 +1855,8 @@ df_days_receive <- stove_daily %>%
     )
   ) %>%
   filter(
+    lpg_available_for_analysis,
+    observed_stove_use_day,
     before_after == "Days After Receiving",
     !is.na(days_after_first_receiving)
   )
@@ -1143,8 +1924,8 @@ fig2_monitor_data <- df_days_receive %>%
   transmute(
     days_after_first_receiving,
     before_after,
-    LPG = as.integer(lpg_monitored),
-    Biomass = as.integer(biomass_monitored)
+    LPG = as.integer(lpg_recorded),
+    Biomass = as.integer(biomass_recorded)
   ) %>%
   pivot_longer(
     cols = c(LPG, Biomass),
@@ -1247,7 +2028,7 @@ fig2_monitored <- ggplot(
   scale_color_manual(values = stove_colors) +
   labs(
     x = "Days after first receiving LPG through free distribution program",
-    y = "Number of stoves monitored",
+    y = "Number of stoves with recorded use",
     color = "Stove"
   ) +
   theme_bw(base_size = 11) +
@@ -1296,6 +2077,8 @@ save_reviewed_plot(
 
 exclusive_use_by_month_hh <- stove_daily %>%
   filter(
+    lpg_available_for_analysis,
+    observed_stove_use_day,
     lpg_enrolled_and_receiving ==
       "receiving LPG through distribution program",
     !is.na(months_after_first_receiving_numeric)
@@ -1431,6 +2214,7 @@ supplement_day_data <- stove_daily %>%
       levels = c("0", "1-19", "20-39", "40-59", "60-79", "80-99", "100")
     )
   ) %>%
+  filter(lpg_available_for_analysis, observed_stove_use_day) %>%
   filter(!is.na(days_after_group))
 
 supplement_day_summary <- supplement_day_data %>%

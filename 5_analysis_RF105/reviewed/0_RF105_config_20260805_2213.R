@@ -326,7 +326,9 @@ quarantine_restricted_public_csvs <- function() {
   invisible(moved)
 }
 
-quarantine_restricted_public_csvs()
+# Public-table quarantine is intentionally not run on source(config_file).
+# The RF105 runner calls quarantine_restricted_public_csvs() explicitly before
+# and after the workflow so this filesystem-moving step is visible.
 
 resolve_reviewed_or_restricted_csv <- function(filename, restricted_subfolder = "identified_tables") {
   candidate_paths <- c(

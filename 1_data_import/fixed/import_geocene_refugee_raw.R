@@ -95,12 +95,58 @@ if (!"fcn_id" %in% names(survey_data)) {
 survey_data <- survey_data %>%
   select(any_of(c(
     "timepoint", "study_arm_overall", "fcn_id", "camp_id", "block_id",
-    "subblock_id", "first_enrolled_lpg", "first_receive_lpg"
+    "subblock_id", "first_enrolled_lpg", "first_receive_lpg",
+    "raw_collection_round", "raw_survey_version", "raw_source_file",
+    "raw_source_path"
   ))) %>%
   mutate(
+    timepoint = as.character(timepoint),
     fcn_id = as.character(fcn_id),
-    study_arm_overall = as.character(study_arm_overall)
+    study_arm_overall = as.character(study_arm_overall),
+    first_enrolled_lpg = as.character(first_enrolled_lpg),
+    first_receive_lpg = as.character(first_receive_lpg)
   )
+
+geocene_lpg_date_correction_audit <- survey_data %>%
+  filter(
+    timepoint == "midline",
+    study_arm_overall == "intervention",
+    fcn_id == "123970",
+    str_squish(first_enrolled_lpg) %in% c("1/1/1982", "Jan 1, 1982", "1982-01-01")
+  ) %>%
+  transmute(
+    fcn_id,
+    timepoint,
+    study_arm_overall,
+    variable = "first_enrolled_lpg",
+    old_value = first_enrolled_lpg,
+    corrected_value = "1/1/2019",
+    correction_reason = "Raw midline survey value for fcn_id 123970 was confirmed to be a data-entry error; correct first LPG enrollment date is 1/1/2019.",
+    raw_collection_round = if ("raw_collection_round" %in% names(.)) raw_collection_round else NA_character_,
+    raw_survey_version = if ("raw_survey_version" %in% names(.)) raw_survey_version else NA_character_,
+    raw_source_file = if ("raw_source_file" %in% names(.)) raw_source_file else NA_character_,
+    raw_source_path = if ("raw_source_path" %in% names(.)) raw_source_path else NA_character_
+  )
+
+survey_data <- survey_data %>%
+  mutate(
+    first_enrolled_lpg = if_else(
+      timepoint == "midline" &
+        study_arm_overall == "intervention" &
+        fcn_id == "123970" &
+        str_squish(first_enrolled_lpg) %in% c("1/1/1982", "Jan 1, 1982", "1982-01-01"),
+      "1/1/2019",
+      first_enrolled_lpg
+    )
+  )
+
+geocene_lpg_date_correction_audit_path <- raw_import_write_csv(
+  geocene_lpg_date_correction_audit,
+  file.path(
+    "4_data", "clean_final", "imported_raw",
+    "geocene_refugee_lpg_date_correction_audit.csv"
+  )
+)
 
 df_mission_id_practice <- df_tags %>%
   filter(tag %in% c("practice", "not_normal", "empty")) %>%
@@ -185,6 +231,19 @@ parse_geocene_time <- function(x) {
   ymd_hms(str_replace(str_replace(as.character(x), "T", " "), "Z$", ""), quiet = TRUE)
 }
 
+geocene_lpg_available_for_analysis <- function(study_arm_overall, date, first_receive_lpg_ymd) {
+  timepoint <- as.character(geocene_timepoint_from_date(date))
+  case_when(
+    study_arm_overall == "comparison" ~ TRUE,
+    study_arm_overall == "intervention" & timepoint == "baseline" ~ FALSE,
+    study_arm_overall == "intervention" &
+      timepoint %in% c("midline", "endline") &
+      !is.na(first_receive_lpg_ymd) &
+      date >= first_receive_lpg_ymd ~ TRUE,
+    TRUE ~ FALSE
+  )
+}
+
 df_events_stove_on <- df_events %>%
   left_join(df_missions_hh_id, by = "mission_id") %>%
   right_join(df_mission_id_to_analyze, by = "mission_id") %>%
@@ -205,6 +264,11 @@ df_events_stove_on <- df_events %>%
       date >= first_receive_lpg_ymd ~ "receiving LPG through distribution program",
       study_arm_overall == "comparison" ~ "receiving LPG through distribution program",
       TRUE ~ "not yet receiving LPG through distribution program"
+    ),
+    lpg_available_for_analysis = geocene_lpg_available_for_analysis(
+      study_arm_overall,
+      date,
+      first_receive_lpg_ymd
     ),
     included_by_reviewed_rule_order =
       lpg_enrolled_and_receiving == "receiving LPG through distribution program",
@@ -288,6 +352,11 @@ df_monitor_days_raw <- df_mission_logs %>%
       date < first_receive_lpg_ymd | is.na(first_receive_lpg_ymd) ~ "not yet receiving LPG through distribution program",
       date >= first_receive_lpg_ymd ~ "receiving LPG through distribution program",
       TRUE ~ "not yet receiving LPG through distribution program"
+    ),
+    lpg_available_for_analysis = geocene_lpg_available_for_analysis(
+      study_arm_overall,
+      date,
+      first_receive_lpg_ymd
     ),
     community = "refugee",
     data_type = "geocene_stove_monitor_day",
@@ -417,7 +486,11 @@ df_geocene_import_inclusion_audit_analysis_eligible_by_arm <-
 
 df_events_stove_on_per_day <- df_events_stove_on_lt_3mo %>%
   filter(fcn_id %notin% df_have_geocene_but_no_survey_data_fcn_id) %>%
-  group_by(study_arm_overall, hh_id, fcn_id, fuel_type, date, first_receive_lpg_ymd, lpg_enrolled_and_receiving) %>%
+  group_by(
+    study_arm_overall, hh_id, fcn_id, fuel_type, date,
+    first_receive_lpg_ymd, lpg_enrolled_and_receiving,
+    lpg_available_for_analysis
+  ) %>%
   summarise(n = n(), stove_on_min_sum = sum(stove_on_min, na.rm = TRUE), .groups = "drop") %>%
   pivot_wider(names_from = fuel_type, values_from = c(n, stove_on_min_sum)) %>%
   mutate(
@@ -448,8 +521,7 @@ df_events_stove_on_per_day <- df_events_stove_on_lt_3mo %>%
   rename(
     cooking_events_with_biomass = any_of("n_biomass"),
     cooking_events_with_lpg = any_of("n_lpg")
-  ) %>%
-  filter(lpg_enrolled_and_receiving == "receiving LPG through distribution program")
+  )
 
 events_path <- raw_import_write_rds(
   df_events_stove_on,
@@ -515,6 +587,7 @@ summary <- data.frame(
     "geocene_refugee_import_inclusion_audit_by_arm",
     "geocene_refugee_import_inclusion_audit_analysis_eligible_by_household",
     "geocene_refugee_import_inclusion_audit_analysis_eligible_by_arm",
+    "geocene_refugee_lpg_date_correction_audit",
     "geocene_refugee_monitor_day_denominator_by_household",
     "geocene_refugee_monitor_day_denominator_by_arm",
     "geocene_refugee_no_survey_match"
@@ -527,6 +600,7 @@ summary <- data.frame(
     inclusion_audit_arm_path,
     inclusion_audit_analysis_household_path,
     inclusion_audit_analysis_arm_path,
+    geocene_lpg_date_correction_audit_path,
     monitor_day_household_path,
     monitor_day_arm_path,
     no_survey_path
@@ -539,6 +613,7 @@ summary <- data.frame(
     nrow(df_geocene_import_inclusion_audit_by_arm),
     nrow(df_geocene_import_inclusion_audit_analysis_eligible_by_household),
     nrow(df_geocene_import_inclusion_audit_analysis_eligible_by_arm),
+    nrow(geocene_lpg_date_correction_audit),
     nrow(df_monitor_day_denominator_by_household),
     nrow(df_monitor_day_denominator_by_arm),
     nrow(df_have_geocene_but_no_survey_data)
@@ -551,4 +626,3 @@ raw_import_write_csv(
 )
 
 message("Wrote ", daily_path)
-

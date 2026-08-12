@@ -1,0 +1,87 @@
+Checking public reviewed table folder for restricted columns before workflow.
+Running G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/5_analysis_RF105/reviewed/0.1_fcn_id_presence_by_arm_20260805_2213.R
+Wrote restricted QA file: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/restricted_qa_fcn_duplicate_records.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_qa_fcn_arm_timepoint_counts.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_qa_fcn_allocation_master_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_qa_fcn_set_differences.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/release/table_release_restricted_qa_manifest.csv
+Wrote restricted QA file: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/restricted_qa_fcn_presence_long.csv
+Wrote restricted QA file: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/restricted_qa_fcn_presence_wide.csv
+Wrote restricted QA file: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/restricted_qa_fcn_allocation_reconciliation.csv
+Wrote restricted QA file: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/restricted_qa_fcn_intervention_endline_ids.csv
+Wrote restricted QA file: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/restricted_qa_fcn_comparison_midline_ids.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/release/table_release_checklist.csv
+fcn_id presence checks complete.
+Running G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/5_analysis_RF105/reviewed/1_geocene_stove_use_20260805_2213.R
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_pathway_notes.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_raw_paths.csv
+Restricted fields detected (fcn_id, hh_id); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_inclusion_audit_household.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_inclusion_audit_arm.csv
+Restricted fields detected (fcn_id, hh_id); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_analysis_inclusion_audit_household.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_analysis_inclusion_audit_arm.csv
+Restricted fields detected (fcn_id, raw_collection_round, raw_survey_version, raw_source_file, raw_source_path); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_lpg_date_correction_audit.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_variable_availability.csv
+Restricted fields detected (fcn_id, hh_id, date, collection_date, raw_collection_round, raw_source_file); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_unclassified_timepoints.csv
+Restricted fields detected (source_file); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_reconciliation_source_audit.csv
+Restricted fields detected (fcn_id, date, hh_id_event); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_monitor_denominator_unmatched_event_days.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_monitor_denominator_unmatched_arm.csv
+Restricted fields detected (fcn_id, hh_id_event); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_monitor_denominator_unmatched_household.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_denominator_sensitivity.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_monitor_window_source_summary.csv
+Restricted fields detected (fcn_id, hh_id, date, raw_collection_round, raw_source_file); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/identified_tables/table_descriptive_stove_daily_dataset.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_monitoring_scope_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_days_after_receipt_reconciliation.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_sensor_window_monitoring_scope_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_stoves_monitored_by_days_after_receipt.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_stoves_monitored_by_days_after_receipt_by_arm.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_sensor_window_stoves_by_days_after_receipt.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_sensor_window_stoves_by_days_after_receipt_by_arm.csv
+Restricted fields detected (fcn_id, hh_id, date, raw_collection_round, raw_source_file); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_duplicate_dates.csv
+Restricted fields detected (fcn_id, hh_id, date); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/qa/table_descriptive_geocene_lpg_unavailable_event_days.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_lpg_unavailable_event_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_lpg_unavailable_event_counts.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_quality_checks.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_sample_counts.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_daily_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_post_lpg_exclusive_use_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_post_lpg_exclusive_use_denominator_by_arm_timepoint.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_geocene_post_lpg_30day_exclusive_use_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/qa/table_descriptive_geocene_post_lpg_30day_exclusive_use_denominator_by_arm_timepoint.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_stove_composite_plot_data.csv
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_descriptive_stove_use_composite_panel.png
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_descriptive_stove_minutes_by_day.png
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_descriptive_stove_use_percent_by_day.png
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_descriptive_stoves_monitored_by_day.png
+Restricted fields detected (fcn_id); wrote restricted table only: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/8_restricted/RF105_reviewed_20260812/identified_tables/table_descriptive_stove_exclusive_household_month.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_stove_exclusive_month_summary.csv
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_descriptive_exclusive_lpg_by_month.png
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_stove_day_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_stove_lpg_distribution.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_stove_energy_summary.csv
+Wrote table: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/7_tables/RF105_reviewed_20260812/table_descriptive_stove_energy_plot_data.csv
+Wrote figure: G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/6_figures/RF105_reviewed_20260812/fig_descriptive_stove_energy_by_day.png
+RF105 reviewed combined Geocene stove-use analysis complete.
+Running G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/5_analysis_RF105/reviewed/2_pm25_ambient_adjusted_analysis_20260805_2213.R
+Loading required package: Matrix
+
+Attaching package: 'Matrix'
+
+The following objects are masked from 'package:tidyr':
+
+    expand, pack, unpack
+
+Reading cleaned PM2.5 inputs
+Summarizing indoor PM2.5 to household monitoring windows
+Matching household windows to concurrent ambient PM2.5
+Writing analysis-ready datasets and diagnostics
+Fitting primary and sensitivity models
+Running rDiD analyses for ambient-excess indoor PM2.5 outcomes
+Running rDiD primary_baseline_midline: indoor_minus_ambient_f025
+Running rDiD primary_baseline_midline: indoor_minus_ambient_f050
+Running rDiD primary_baseline_midline: indoor_minus_ambient_f075
+Running rDiD primary_baseline_midline: indoor_minus_ambient_f100
+Running rDiD secondary_baseline_endline: indoor_minus_ambient_f025
+Running rDiD secondary_baseline_endline: indoor_minus_ambient_f050
+Running rDiD secondary_baseline_endline: indoor_minus_ambient_f075
+Running rDiD secondary_baseline_endline: indoor_minus_ambient_f100
+Evaluating caregiver and child time-weighted PM2.5 exposure
