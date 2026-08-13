@@ -30,3 +30,5 @@ desktop.ini
 *.RData*
 archive/root_loose_files_20260805/**
 8_restricted/**
+
+logs/run_all/

@@ -1,6 +1,6 @@
 # Cleaning fixes log
 
-Generated: 2026-08-12 00:24:20 PDT
+Generated: 2026-08-12 17:18:12 PDT
 
 ## Fixes implemented
 
@@ -30,10 +30,10 @@ Generated: 2026-08-12 00:24:20 PDT
 - `survey_host_household`:     513 rows, 2879 columns; timepoints: baseline=200; midline=181; endline=132
 - `survey_host_location`:    1029 rows,   40 columns; timepoints: midline=1029
 - `survey_host_symptoms`:    1767 rows,   34 columns; timepoints: midline=1029; endline=738
-- `survey_refugee_hh_members`:   11967 rows,   57 columns; timepoints: midline=6355; endline=5612
-- `survey_refugee_household`:    3284 rows, 3150 columns; timepoints: baseline=1193; midline=1145; endline=946
-- `survey_refugee_location`:    6355 rows,   44 columns; timepoints: midline=6355
-- `survey_refugee_symptoms`:   11967 rows,   37 columns; timepoints: midline=6355; endline=5612
+- `survey_refugee_hh_members`:   11933 rows,   57 columns; timepoints: midline=6321; endline=5612
+- `survey_refugee_household`:    3279 rows, 3150 columns; timepoints: baseline=1193; midline=1140; endline=946
+- `survey_refugee_location`:    6321 rows,   44 columns; timepoints: midline=6321
+- `survey_refugee_symptoms`:   11933 rows,   37 columns; timepoints: midline=6321; endline=5612
 
 ## Archive handling
 

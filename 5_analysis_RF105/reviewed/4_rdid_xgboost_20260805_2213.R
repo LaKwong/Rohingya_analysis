@@ -386,6 +386,27 @@ format_weighted_components_rdid <- function(weight_lookup, variables) {
   paste0(variables, "*", round(unname(weight_lookup[variables]), 2), collapse = " + ")
 }
 
+
+weighted_mean_pm_rdid <- function(x, weight) {
+  x <- as_number(x)
+  weight <- as_number(weight)
+  keep <- !is.na(x) & is.finite(x)
+
+  if (!any(keep)) {
+    return(NA_real_)
+  }
+
+  x_keep <- x[keep]
+  weight_keep <- weight[keep]
+  weight_keep[is.na(weight_keep) | !is.finite(weight_keep) | weight_keep < 0] <- 0
+
+  if (sum(weight_keep, na.rm = TRUE) <= 0) {
+    return(mean(x_keep, na.rm = TRUE))
+  }
+
+  weighted.mean(x_keep, weight_keep, na.rm = TRUE)
+}
+
 derive_rdid_empirical_coping_weights <- function(df, label_data, component_map,
                                                  difficult_var, easiest_var,
                                                  included_col) {
@@ -1770,7 +1791,7 @@ if (length(pm_adjusted_missing_vars) > 0) {
   )
 }
 
-pm_household <- pm_adjusted_raw %>%
+pm_adjusted_clean <- pm_adjusted_raw %>%
   clean_timepoint_arm() %>%
   transmute(
     fcn_id = as.character(fcn_id),
@@ -1792,17 +1813,33 @@ pm_household <- pm_adjusted_raw %>%
     fcn_id != "",
     !is.na(timepoint),
     !is.na(study_arm_overall)
-  ) %>%
+  )
+
+pm_source_household_timepoint_counts <- pm_adjusted_clean %>%
+  group_by(fcn_id, timepoint) %>%
+  summarise(
+    study_arm_overall = as.character(first_nonmissing(study_arm_overall)),
+    n_source_rows = n(),
+    n_windows_source = sum(n_windows, na.rm = TRUE),
+    n_pm_observations_source = sum(pm25_n_observations, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# PM2.5 rDiD is household-level. Repeated short-term PM rows within a
+# household-timepoint are aggregated before the rDiD panel is paired, so valid
+# 24-hour periods/windows are not counted as independent households.
+pm_household <- pm_adjusted_clean %>%
   group_by(fcn_id, timepoint) %>%
   summarise(
     study_arm_overall = as.character(first_nonmissing(study_arm_overall)),
     collection_date_min = if (all(is.na(collection_date_min))) as.Date(NA) else min(collection_date_min, na.rm = TRUE),
     collection_date_max = if (all(is.na(collection_date_max))) as.Date(NA) else max(collection_date_max, na.rm = TRUE),
+    n_source_rows = n(),
     n_windows = sum(n_windows, na.rm = TRUE),
     n_monitor_files = sum(n_monitor_files, na.rm = TRUE),
     pm25_n_observations = sum(pm25_n_observations, na.rm = TRUE),
-    mean_ambient_coverage_prop = mean(mean_ambient_coverage_prop, na.rm = TRUE),
-    across(starts_with("pm25_ambient_excess_"), ~ mean(.x, na.rm = TRUE)),
+    mean_ambient_coverage_prop = weighted_mean_pm_rdid(mean_ambient_coverage_prop, n_windows),
+    across(starts_with("pm25_ambient_excess_"), ~ weighted_mean_pm_rdid(.x, pm25_n_observations)),
     .groups = "drop"
   ) %>%
   mutate(
@@ -1813,6 +1850,17 @@ pm_household <- pm_adjusted_raw %>%
       mean_ambient_coverage_prop
     )
   )
+
+pm_household_duplicate_audit <- pm_household %>%
+  count(fcn_id, timepoint, name = "n_rows_after_aggregation") %>%
+  filter(n_rows_after_aggregation > 1)
+
+if (nrow(pm_household_duplicate_audit) > 0) {
+  stop(
+    "PM2.5 rDiD panel still has duplicate fcn_id/timepoint rows after household-level aggregation.",
+    call. = FALSE
+  )
+}
 
 pm_adjusted_source_audit <- pm_adjusted_source %>%
   mutate(
@@ -1834,7 +1882,14 @@ pm_adjusted_source_audit <- pm_adjusted_source %>%
         "pm25_ambient_excess_f100"),
       collapse = "; "
     ),
-    reviewed_rdid_uses_raw_indoor_pm = FALSE
+    reviewed_rdid_uses_raw_indoor_pm = FALSE,
+    reviewed_rdid_analysis_unit = "one fcn_id household-timepoint aggregate row",
+    reviewed_rdid_cluster_unit = "fcn_id",
+    reviewed_rdid_repeated_measure_handling = paste(
+      "Valid 24-hour periods/windows for the same fcn_id and timepoint are",
+      "treated as repeated short-term measures and aggregated before rDiD;",
+      "they are not counted as independent households."
+    )
   )
 
 safe_write_reviewed_csv(
@@ -1868,6 +1923,162 @@ pm_household_counts <- pm_household %>%
 safe_write_reviewed_csv(
   pm_household_counts,
   "table_rDiD_pm25_household_counts.csv",
+  subfolder = "qa"
+)
+
+pm_household_timepoint_unit_audit <- pm_source_household_timepoint_counts %>%
+  group_by(timepoint, study_arm_overall) %>%
+  summarise(
+    n_rdid_household_timepoints = n(),
+    n_households = n_distinct(fcn_id),
+    n_source_rows_before_aggregation = sum(n_source_rows, na.rm = TRUE),
+    n_household_timepoints_with_multiple_source_rows = sum(n_source_rows > 1, na.rm = TRUE),
+    max_source_rows_per_household_timepoint = max(n_source_rows, na.rm = TRUE),
+    n_ambient_matched_windows = sum(n_windows_source, na.rm = TRUE),
+    n_pm_observations = sum(n_pm_observations_source, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    rdid_analysis_unit = "one fcn_id household-timepoint aggregate row",
+    rdid_cluster_unit = "fcn_id",
+    rdid_repeated_measure_handling = paste(
+      "Any repeated PM source rows within fcn_id/timepoint are averaged before",
+      "rDiD. The rDiD sample size and standard error are therefore based on",
+      "paired households, not source rows or valid 24-hour periods."
+    )
+  ) %>%
+  arrange(timepoint, study_arm_overall)
+
+safe_write_reviewed_csv(
+  pm_household_timepoint_unit_audit,
+  "table_rDiD_pm25_household_timepoint_unit_audit.csv",
+  subfolder = "qa"
+)
+
+pm_24h_period_file <- file.path(
+  dirname(pm_adjusted_file),
+  "table_pm25_hapin_24h_period_summary_internal.csv"
+)
+
+make_pm_24h_cluster_audit_note <- function(status, note) {
+  tibble(
+    timepoint = NA_character_,
+    study_arm_overall = NA_character_,
+    n_household_timepoints = NA_integer_,
+    n_households = NA_integer_,
+    n_valid_24h_periods = NA_integer_,
+    n_household_timepoints_with_gt1_valid_24h = NA_integer_,
+    mean_valid_24h_periods_per_household_timepoint = NA_real_,
+    max_valid_24h_periods_per_household_timepoint = NA_integer_,
+    valid_24h_source_file = pm_24h_period_file,
+    audit_status = status,
+    rdid_analysis_unit = "one fcn_id household-timepoint aggregate row",
+    rdid_cluster_unit = "fcn_id",
+    rdid_repeated_measure_handling = note
+  )
+}
+
+pm_valid_24h_period_cluster_audit <- make_pm_24h_cluster_audit_note(
+  "not_run",
+  "Valid 24-hour-period source file was not inspected."
+)
+
+if (file.exists(pm_24h_period_file)) {
+  pm_24h_required_vars <- c(
+    "fcn_id", "timepoint", "study_arm_overall", "metric_name",
+    "metric_valid_24h", "metric_value_24h", "monitoring_coverage_window_id",
+    "period_number"
+  )
+  pm_24h_raw <- readr::read_csv(pm_24h_period_file, show_col_types = FALSE)
+  pm_24h_missing_vars <- setdiff(pm_24h_required_vars, names(pm_24h_raw))
+
+  if (length(pm_24h_missing_vars) > 0) {
+    pm_valid_24h_period_cluster_audit <- make_pm_24h_cluster_audit_note(
+      "not_available_missing_columns",
+      paste(
+        "The valid 24-hour-period source file is missing required column(s):",
+        paste(pm_24h_missing_vars, collapse = ", ")
+      )
+    )
+  } else {
+    pm_valid_24h_periods <- pm_24h_raw %>%
+      clean_timepoint_arm() %>%
+      mutate(
+        fcn_id = as.character(fcn_id),
+        metric_valid_24h_flag = metric_valid_24h %in% TRUE |
+          str_to_lower(as.character(metric_valid_24h)) %in% c("true", "1", "yes")
+      ) %>%
+      filter(
+        metric_name == "ambient_adjusted_indoor_excess_pm25",
+        metric_valid_24h_flag,
+        !is.na(fcn_id),
+        fcn_id != "",
+        timepoint %in% timepoint_levels,
+        study_arm_overall %in% arm_levels,
+        !is.na(metric_value_24h),
+        is.finite(metric_value_24h)
+      )
+
+    if (nrow(pm_valid_24h_periods) == 0) {
+      pm_valid_24h_period_cluster_audit <- make_pm_24h_cluster_audit_note(
+        "no_valid_24h_period_rows",
+        "No valid ambient-adjusted 24-hour PM2.5 period rows were available for the clustering audit."
+      )
+    } else {
+      pm_valid_24h_household_timepoints <- pm_valid_24h_periods %>%
+        mutate(
+          valid_24h_period_id = paste(monitoring_coverage_window_id, period_number, sep = "__")
+        ) %>%
+        group_by(fcn_id, timepoint, study_arm_overall) %>%
+        summarise(
+          n_valid_24h_periods_per_household_timepoint = n_distinct(valid_24h_period_id),
+          .groups = "drop"
+        )
+
+      pm_valid_24h_period_cluster_audit <- pm_valid_24h_household_timepoints %>%
+        group_by(timepoint, study_arm_overall) %>%
+        summarise(
+          n_household_timepoints = n(),
+          n_households = n_distinct(fcn_id),
+          n_valid_24h_periods = sum(n_valid_24h_periods_per_household_timepoint, na.rm = TRUE),
+          n_household_timepoints_with_gt1_valid_24h = sum(n_valid_24h_periods_per_household_timepoint > 1, na.rm = TRUE),
+          mean_valid_24h_periods_per_household_timepoint = mean(n_valid_24h_periods_per_household_timepoint, na.rm = TRUE),
+          max_valid_24h_periods_per_household_timepoint = max(n_valid_24h_periods_per_household_timepoint, na.rm = TRUE),
+          .groups = "drop"
+        ) %>%
+        mutate(
+          mean_valid_24h_periods_per_household_timepoint = round(
+            mean_valid_24h_periods_per_household_timepoint,
+            2
+          ),
+          valid_24h_source_file = pm_24h_period_file,
+          audit_status = "ok",
+          rdid_analysis_unit = "one fcn_id household-timepoint aggregate row",
+          rdid_cluster_unit = "fcn_id",
+          rdid_repeated_measure_handling = paste(
+            "Valid 24-hour PM2.5 periods are repeated short-term measures",
+            "nested within fcn_id/timepoint. They are summarized into the",
+            "household-timepoint PM outcome before rDiD, so they do not inflate",
+            "the rDiD sample size or standard error denominator."
+          )
+        ) %>%
+        arrange(timepoint, study_arm_overall)
+    }
+  }
+} else {
+  pm_valid_24h_period_cluster_audit <- make_pm_24h_cluster_audit_note(
+    "valid_24h_source_file_not_found",
+    paste(
+      "The rDiD PM panel still uses one household-timepoint row from",
+      basename(pm_adjusted_file),
+      "but the 24-hour-period source table was not available for this audit."
+    )
+  )
+}
+
+safe_write_reviewed_csv(
+  pm_valid_24h_period_cluster_audit,
+  "table_rDiD_pm25_valid_24h_cluster_audit.csv",
   subfolder = "qa"
 )
 
@@ -2502,7 +2713,16 @@ pm_results <- bind_rows(
     "secondary_baseline_endline",
     "pm25_indoor_household_mean"
   )
-)
+) %>%
+  mutate(
+    note = str_squish(paste(
+      note,
+      "Cluster unit: fcn_id. PM2.5 valid 24-hour periods/windows are",
+      "repeated short-term measures nested within household-timepoint and",
+      "are aggregated before rDiD, so sample_size counts paired households,",
+      "not valid 24-hour periods."
+    ))
+  )
 
 rdid_results_all <- bind_rows(survey_results, pm_results) %>%
   arrange(contrast, domain, outcome, estimator)
@@ -2717,6 +2937,17 @@ writeLines(
     ),
     paste0("Ambient-adjusted input file: ", pm_adjusted_file),
     "",
+    "## Repeated 24-hour Periods and Household Clustering",
+    "",
+    paste(
+      "The PM2.5 rDiD analysis unit is one fcn_id household-timepoint row.",
+      "Valid 24-hour periods/windows for the same household are treated as",
+      "repeated short-term measures and aggregated before the rDiD panel is",
+      "paired. The rDiD sample size and standard errors are therefore based on",
+      "paired households, not on the number of valid 24-hour periods."
+    ),
+    "See `table_rDiD_pm25_household_timepoint_unit_audit.csv` and `table_rDiD_pm25_valid_24h_cluster_audit.csv` for source-row and valid-24-hour-period counts.",
+    "",
     pm_missing_timepoint_note,
     "",
     "## Ambient-adjusted PM2.5 Counts",
@@ -2740,7 +2971,7 @@ writeLines(
     format_pm_result_line(rdid_xgboost_results, "primary_baseline_midline"),
     format_pm_result_line(rdid_xgboost_results, "secondary_baseline_endline"),
     "",
-    "Detailed rows are in `table_rDiD_pm25_data_source.csv`, `table_rDiD_pm25_household_counts.csv`, `table_rDiD_pm25_paired_counts.csv`, `table_rDiD_pm25_paired_households.csv`, and `table_rDiD_xgboost_all_results.csv`."
+    "Detailed rows are in `table_rDiD_pm25_data_source.csv`, `table_rDiD_pm25_household_counts.csv`, `table_rDiD_pm25_household_timepoint_unit_audit.csv`, `table_rDiD_pm25_valid_24h_cluster_audit.csv`, `table_rDiD_pm25_paired_counts.csv`, `table_rDiD_pm25_paired_households.csv`, and `table_rDiD_xgboost_all_results.csv`."
   ),
   pm_audit_summary_file
 )

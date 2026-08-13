@@ -14,12 +14,13 @@
 #
 # Active reviewed workflow:
 #   1. Run household fcn_id/study-arm QA, including allocation-master reconciliation.
-#   2. Build reviewed Geocene stove-use daily analysis products.
-#   3. Build ambient-adjusted PM2.5 household-timepoint products.
-#   4. Generate all descriptive tables, figures, and embedded descriptive QA.
+#   2. Create participant-flow tables and figure by arm and timepoint.
+#   3. Build reviewed Geocene stove-use daily analysis products.
+#   4. Build ambient-adjusted PM2.5 household-timepoint products.
+#   5. Generate all descriptive tables, figures, and embedded descriptive QA.
 #      This includes the child physical-health panel sample-size diagnostic.
-#   5. Fit and post-process all rDiD/XGBoost and GLM sensitivity models.
-#   6. Run the DRDID benchmark comparison for the reviewed rDiD estimates.
+#   6. Fit and post-process all rDiD/XGBoost and GLM sensitivity models.
+#   7. Run the DRDID benchmark comparison for the reviewed rDiD estimates.
 #
 # Outputs:
 #   Tables:  7_tables/RF105_reviewed_YYYYMMDD/
@@ -90,6 +91,7 @@ message("Checking public reviewed table folder for restricted columns before wor
 quarantine_restricted_public_csvs()
 reviewed_scripts <- c(
   "0.1_fcn_id_presence_by_arm_20260805_2213.R",
+  "6_participant_flow_20260812.R",
   "1_geocene_stove_use_20260805_2213.R",
   "2_pm25_ambient_adjusted_analysis_20260805_2213.R",
   "3_descriptive_outcomes_20260805_2213.R",

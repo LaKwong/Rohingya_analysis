@@ -1773,40 +1773,155 @@ for (metric_i in hapin_metric_metadata$metric_name) {
   }
 
   if (nrow(plot_48h_data) > 0) {
-    fig_48h <- ggplot(
-      plot_48h_data,
-      aes(
-        x = study_arm_overall,
-        y = metric_value_48h_time_weighted,
-        color = study_arm_overall
-      )
-    ) +
-      geom_boxplot(width = 0.46, outlier.shape = NA, alpha = 0.12) +
-      geom_jitter(width = 0.08, height = 0, alpha = 0.45, size = 1.6) +
-      stat_summary(
-        fun = mean,
-        geom = "point",
-        shape = 23,
-        fill = "white",
-        color = "black",
-        size = 2.8
+    if (identical(metric_i, "raw_indoor_pm25")) {
+      plot_48h_indoor_data <- plot_48h_data %>%
+        transmute(
+          timepoint,
+          study_arm_overall,
+          exposure_group = case_when(
+            study_arm_overall == "comparison" ~ "comparison_indoor",
+            study_arm_overall == "intervention" ~ "intervention_indoor",
+            TRUE ~ NA_character_
+          ),
+          metric_value_48h_time_weighted,
+          source_unit = "household_indoor_48h_time_weighted_mean"
+        )
+
+      plot_48h_outdoor_data <- hapin_24h_period_wide %>%
+        filter(
+          has_valid_75pct_coverage,
+          n_ambient_rows_24h > 0,
+          !is.na(ambient_mean_pm25_24h),
+          is.finite(ambient_mean_pm25_24h),
+          ambient_mean_pm25_24h > 0
+        ) %>%
+        group_by(timepoint, hapin_window_id) %>%
+        summarise(
+          metric_value_48h_time_weighted = hapin_weighted_mean(
+            ambient_mean_pm25_24h,
+            valid_monitoring_hours
+          ),
+          source_unit = "concurrent_outdoor_48h_time_weighted_mean",
+          .groups = "drop"
+        ) %>%
+        filter(
+          !is.na(metric_value_48h_time_weighted),
+          is.finite(metric_value_48h_time_weighted),
+          metric_value_48h_time_weighted > 0
+        ) %>%
+        mutate(
+          study_arm_overall = "outdoor_pm25",
+          exposure_group = "outdoor_pm25"
+        ) %>%
+        select(
+          timepoint,
+          study_arm_overall,
+          exposure_group,
+          metric_value_48h_time_weighted,
+          source_unit
+        )
+
+      plot_48h_display_data <- bind_rows(plot_48h_indoor_data, plot_48h_outdoor_data) %>%
+        filter(!is.na(exposure_group)) %>%
+        mutate(
+          exposure_group = factor(
+            exposure_group,
+            levels = c("comparison_indoor", "intervention_indoor", "outdoor_pm25"),
+            labels = c("Comparison indoor", "Intervention indoor", "Outdoor PM2.5")
+          )
+        )
+
+      fig_48h <- ggplot(
+        plot_48h_display_data,
+        aes(
+          x = exposure_group,
+          y = metric_value_48h_time_weighted,
+          color = exposure_group
+        )
       ) +
-      facet_wrap(~ timepoint, nrow = 1) +
-      scale_color_manual(values = hapin_arm_colors, drop = FALSE) +
-      labs(
-        x = NULL,
-        y = "48-hour time-weighted PM2.5 (ug/m3)",
-        color = "Study arm",
-        title = paste0(metric_label_i, " by study arm and timepoint"),
-        subtitle = "Points are household monitoring windows; boxplots show median and IQR; diamonds show arithmetic means"
+        geom_hline(
+          yintercept = c(25, 50, 75),
+          color = "grey45",
+          linetype = "dotted",
+          linewidth = 0.35
+        ) +
+        geom_boxplot(width = 0.46, outlier.shape = NA, alpha = 0.12) +
+        geom_jitter(width = 0.08, height = 0, alpha = 0.45, size = 1.6) +
+        stat_summary(
+          fun = mean,
+          geom = "point",
+          shape = 23,
+          fill = "white",
+          color = "black",
+          size = 2.8
+        ) +
+        facet_wrap(~ timepoint, nrow = 1) +
+        scale_y_log10(
+          breaks = c(10, 25, 50, 75, 100, 250, 500, 1000),
+          labels = function(x) format(x, trim = TRUE, scientific = FALSE)
+        ) +
+        scale_color_manual(
+          values = c(
+            "Comparison indoor" = "#4E79A7",
+            "Intervention indoor" = "#D55E00",
+            "Outdoor PM2.5" = "#3A3A3A"
+          ),
+          drop = FALSE
+        ) +
+        labs(
+          x = NULL,
+          y = "48-hour time-weighted PM2.5 (ug/m3, log scale)",
+          color = NULL,
+          title = paste0(metric_label_i, " and concurrent outdoor PM2.5"),
+          subtitle = paste(
+            "Points are household monitoring windows; boxplots show median and IQR;",
+            "diamonds show arithmetic means; dotted lines mark 25, 50, and 75 ug/m3"
+          )
+        ) +
+        theme_bw(base_size = 11) +
+        theme(
+          legend.position = "bottom",
+          axis.text.x = element_text(angle = 20, hjust = 1),
+          panel.grid.minor = element_blank(),
+          strip.background = element_rect(fill = "grey92", color = "grey75")
+        )
+    } else {
+      fig_48h <- ggplot(
+        plot_48h_data,
+        aes(
+          x = study_arm_overall,
+          y = metric_value_48h_time_weighted,
+          color = study_arm_overall
+        )
       ) +
-      theme_bw(base_size = 11) +
-      theme(
-        legend.position = "bottom",
-        panel.grid.minor = element_blank(),
-        strip.background = element_rect(fill = "grey92", color = "grey75")
-      )
-    fig_48h <- hapin_add_y_scale(fig_48h, metric_i)
+        geom_boxplot(width = 0.46, outlier.shape = NA, alpha = 0.12) +
+        geom_jitter(width = 0.08, height = 0, alpha = 0.45, size = 1.6) +
+        stat_summary(
+          fun = mean,
+          geom = "point",
+          shape = 23,
+          fill = "white",
+          color = "black",
+          size = 2.8
+        ) +
+        facet_wrap(~ timepoint, nrow = 1) +
+        scale_color_manual(values = hapin_arm_colors, drop = FALSE) +
+        labs(
+          x = NULL,
+          y = "48-hour time-weighted PM2.5 (ug/m3)",
+          color = "Study arm",
+          title = paste0(metric_label_i, " by study arm and timepoint"),
+          subtitle = "Points are household monitoring windows; boxplots show median and IQR; diamonds show arithmetic means"
+        ) +
+        theme_bw(base_size = 11) +
+        theme(
+          legend.position = "bottom",
+          panel.grid.minor = element_blank(),
+          strip.background = element_rect(fill = "grey92", color = "grey75")
+        )
+      fig_48h <- hapin_add_y_scale(fig_48h, metric_i)
+    }
+
     hapin_save_plot(
       fig_48h,
       paste0("fig_pm25_hapin_48h_household_distribution_", metric_token_i, ".png"),

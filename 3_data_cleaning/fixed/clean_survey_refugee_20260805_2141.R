@@ -191,14 +191,16 @@ apply_refugee_manual_corrections <- function(data) {
   # Baseline household listing and duplicate-survey corrections. Cases that
   # previously matched on participant/child names now use non-identifying raw
   # source row numbers from the imported baseline file.
+  # This fcn_id correction is based on matches of camp, block, sub-block,
+  # caregiver names, and child names.
   idx <- manual_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 2) &
     is_timepoint("baseline") & is_arm("intervention") &
     col_equals("camp_id", "8W", TRUE) &
     col_equals("block_id", "D", TRUE) &
     col_equals("subblock_id", "I21", TRUE) &
     col_missing_or("fcn_id", c("x", "999999"))
-  set_value("fcn_id", idx, "101595", "manual_baseline_fcn_8wdi21_geocene_resolution", "Resolved using geocene_data_but_no_survey_error_fix_fcn_id.xlsx after a discussion with the team to clarify the hh_id.")
-  set_value("hh_id", idx, "8WDI21101595", "manual_baseline_hh_id_8wdi21_geocene_resolution", "Resolved using geocene_data_but_no_survey_error_fix_fcn_id.xlsx after a discussion with the team to clarify the hh_id.")
+  set_value("fcn_id", idx, "100976", "manual_baseline_fcn_8wdi21_location_name_match", "Decision based on matches of camp, block, sub-block, caregiver names, and child names.")
+  set_value("hh_id", idx, "8WDI21100976", "manual_baseline_hh_id_8wdi21_location_name_match", "Update hh_id to remain consistent with the corrected fcn_id after matching camp, block, sub-block, caregiver names, and child names.")
 
   idx <- manual_case("RohingyaFuelMaster_Corrected_20200419_refugee.csv", 42) &
     is_timepoint("baseline") & is_arm("intervention") &
@@ -278,9 +280,17 @@ apply_refugee_manual_corrections <- function(data) {
     c("186294" = "285592", "199748" = "299748", "245292" = "145292", "200677" = "200667", "194490" = "194499", "197472" = "197422", "383686" = "283686", "297028" = "207028", "168661" = "451059", "172965" = "172964", "183398" = "283398", "180887" = "180837", "184810" = "184809", "185054" = "185055", "193911" = "185415", "185979" = "185980", "157669" = "177669", "177668" = "188577", "177772" = "157574", "177471" = "173073", "287797" = "278797", "296727" = "296729", "650712" = "295896", "650705" = "295894", "650711" = "295890", "451786" = "166147", "164741" = "164742", "120733" = "120773"),
     "midline", "comparison", "manual_midline_comparison_fcn", "Manual fcn_id correction from manual cleaner."
   )
+  # These fcn_id corrections are based on matches of camp, block, sub-block,
+  # caregiver names, and child names.
+  set_by_fcn(
+    "fcn_id",
+    c("600901" = "108247", "450097" = "288766", "122503" = "125503", "122485" = "107190", "290439" = "291216", "601066" = "124948"),
+    "midline", rule_id = "manual_midline_fcn_location_caregiver_child_match",
+    note = "Decision based on matches of camp, block, sub-block, caregiver names, and child names."
+  )
 
   set_constant("camp_id", "165336", "5", "midline", rule_id = "manual_midline_camp_165336", note = "Manual camp_id correction from manual cleaner.")
-  set_constant("camp_id", c("100959", "100971", "100972", "100976", "100999", "101034", "101038", "101109", "101172", "101239", "101251", "101574", "101618", "101667", "101705", "101723", "101737", "101762", "101777", "106976", "113898", "117152", "117719", "117729", "119902", "122567", "123342", "123677", "123970", "123976", "125795", "274944", "290417", "290439", "290495", "291236", "291525", "296044", "300629"), "8W", "midline", rule_id = "manual_midline_camp_8w", note = "Manual camp_id correction from manual cleaner.")
+  set_constant("camp_id", c("100959", "100971", "100972", "100976", "100999", "101034", "101038", "101109", "101172", "101239", "101251", "101574", "101618", "101667", "101705", "101723", "101737", "101762", "101777", "106976", "113898", "117152", "117719", "117729", "119902", "122567", "123342", "123677", "123970", "123976", "125795", "274944", "290417", "290439", "291216", "290495", "291236", "291525", "296044", "300629"), "8W", "midline", rule_id = "manual_midline_camp_8w", note = "Manual camp_id correction from manual cleaner.")
   set_constant("camp_id", c("114476", "114556", "124614"), "8E", "midline", rule_id = "manual_midline_camp_8e", note = "Manual camp_id correction from manual cleaner.")
   set_constant("camp_id", "115663", "9", "midline", rule_id = "manual_midline_camp_115663", note = "Manual camp_id correction from manual cleaner.")
   set_constant("camp_id", c("115815", "110636", "109334", "193582"), "10", "midline", rule_id = "manual_midline_camp_10", note = "Manual camp_id correction from manual cleaner.")
@@ -1435,7 +1445,7 @@ if ("study_arm_overall" %in% names(survey)) {
 
 survey$refugee_cleaning_exclusion_reason <- NA_character_
 # The baseline 8wDI21x row is resolved in apply_refugee_manual_corrections()
-# using geocene_data_but_no_survey_error_fix_fcn_id.xlsx.
+# based on matches of camp, block, sub-block, caregiver names, and child names.
 survey_before_endline_review_identity <- survey
 survey <- apply_refugee_household_correction_workbook(survey)
 survey <- apply_refugee_endline_review_corrections(survey, identity_data = survey_before_endline_review_identity)
@@ -1458,6 +1468,42 @@ if (length(missing_fcn_idx)) {
     "missing_fcn_id_declined_participation"
   )
 }
+
+# These households are being removed because they have no baseline or endline
+# data and were included in midline by accident.
+midline_only_accidental_idx <- integer(0)
+midline_only_accidental_household_count <- 0L
+if (all(c("timepoint", "fcn_id") %in% names(survey))) {
+  fcn_clean_all <- clean_refugee_exclusion_value(survey$fcn_id)
+  timepoint_clean_all <- tolower(trimws(as.character(survey$timepoint)))
+  timepoint_clean_all[timepoint_clean_all %in% c("", "na", "nan", "null")] <- NA_character_
+  eligible_idx <- which(
+    is.na(survey$refugee_cleaning_exclusion_reason) &
+      !is.na(fcn_clean_all) &
+      !is.na(timepoint_clean_all)
+  )
+  if (length(eligible_idx)) {
+    rows_by_fcn <- split(eligible_idx, fcn_clean_all[eligible_idx])
+    midline_only_fcn <- names(Filter(function(row_idx) {
+      observed_timepoints <- unique(timepoint_clean_all[row_idx])
+      "midline" %in% observed_timepoints && !any(observed_timepoints %in% c("baseline", "endline"))
+    }, rows_by_fcn))
+    midline_only_accidental_household_count <- length(midline_only_fcn)
+    if (length(midline_only_fcn)) {
+      midline_only_accidental_idx <- which(
+        is.na(survey$refugee_cleaning_exclusion_reason) &
+          fcn_clean_all %in% midline_only_fcn
+      )
+    }
+  }
+}
+if (length(midline_only_accidental_idx)) {
+  survey$refugee_cleaning_exclusion_reason[midline_only_accidental_idx] <- append_refugee_exclusion_reason(
+    survey$refugee_cleaning_exclusion_reason[midline_only_accidental_idx],
+    "midline_only_household_no_baseline_or_endline_included_in_midline_by_accident"
+  )
+}
+midline_only_accidental_row_count <- length(midline_only_accidental_idx)
 
 # For duplicate refugee endline fcn_id values, keep the first completed survey
 # and arbitrarily drop the second survey from the cleaned dataset.
@@ -1567,7 +1613,7 @@ entry <- make_inventory_entry(
       baseline_arm_result$audit_path,
       "."
     ),
-    paste0("Excluded refugee household rows with missing fcn_id or duplicate endline fcn_id second surveys: ", excluded_refugee_count, ". The baseline 8wDI21x row was resolved to fcn_id 101595 and hh_id 8WDI21101595 using geocene_data_but_no_survey_error_fix_fcn_id.xlsx. Duplicate endline second surveys arbitrarily dropped: ", duplicate_endline_drop_count, ". Audit: ", refugee_exclusion_audit_path, ".")
+    paste0("Excluded refugee household rows with missing fcn_id, accidental midline-only households, or duplicate endline fcn_id second surveys: ", excluded_refugee_count, ". Midline-only households removed because they had no baseline or endline data and were included in midline by accident: ", midline_only_accidental_household_count, " households / ", midline_only_accidental_row_count, " rows. The baseline 8wDI21x row was resolved to fcn_id 100976 and hh_id 8WDI21100976 based on matches of camp, block, sub-block, caregiver names, and child names. Duplicate endline second surveys arbitrarily dropped: ", duplicate_endline_drop_count, ". Audit: ", refugee_exclusion_audit_path, ".")
   )
 )
 update_inventory(entry)
