@@ -60,10 +60,10 @@ if (is.na(config_file)) {
 source(config_file)
 
 if (!requireNamespace("writexl", quietly = TRUE)) {
-  stop("Install package `writexl` before creating Excel outputs.", call. = FALSE)
+  stop("Package `writexl` is required for Excel outputs. Run renv::restore() from the project root, then rerun this script.", call. = FALSE)
 }
 if (!requireNamespace("openxlsx", quietly = TRUE)) {
-  stop("Install package `openxlsx` before verifying Excel outputs.", call. = FALSE)
+  stop("Package `openxlsx` is required for Excel verification. Run renv::restore() from the project root, then rerun this script.", call. = FALSE)
 }
 
 collapse_unique <- function(x) {

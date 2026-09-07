@@ -32,3 +32,12 @@ archive/root_loose_files_20260805/**
 8_restricted/**
 
 logs/run_all/
+# renv reproducibility files
+!renv.lock
+renv/library/
+renv/local/
+renv/cellar/
+renv/lock/
+renv/python/
+renv/sandbox/
+renv/staging/

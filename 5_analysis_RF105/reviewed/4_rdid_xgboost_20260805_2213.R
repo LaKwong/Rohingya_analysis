@@ -60,14 +60,9 @@ source(config_file)
 ################################################################################
 
 if (!requireNamespace("xgboost", quietly = TRUE)) {
-  message("Installing missing package: xgboost")
-  install.packages("xgboost", repos = "https://cloud.r-project.org")
-}
-
-if (!requireNamespace("xgboost", quietly = TRUE)) {
   stop(
     "Package xgboost is required for RF105 rDiD/XGBoost analyses. ",
-    "Install it and rerun this script.",
+    "Run renv::restore() from the project root, then rerun this script.",
     call. = FALSE
   )
 }

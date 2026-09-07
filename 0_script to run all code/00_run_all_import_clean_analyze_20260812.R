@@ -8,15 +8,17 @@
 # Default pipeline:
 #   1. Import and clean host survey data.
 #   2. Import and clean refugee survey, PM2.5, and Geocene stove-use data.
-#   3. Run the reviewed RF105 analysis pipeline that creates manuscript tables,
+#   3. Refresh the de-identified public cleaned RF105 analysis data.
+#   4. Run the reviewed RF105 analysis pipeline that creates manuscript tables,
 #      QA tables, release manifests, restricted QA outputs, and figures.
 #
 # Optional stages:
-#   - Set ROHINGYA_RUN_PUBLIC_CLEAN_EXPORT=true to also refresh the de-identified
-#     public cleaned RF105 analysis data after the internal clean-data pipeline.
-#   - Set ROHINGYA_RUN_RESTRICTED_EXCEL_EXPORTS=true to also refresh restricted
+#   - Set ROHINGYA_RUN_RESTRICTED_EXCEL_EXPORTS=true to refresh restricted
 #     identified Excel QA workbooks. These outputs contain identifiers and remain
 #     in 8_restricted.
+#
+# First-time package setup:
+#   renv::restore()
 #
 # Usage:
 #   Rscript "0_script to run all code/00_run_all_import_clean_analyze_20260812.R"
@@ -28,6 +30,7 @@
 #   Sys.setenv(ROHINGYA_RUN_DRY_RUN = "true")
 #   source("G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis/0_script to run all code/00_run_all_import_clean_analyze_20260812.R")
 #   Sys.unsetenv("ROHINGYA_RUN_DRY_RUN")
+#
 # Optional if running from outside the project root:
 #   Sys.setenv(ROHINGYA_ANALYSIS_ROOT =
 #     "G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis")
@@ -200,6 +203,63 @@ write_manifest <- function(results) {
   utils::write.csv(manifest, manifest_file, row.names = FALSE, na = "")
   invisible(manifest)
 }
+read_project_dependency_packages <- function() {
+  description_path <- file.path(project_root, "DESCRIPTION")
+  if (!file.exists(description_path)) {
+    return(character())
+  }
+
+  dependency_fields <- read.dcf(
+    description_path,
+    fields = c("Depends", "Imports")
+  )
+  dependency_fields <- dependency_fields[1, !is.na(dependency_fields[1, ]), drop = FALSE]
+  dependency_text <- paste(dependency_fields[1, ], collapse = ",")
+  dependency_entries <- unlist(strsplit(dependency_text, ",", fixed = TRUE))
+  dependency_names <- trimws(gsub("\\s*\\(.*\\)", "", dependency_entries))
+  dependency_names <- dependency_names[nzchar(dependency_names)]
+  sort(setdiff(unique(dependency_names), "R"))
+}
+
+check_project_dependencies <- function() {
+  required_packages <- read_project_dependency_packages()
+  if (length(required_packages) == 0) {
+    return(invisible(TRUE))
+  }
+
+  available_packages <- vapply(
+    required_packages,
+    function(package) requireNamespace(package, quietly = TRUE),
+    FUN.VALUE = logical(1)
+  )
+  missing_packages <- required_packages[!available_packages]
+
+  if (length(missing_packages) == 0) {
+    return(invisible(TRUE))
+  }
+
+  runner_path <- normalizePath(
+    file.path(
+      project_root,
+      "0_script to run all code",
+      "00_run_all_import_clean_analyze_20260812.R"
+    ),
+    winslash = "/",
+    mustWork = FALSE
+  )
+
+  message_lines <- c(
+    "The project package library is incomplete.",
+    paste0("Missing required package(s): ", paste(missing_packages, collapse = ", ")),
+    "",
+    "Run this once from the Rohingya_analysis project root before running the pipeline:",
+    "  renv::restore()",
+    "",
+    "Then restart R and rerun:",
+    paste0("  source(\"", runner_path, "\")")
+  )
+  stop(paste(message_lines, collapse = "\n"), call. = FALSE)
+}
 
 rscript <- file.path(R.home("bin"), if (.Platform$OS.type == "windows") {
   "Rscript.exe"
@@ -211,16 +271,18 @@ if (!file.exists(rscript)) {
 }
 
 core_steps <- data.frame(
-  key = c("host_clean", "refugee_clean", "rf105_reviewed"),
-  stage = c("import_clean", "import_clean", "analysis"),
+  key = c("host_clean", "refugee_clean", "public_clean_export", "rf105_reviewed"),
+  stage = c("import_clean", "import_clean", "clean_public", "analysis"),
   label = c(
     "Import and clean host survey data",
     "Import and clean refugee survey, PM2.5, and Geocene stove-use data",
+    "Create de-identified public cleaned RF105 analysis data",
     "Run reviewed RF105 analyses and manuscript outputs"
   ),
   script = c(
     "1_run_clean_host_20260805_2141.R",
     "1_run_clean_refugee_20260805_2141.R",
+    "3_data_cleaning/fixed/create_public_clean_final_20260806_1815.R",
     "5_analysis_RF105/reviewed/00_run_RF105_20260805_2213.R"
   ),
   stringsAsFactors = FALSE
@@ -234,15 +296,6 @@ optional_steps <- data.frame(
   stringsAsFactors = FALSE
 )
 
-if (env_flag("ROHINGYA_RUN_PUBLIC_CLEAN_EXPORT")) {
-  optional_steps <- rbind(optional_steps, data.frame(
-    key = "public_clean_export",
-    stage = "clean_public",
-    label = "Create de-identified public cleaned RF105 analysis data",
-    script = "3_data_cleaning/fixed/create_public_clean_final_20260806_1815.R",
-    stringsAsFactors = FALSE
-  ))
-}
 
 if (env_flag("ROHINGYA_RUN_RESTRICTED_EXCEL_EXPORTS")) {
   optional_steps <- rbind(optional_steps, data.frame(
@@ -261,10 +314,8 @@ if (env_flag("ROHINGYA_RUN_RESTRICTED_EXCEL_EXPORTS")) {
 }
 
 steps <- rbind(
-  core_steps[1:2, ],
-  optional_steps[optional_steps$key == "public_clean_export", ],
-  core_steps[3, ],
-  optional_steps[optional_steps$key != "public_clean_export", ]
+  core_steps,
+  optional_steps
 )
 
 validate_steps <- function(steps) {
@@ -348,6 +399,7 @@ log_message("Rscript: ", rscript)
 log_message("Log file: ", log_file)
 log_message("Manifest file: ", manifest_file)
 log_message("Steps: ", paste(steps$key, collapse = ", "))
+check_project_dependencies()
 
 if (env_flag("ROHINGYA_RUN_DRY_RUN")) {
   dry_results <- lapply(seq_len(nrow(steps)), function(i) {

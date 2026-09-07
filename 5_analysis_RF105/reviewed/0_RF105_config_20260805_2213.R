@@ -32,8 +32,10 @@ missing_packages <- required_packages[
 
 if (length(missing_packages) > 0) {
   stop(
-    "Install required packages before running reviewed RF105 scripts: ",
-    paste(missing_packages, collapse = ", ")
+    "Missing package(s) for reviewed RF105 scripts: ",
+    paste(missing_packages, collapse = ", "),
+    ". Run renv::restore() from the project root, then rerun.",
+    call. = FALSE
   )
 }
 
@@ -875,3 +877,4 @@ make_characteristics_table <- function(df, vars, labels = NULL, group_var = NULL
       relocate(p_value, .after = last_col())
   }
 }
+

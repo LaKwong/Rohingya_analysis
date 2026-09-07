@@ -14,6 +14,7 @@
 #   4_data/clean_final_public/*.rds
 #   4_data/clean_final_public/imported_raw/*.rds
 #   4_data/clean_final_public/public_clean_final_manifest.csv
+#   4_data/clean_final_public/public_clean_final_private_public_compatibility.csv
 #   4_data/clean_final_public/README_clean_final_public.md
 #
 # De-identification:
@@ -32,8 +33,12 @@ missing_packages <- required_packages[
   !vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)
 ]
 if (length(missing_packages) > 0) {
-  stop("Install required packages before running this script: ",
-       paste(missing_packages, collapse = ", "), call. = FALSE)
+  stop(
+    "Missing package(s) for public clean-data export: ",
+    paste(missing_packages, collapse = ", "),
+    ". Run renv::restore() from the project root, then rerun.",
+    call. = FALSE
+  )
 }
 
 suppressPackageStartupMessages({
@@ -244,7 +249,48 @@ public_identifier_audit <- function(data, rel_path) {
   )
 }
 
+collapse_column_names <- function(x) {
+  x <- unique(x)
+  x <- x[!is.na(x) & nzchar(x)]
+  if (length(x) == 0) {
+    return(NA_character_)
+  }
+  paste(x, collapse = "; ")
+}
+
+public_compatibility_audit <- function(private_data, public_data, rel_path) {
+  expected_public_columns <- setdiff(names(private_data), columns_to_drop(private_data))
+  missing_columns <- setdiff(expected_public_columns, names(public_data))
+  extra_columns <- setdiff(names(public_data), expected_public_columns)
+  expected_link_columns <- intersect(
+    c("fcn_id", "hh_id", "PARENT_KEY", "study_arm_overall", "study_arm"),
+    expected_public_columns
+  )
+  missing_link_columns <- setdiff(expected_link_columns, names(public_data))
+
+  row_count_matches <- nrow(private_data) == nrow(public_data)
+  schema_matches <- length(missing_columns) == 0 && length(extra_columns) == 0
+  link_columns_match <- length(missing_link_columns) == 0
+
+  tibble(
+    file = rel_path,
+    private_n_rows = nrow(private_data),
+    public_n_rows = nrow(public_data),
+    row_count_match = row_count_matches,
+    private_n_cols = ncol(private_data),
+    expected_public_n_cols = length(expected_public_columns),
+    public_n_cols = ncol(public_data),
+    schema_match = schema_matches,
+    schema_order_match = identical(names(public_data), expected_public_columns),
+    link_columns_expected = collapse_column_names(expected_link_columns),
+    link_columns_missing = collapse_column_names(missing_link_columns),
+    link_columns_match = link_columns_match,
+    missing_public_columns = collapse_column_names(missing_columns),
+    extra_public_columns = collapse_column_names(extra_columns)
+  )
+}
 manifest_rows <- list()
+compatibility_rows <- list()
 
 i <- 1L
 for (file in root_rds_files) {
@@ -256,6 +302,8 @@ for (file in root_rds_files) {
   manifest_rows[[i]] <- public_identifier_audit(public, file) %>%
     mutate(output_path = normalizePath(output_path, winslash = "/", mustWork = TRUE),
            source_role = "cleaned_analysis_input")
+  compatibility_rows[[i]] <- public_compatibility_audit(data, public, file) %>%
+    mutate(source_role = "cleaned_analysis_input")
   i <- i + 1L
 }
 
@@ -269,18 +317,50 @@ for (file in imported_rds_files) {
   manifest_rows[[i]] <- public_identifier_audit(public, rel_path) %>%
     mutate(output_path = normalizePath(output_path, winslash = "/", mustWork = TRUE),
            source_role = "derived_geocene_analysis_input")
+  compatibility_rows[[i]] <- public_compatibility_audit(data, public, rel_path) %>%
+    mutate(source_role = "derived_geocene_analysis_input")
   i <- i + 1L
 }
 
 manifest <- bind_rows(manifest_rows) %>%
   select(file, source_role, n_rows, n_cols, everything())
 
+compatibility <- bind_rows(compatibility_rows) %>%
+  select(
+    file, source_role, private_n_rows, public_n_rows, row_count_match,
+    private_n_cols, expected_public_n_cols, public_n_cols,
+    schema_match, schema_order_match, link_columns_expected,
+    link_columns_missing, link_columns_match,
+    missing_public_columns, extra_public_columns
+  )
+
+readr::write_csv(
+  compatibility,
+  file.path(output_dir, "public_clean_final_private_public_compatibility.csv"),
+  na = ""
+)
+
 if (any(manifest$has_name_columns | manifest$has_unhcr_columns |
         manifest$has_camp_block_columns | manifest$has_original_fcn_id_values |
         manifest$has_original_hh_id_values)) {
   readr::write_csv(manifest, file.path(restricted_dir, "failed_public_clean_final_manifest.csv"), na = "")
+  readr::write_csv(compatibility, file.path(restricted_dir, "failed_public_clean_final_private_public_compatibility.csv"), na = "")
   stop("Public cleaned-data export failed privacy checks. See restricted manifest.",
        call. = FALSE)
+}
+
+if (any(!compatibility$row_count_match |
+        !compatibility$schema_match |
+        !compatibility$link_columns_match)) {
+  readr::write_csv(
+    compatibility,
+    file.path(restricted_dir, "failed_public_clean_final_private_public_compatibility.csv"),
+    na = ""
+  )
+  stop(
+    "Public cleaned-data export failed private/public row-count or schema compatibility checks. See restricted compatibility report.",
+    call. = FALSE
+  )
 }
 
 readr::write_csv(manifest, file.path(output_dir, "public_clean_final_manifest.csv"), na = "")
@@ -304,7 +384,8 @@ readme <- c(
   "Sys.setenv(RF105_CLEAN_DATA_DIR = \"4_data/clean_final_public\")",
   "```",
   "",
-  "The file `public_clean_final_manifest.csv` documents the included files and privacy checks."
+  "The file `public_clean_final_manifest.csv` documents the included files and privacy checks.",
+  "The file `public_clean_final_private_public_compatibility.csv` verifies row counts and expected public schemas against the private cleaned source files."
 )
 writeLines(readme, file.path(output_dir, "README_clean_final_public.md"))
 

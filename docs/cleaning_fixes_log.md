@@ -1,6 +1,6 @@
 # Cleaning fixes log
 
-Generated: 2026-08-12 17:18:12 PDT
+Generated: 2026-09-06 18:02:10 PDT
 
 ## Fixes implemented
 
@@ -24,16 +24,16 @@ Generated: 2026-08-12 17:18:12 PDT
 - `pm25_pats_refugee_indoor`: 1362519 rows,   52 columns; timepoints: baseline=559683; endline=529975; midline=272861
 - `pm25_pats_refugee_indoor_household_counts_by_arm_timepoint`:       6 rows,    7 columns; timepoints: baseline=2; endline=2; midline=2
 - `pm25_pats_refugee_qc_files`:      61 rows,    8 columns; timepoints: baseline=32; endline=19; midline=10
-- `stove_use_geocene_refugee_daily`:    2635 rows,   29 columns; timepoints: endline=1486; baseline=878; midline=271
-- `stove_use_geocene_refugee_monitor_days`:    2130 rows,   27 columns; timepoints: endline=965; baseline=718; midline=447
-- `survey_host_hh_members`:    1767 rows,   54 columns; timepoints: midline=1029; endline=738
-- `survey_host_household`:     513 rows, 2879 columns; timepoints: baseline=200; midline=181; endline=132
-- `survey_host_location`:    1029 rows,   40 columns; timepoints: midline=1029
-- `survey_host_symptoms`:    1767 rows,   34 columns; timepoints: midline=1029; endline=738
-- `survey_refugee_hh_members`:   11933 rows,   57 columns; timepoints: midline=6321; endline=5612
-- `survey_refugee_household`:    3279 rows, 3150 columns; timepoints: baseline=1193; midline=1140; endline=946
-- `survey_refugee_location`:    6321 rows,   44 columns; timepoints: midline=6321
-- `survey_refugee_symptoms`:   11933 rows,   37 columns; timepoints: midline=6321; endline=5612
+- `stove_use_geocene_refugee_daily`:    9022 rows,   36 columns; timepoints: baseline=7061; endline=1644; midline=308; (missing)=9
+- `stove_use_geocene_refugee_monitor_days`:    3765 rows,   37 columns; timepoints: endline=1566; baseline=1230; midline=969
+- `survey_host_hh_members`:    1357 rows,   54 columns; timepoints: endline=738; midline=618; baseline=1
+- `survey_host_household`:     322 rows, 2879 columns; timepoints: midline=181; endline=132; baseline=9
+- `survey_host_location`:     619 rows,   40 columns; timepoints: midline=618; baseline=1
+- `survey_host_symptoms`:    1357 rows,   34 columns; timepoints: endline=738; midline=618; baseline=1
+- `survey_refugee_hh_members`:   12002 rows,   57 columns; timepoints: endline=5612; midline=4828; (missing)=1562
+- `survey_refugee_household`:    3004 rows, 3150 columns; timepoints: baseline=1193; endline=946; midline=865
+- `survey_refugee_location`:    6390 rows,   44 columns; timepoints: midline=4828; (missing)=1562
+- `survey_refugee_symptoms`:   12002 rows,   37 columns; timepoints: endline=5612; midline=4828; (missing)=1562
 
 ## Archive handling
 

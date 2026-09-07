@@ -1,24 +1,30 @@
 RSCRIPT ?= Rscript
 # Example Windows override: make RSCRIPT="C:/Program Files/R/R-4.5.3/bin/Rscript.exe"
 
-.PHONY: all clean-data clean-host clean-refugee rf105-reviewed rf105 drdid
+.PHONY: all deps clean-data clean-host clean-refugee public-clean rf105-reviewed rf105 drdid
 
-all: clean-data rf105-reviewed
+all: rf105-reviewed
+
+deps:
+	"$(RSCRIPT)" -e "renv::restore(prompt = FALSE)"
 
 clean-data: clean-host clean-refugee
 
-clean-host:
+clean-host: deps
 	"$(RSCRIPT)" 1_run_clean_host_20260805_2141.R
 
-clean-refugee:
+clean-refugee: deps
 	"$(RSCRIPT)" 1_run_clean_refugee_20260805_2141.R
 
-rf105-reviewed: clean-data
+public-clean: clean-data
+	"$(RSCRIPT)" 3_data_cleaning/fixed/create_public_clean_final_20260806_1815.R
+
+rf105-reviewed: public-clean
 	"$(RSCRIPT)" 5_analysis_RF105/reviewed/00_run_RF105_20260805_2213.R
 
 rf105: rf105-reviewed
 
-drdid:
+drdid: deps
 	"$(RSCRIPT)" 5_analysis_RF105/reviewed/5_drDiD_comparison_20260805_2213.R
 
 .PHONY: geocene-reviewed

@@ -768,13 +768,40 @@ generic_summarise_continuous_vars <- function(df, var_table,
     return(tibble())
   }
 
+  default_denominator_note <- "Continuous summaries use nonmissing nonnegative numeric values; all_arms rows pool comparison and intervention households."
+
   map_dfr(seq_len(nrow(var_table)), function(i) {
     var <- var_table$source_variable[[i]]
+
+    denominator_note_i <- default_denominator_note
+    if ("denominator_note" %in% names(var_table)) {
+      note_i <- var_table$denominator_note[[i]]
+      if (!is.na(note_i) && nzchar(note_i)) {
+        denominator_note_i <- note_i
+      }
+    }
+
+    missing_response_codes_as_na_i <- TRUE
+    if ("missing_response_codes_as_na" %in% names(var_table)) {
+      missing_codes_i <- var_table$missing_response_codes_as_na[[i]]
+      if (!is.na(missing_codes_i)) {
+        missing_response_codes_as_na_i <- isTRUE(missing_codes_i)
+      }
+    }
+
     df %>%
       transmute(
         timepoint,
         study_arm_overall,
-        value = generic_clean_numeric_value(.data[[var]], nonnegative = TRUE)
+        value = {
+          value <- as_number(.data[[var]])
+          if (isTRUE(missing_response_codes_as_na_i)) {
+            value <- generic_clean_numeric_value(.data[[var]], nonnegative = TRUE)
+          } else {
+            value[value < 0] <- NA_real_
+          }
+          value
+        }
       ) %>%
       add_all_arms_rows() %>%
       group_by(timepoint, study_arm_overall) %>%
@@ -804,7 +831,7 @@ generic_summarise_continuous_vars <- function(df, var_table,
         analysis_type = "continuous_summary",
         unit = var_table$unit[[i]],
         population = population,
-        denominator_note = "Continuous summaries use nonmissing nonnegative numeric values; all_arms rows pool comparison and intervention households."
+        denominator_note = denominator_note_i
       )
   }) %>%
     select(timepoint, study_arm_overall, outcome_group, outcome_name,
@@ -1219,6 +1246,30 @@ survey$fire_any_yn <- generic_positive_numeric_yn_col(survey, "fire_number")
 survey$burn_plastic_any_yn <- generic_positive_numeric_yn_col(survey, "burn_plastic_frequency")
 survey$cook_sell_yesterday_any_yn <- generic_positive_numeric_yn_col(survey, "cook_sell_yesterday")
 survey$cook_pressure_cooker_any_yn <- generic_positive_numeric_yn_col(survey, "cook_pressure_cooker")
+forest_wood_fee_bdt <- generic_clean_numeric_value(num_col(survey, "forest_wood_fee"), nonnegative = TRUE)
+buy_wood_cost_bdt <- generic_clean_numeric_value(num_col(survey, "buy_wood_cost"), nonnegative = TRUE)
+spent_total_month_bdt <- generic_clean_numeric_value(num_col(survey, "spent_total_month"), nonnegative = TRUE)
+
+survey$forest_wood_fee_paid_gt0_pct <- case_when(
+  is.na(forest_wood_fee_bdt) ~ NA_real_,
+  forest_wood_fee_bdt > 0 ~ 100,
+  TRUE ~ 0
+)
+survey$forest_wood_fee_positive_bdt <- case_when(
+  !is.na(forest_wood_fee_bdt) & forest_wood_fee_bdt > 0 ~ forest_wood_fee_bdt,
+  TRUE ~ NA_real_
+)
+survey$forest_wood_fee_pct_monthly_expenditures <- case_when(
+  !is.na(forest_wood_fee_bdt) & forest_wood_fee_bdt > 0 &
+    !is.na(spent_total_month_bdt) & spent_total_month_bdt > 0 ~
+    100 * forest_wood_fee_bdt / spent_total_month_bdt,
+  TRUE ~ NA_real_
+)
+survey$buy_wood_cost_pct_monthly_expenditures <- case_when(
+  !is.na(buy_wood_cost_bdt) & !is.na(spent_total_month_bdt) &
+    spent_total_month_bdt > 0 ~ 100 * buy_wood_cost_bdt / spent_total_month_bdt,
+  TRUE ~ NA_real_
+)
 
 write_reviewed_csv(
   analysis_population$sample_counts,
@@ -1298,8 +1349,12 @@ analysis_variables <- tribble(
   "fuel_time_cost", "times_wood_day", "Wood collection trips per day",
   "fuel_time_cost", "collect_wood_walk_hr", "Hours walking to collect wood",
   "fuel_time_cost", "forest_wood_fee", "Forest wood fee",
+  "fuel_time_cost", "forest_wood_fee_paid_gt0_pct", "Paid any forest wood fee",
+  "fuel_time_cost", "forest_wood_fee_positive_bdt", "Forest wood fee among households paying >0",
+  "fuel_time_cost", "forest_wood_fee_pct_monthly_expenditures", "Forest wood fee as percent of monthly expenditures among households paying >0",
   "fuel_time_cost", "gather_wood_reason", "Reason for gathering wood",
   "fuel_time_cost", "buy_wood_cost", "Wood purchase cost",
+  "fuel_time_cost", "buy_wood_cost_pct_monthly_expenditures", "Wood purchase cost as percent of monthly expenditures",
   "fuel_time_cost", "buy_wood_reason", "Reason for buying wood",
   "fuel_time_cost", "buy_wood_cost_bundle", "Wood bundle cost",
   "fuel_time_cost", "buy_wood_bundle_last", "Wood bundles bought last time",
@@ -1470,7 +1525,11 @@ continuous_vars <- tribble(
   "fuel_time_cost", "times_wood_day", "times_wood_day", "times_wood_day", "Wood collection trips per day", "trips",
   "fuel_time_cost", "collect_wood_walk_hr", "collect_wood_walk_hr", "collect_wood_walk_hr", "Hours walking to collect wood", "hours",
   "fuel_time_cost", "forest_wood_fee", "forest_wood_fee", "forest_wood_fee", "Forest wood fee", "BDT",
+  "fuel_time_cost", "forest_wood_fee_paid_gt0_pct", "forest_wood_fee_paid_gt0_pct", "forest_wood_fee_paid_gt0_pct", "Households paying any forest wood fee", "percent",
+  "fuel_time_cost", "forest_wood_fee_positive_bdt", "forest_wood_fee_positive_bdt", "forest_wood_fee_positive_bdt", "Forest wood fee among households paying >0", "BDT",
+  "fuel_time_cost", "forest_wood_fee_pct_monthly_expenditures", "forest_wood_fee_pct_monthly_expenditures", "forest_wood_fee_pct_monthly_expenditures", "Forest wood fee as percent of monthly expenditures among households paying >0", "percent of monthly expenditures",
   "fuel_time_cost", "buy_wood_cost", "buy_wood_cost", "buy_wood_cost", "Wood purchase cost", "BDT",
+  "fuel_time_cost", "buy_wood_cost_pct_monthly_expenditures", "buy_wood_cost_pct_monthly_expenditures", "buy_wood_cost_pct_monthly_expenditures", "Wood purchase cost as percent of monthly expenditures", "percent of monthly expenditures",
   "fuel_time_cost", "buy_wood_cost_bundle", "buy_wood_cost_bundle", "buy_wood_cost_bundle", "Wood bundle cost", "BDT",
   "fuel_time_cost", "buy_wood_bundle_last", "buy_wood_bundle_last", "buy_wood_bundle_last", "Wood bundles bought last time", "bundles",
   "fuel_time_cost", "buy_wood_cost_month_estimate", "buy_wood_cost_month_estimate", "buy_wood_cost_month_estimate", "Estimated monthly wood cost", "BDT",
@@ -1492,7 +1551,26 @@ continuous_vars <- tribble(
   "kitchen_spotcheck", "cook_pot_with_handle_num", "cook_pot_with_handle_num", "cook_pot_with_handle_num", "Number of pots with handles", "count",
   "kitchen_spotcheck", "cook_pressure_cooker_num", "cook_pressure_cooker_num", "cook_pressure_cooker_num", "Number of pressure cookers", "count"
 ) %>%
-  mutate(analysis_output = "table_descriptive_continuous_outcomes.csv")
+  mutate(
+    analysis_output = "table_descriptive_continuous_outcomes.csv",
+    missing_response_codes_as_na = !source_variable %in% c(
+      "forest_wood_fee_paid_gt0_pct",
+      "forest_wood_fee_positive_bdt",
+      "forest_wood_fee_pct_monthly_expenditures",
+      "buy_wood_cost_pct_monthly_expenditures"
+    ),
+    denominator_note = case_when(
+      source_variable == "forest_wood_fee_paid_gt0_pct" ~
+        "Mean is the percent of households with nonmissing nonnegative forest_wood_fee who reported paying more than 0 BDT; all_arms rows pool comparison and intervention households.",
+      source_variable == "forest_wood_fee_positive_bdt" ~
+        "Amount summary is restricted to households with nonmissing nonnegative forest_wood_fee greater than 0 BDT; all_arms rows pool comparison and intervention households.",
+      source_variable == "forest_wood_fee_pct_monthly_expenditures" ~
+        "Summary is restricted to households with forest_wood_fee greater than 0 BDT and nonmissing positive spent_total_month; values are 100 * forest_wood_fee / spent_total_month.",
+      source_variable == "buy_wood_cost_pct_monthly_expenditures" ~
+        "Summary uses households with nonmissing nonnegative buy_wood_cost and nonmissing positive spent_total_month; values are 100 * buy_wood_cost / spent_total_month.",
+      TRUE ~ NA_character_
+    )
+  )
 
 text_vars <- tribble(
   ~outcome_group, ~analysis_variable, ~source_variable, ~outcome_name, ~outcome_label,
@@ -1673,7 +1751,7 @@ write_rf105b_characteristics_workbook <- function(survey_dedup,
   if (!requireNamespace("openxlsx", quietly = TRUE)) {
     stop(
       "Package 'openxlsx' is required to write ", basename(output_file),
-      ". Install it with install.packages('openxlsx') and rerun this script.",
+      ". Run renv::restore() from the project root, then rerun this script.",
       call. = FALSE
     )
   }
@@ -7442,7 +7520,10 @@ file_survey_refugee_symptoms <- file.path(
 )
 
 members <- readr::read_rds(file_survey_refugee_hh_members) %>%
-  clean_timepoint_arm() %>%
+  mutate(
+    timepoint = as_ordered_timepoint(timepoint),
+    study_arm_overall = factor(study_arm_overall, levels = c(arm_levels, "all_arms", "missing_study_arm"))
+  ) %>%
   mutate(
     age_yrs = num_col(., "age_yrs"),
     hours_outside = num_col(., "hours_outside"),
@@ -7568,7 +7649,10 @@ write_plot_if_data(location_plot_data, fig_member_locations,
                    width = 14, height = 10)
 
 symptoms <- readr::read_rds(file_survey_refugee_symptoms) %>%
-  clean_timepoint_arm() %>%
+  mutate(
+    timepoint = as_ordered_timepoint(timepoint),
+    study_arm_overall = factor(study_arm_overall, levels = c(arm_levels, "all_arms", "missing_study_arm"))
+  ) %>%
   mutate(
     age_group = "Age not linked in clean_final symptoms file",
     sex_label = "Sex not linked in clean_final symptoms file"
@@ -8032,13 +8116,12 @@ pm_indoor <- readRDS(file_pm25_indoor)
 
 if (!requireNamespace("gridExtra", quietly = TRUE)) {
   stop(
-    "Install gridExtra before generating the stove-use composite panel.",
+    "Package gridExtra is required for the stove-use composite panel. Run renv::restore() from the project root, then rerun this script.",
     call. = FALSE
   )
 }
 
 # Geocene figures are generated by the shared primary/sensitivity pipeline.
-
 # Time-use figures like fig_time_respondent_more_less and fig_time_child_more_less
 ################################################################################
 
@@ -8329,7 +8412,10 @@ save_plot_if_data(
 ################################################################################
 
 pm_household_hourly_input <- pm_indoor %>%
-  clean_timepoint_arm() %>%
+  mutate(
+    timepoint = as_ordered_timepoint(timepoint),
+    study_arm_overall = factor(study_arm_overall, levels = c(arm_levels, "all_arms", "missing_study_arm"))
+  ) %>%
   filter(
     !is.na(timepoint),
     !is.na(study_arm_overall),
@@ -8966,7 +9052,10 @@ pm_household <- readr::read_csv(
   ambient_household_timepoint_file,
   show_col_types = FALSE
 ) %>%
-  clean_timepoint_arm() %>%
+  mutate(
+    timepoint = as_ordered_timepoint(timepoint),
+    study_arm_overall = factor(study_arm_overall, levels = c(arm_levels, "all_arms", "missing_study_arm"))
+  ) %>%
   transmute(
     fcn_id = as.character(fcn_id),
     timepoint,

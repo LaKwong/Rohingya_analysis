@@ -1,0 +1,37 @@
+Package: RohingyaAnalysis
+Type: Project
+Title: Rohingya Clean Cooking Analysis Workflow
+Version: 0.0.0.9000
+Authors@R: person(given = "Laura", family = "Kwong", role = c("aut", "cre"))
+Description: Project-level dependency metadata for the Rohingya clean cooking
+    import, cleaning, public cleaned-data export, and reviewed RF105 analysis
+    workflow.
+Encoding: UTF-8
+Depends:
+    R (>= 4.5.0)
+Imports:
+    broom,
+    digest,
+    dplyr,
+    DRDID,
+    forcats,
+    ggplot2,
+    gridExtra,
+    here,
+    janitor,
+    lme4,
+    lubridate,
+    openxlsx,
+    purrr,
+    readr,
+    readxl,
+    renv,
+    scales,
+    stringr,
+    tibble,
+    tidyr,
+    tidyverse,
+    writexl,
+    xgboost
+Suggests:
+    rstudioapi

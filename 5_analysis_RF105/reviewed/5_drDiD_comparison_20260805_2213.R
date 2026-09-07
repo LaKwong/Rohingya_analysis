@@ -65,14 +65,9 @@ source(config_file)
 
 ensure_package <- function(package) {
   if (!requireNamespace(package, quietly = TRUE)) {
-    message("Installing missing package: ", package)
-    install.packages(package, repos = "https://cloud.r-project.org")
-  }
-
-  if (!requireNamespace(package, quietly = TRUE)) {
     stop(
       "Package ", package, " is required for the RF105 DRDID benchmark. ",
-      "Install it and rerun this script.",
+      "Run renv::restore() from the project root, then rerun this script.",
       call. = FALSE
     )
   }

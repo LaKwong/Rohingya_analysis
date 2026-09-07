@@ -24,8 +24,9 @@ required_packages <- c("dplyr", "readr", "lubridate", "ggplot2", "lme4", "spline
 missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing_packages) > 0) {
   stop(
-    "Install required package(s) before running this script: ",
+    "Missing package(s) for this script: ",
     paste(missing_packages, collapse = ", "),
+    ". Run renv::restore() from the project root, then rerun.",
     call. = FALSE
   )
 }
