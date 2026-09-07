@@ -8,8 +8,7 @@
 #
 # Inputs:
 #   4_data/clean_final/*.rds
-#   4_data/clean_final/imported_raw/geocene_refugee_stove_events_derived_raw.rds
-#   4_data/clean_final/imported_raw/geocene_refugee_monitor_days_derived_raw.rds
+#   4_data/clean_final/geocene/<variant>/{events,household_days}.rds
 #
 # Outputs:
 #   4_data/clean_final_public/*.rds
@@ -75,14 +74,10 @@ root_rds_files <- c(
   "pm25_pats_refugee_indoor.rds",
   "pm25_pats_refugee_ambient.rds",
   "pm25_pats_refugee_qc_files.rds",
-  "stove_use_geocene_refugee_daily.rds",
-  "stove_use_geocene_refugee_monitor_days.rds"
+  "stove_use_geocene_refugee_daily.rds"
 )
 
-imported_rds_files <- c(
-  "geocene_refugee_stove_events_derived_raw.rds",
-  "geocene_refugee_monitor_days_derived_raw.rds"
-)
+imported_rds_files <- character()
 
 all_input_paths <- c(
   file.path(input_dir, root_rds_files),
@@ -315,3 +310,5 @@ writeLines(readme, file.path(output_dir, "README_clean_final_public.md"))
 
 message("Wrote public cleaned-data folder: ", normalizePath(output_dir, winslash = "/", mustWork = TRUE))
 message("Included RDS files: ", length(root_rds_files) + length(imported_rds_files))
+source(file.path("1_data_import", "fixed", "geocene_pipeline_helpers.R"))
+geocene_export_public(household_lookup)

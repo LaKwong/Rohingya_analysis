@@ -20,3 +20,7 @@ rf105: rf105-reviewed
 
 drdid:
 	"$(RSCRIPT)" 5_analysis_RF105/reviewed/5_drDiD_comparison_20260805_2213.R
+
+.PHONY: geocene-reviewed
+geocene-reviewed:
+	"$(RSCRIPT)" --vanilla 1_run_geocene.R

@@ -120,9 +120,8 @@ file_pm25_indoor <- file.path(
 file_pm25_ambient <- file.path(
   dir_clean_final, "pm25_pats_refugee_ambient.rds"
 )
-file_stove_monitor_days <- file.path(
-  dir_clean_final, "stove_use_geocene_refugee_monitor_days.rds"
-)
+file_geocene_events <- file.path(dir_clean_final, "geocene", "100_80_5_20", "events.rds")
+file_geocene_household_days <- file.path(dir_clean_final, "geocene", "100_80_5_20", "household_days.rds")
 timepoint_levels <- c("baseline", "midline", "endline")
 arm_levels <- c("comparison", "intervention")
 
@@ -876,4 +875,3 @@ make_characteristics_table <- function(df, vars, labels = NULL, group_var = NULL
       relocate(p_value, .after = last_col())
   }
 }
-
