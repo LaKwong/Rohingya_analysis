@@ -120,10 +120,6 @@ file_pm25_indoor <- file.path(
 file_pm25_ambient <- file.path(
   dir_clean_final, "pm25_pats_refugee_ambient.rds"
 )
-file_stove_daily <- file.path(
-  dir_clean_final, "stove_use_geocene_refugee_daily.rds"
-)
-
 file_stove_monitor_days <- file.path(
   dir_clean_final, "stove_use_geocene_refugee_monitor_days.rds"
 )

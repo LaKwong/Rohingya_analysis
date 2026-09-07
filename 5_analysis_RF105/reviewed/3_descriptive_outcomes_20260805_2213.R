@@ -6244,17 +6244,35 @@ as_logical_clean <- function(x) {
   )
 }
 
+geocene_recoded_midline_timepoint <- "midline"
+geocene_previous_recoded_midline_label <- "recode as midline"
+geocene_stove_timepoint_levels <- c("baseline", "midline", "endline")
+
+as_geocene_stove_timepoint <- function(x) {
+  x_clean <- str_squish(str_to_lower(as.character(x)))
+  x_clean <- if_else(
+    x_clean == geocene_previous_recoded_midline_label,
+    geocene_recoded_midline_timepoint,
+    x_clean
+  )
+  factor(
+    x_clean,
+    levels = geocene_stove_timepoint_levels,
+    ordered = TRUE
+  )
+}
+
 geocene_daily_file <- "table_descriptive_stove_daily_dataset.csv"
 geocene_daily_summary_file <- "table_descriptive_geocene_daily_summary.csv"
 
 stove_data_raw <- read_geocene_reviewed_csv(geocene_daily_file) %>%
   mutate(
-    timepoint = as_ordered_timepoint(timepoint),
+    timepoint = as_geocene_stove_timepoint(timepoint),
     study_arm_overall = factor(study_arm_overall, levels = c(arm_levels, "all_arms", "missing_study_arm"))
   )
 geocene_daily_summary <- read_geocene_reviewed_csv(geocene_daily_summary_file) %>%
   mutate(
-    timepoint = as_ordered_timepoint(timepoint),
+    timepoint = as_geocene_stove_timepoint(timepoint),
     study_arm_overall = factor(study_arm_overall, levels = c(arm_levels, "all_arms", "missing_study_arm"))
   )
 
@@ -6320,7 +6338,7 @@ stove_data <- stove_data_raw %>%
   mutate(
     fcn_id = str_squish(as.character(fcn_id)),
     hh_id = str_squish(as.character(hh_id)),
-    timepoint = as_ordered_timepoint(timepoint),
+    timepoint = as_geocene_stove_timepoint(timepoint),
     study_arm_overall = str_squish(str_to_lower(as.character(study_arm_overall))),
     date = as.Date(date),
     collection_year = lubridate::year(date),
@@ -6350,7 +6368,7 @@ stove_data <- stove_data_raw %>%
   filter(
     !is.na(date),
     !is.na(fcn_id), fcn_id != "",
-    timepoint %in% timepoint_levels,
+    timepoint %in% geocene_stove_timepoint_levels,
     study_arm_overall %in% c(arm_levels, "all_arms"),
     observed_stove_use_day
   )
@@ -6392,7 +6410,7 @@ write_reviewed_csv(stove_sample_counts, "table_descriptive_stove_sample_counts.c
 
 stove_daily_summary <- geocene_daily_summary %>%
   filter(
-    timepoint %in% timepoint_levels,
+    timepoint %in% geocene_stove_timepoint_levels,
     study_arm_overall %in% c(arm_levels, "all_arms")
   ) %>%
   arrange(timepoint, study_arm_overall)
@@ -8507,6 +8525,24 @@ arm_colors <- c(comparison = "#430154", intervention = "#138B87")
 stove_colors <- c(lpg = "#0072B2", biomass = "#D55E00")
 change_colors <- c(more = "#2F8F5B", less = "#B6463A")
 
+geocene_recoded_midline_timepoint <- "midline"
+geocene_previous_recoded_midline_label <- "recode as midline"
+geocene_stove_timepoint_levels <- c("baseline", "midline", "endline")
+
+as_geocene_stove_timepoint <- function(x) {
+  x_clean <- str_squish(str_to_lower(as.character(x)))
+  x_clean <- if_else(
+    x_clean == geocene_previous_recoded_midline_label,
+    geocene_recoded_midline_timepoint,
+    x_clean
+  )
+  factor(
+    x_clean,
+    levels = geocene_stove_timepoint_levels,
+    ordered = TRUE
+  )
+}
+
 manuscript_figure_targets <- tibble(
   figure_description = c(
     "Composite stove-use and energy-consumption panel",
@@ -8581,7 +8617,10 @@ align_ggplot_widths <- function(...) {
 }
 
 stove_composite_data <- stove_daily %>%
-  clean_timepoint_arm() %>%
+  mutate(
+    timepoint = as_geocene_stove_timepoint(timepoint),
+    study_arm_overall = factor(study_arm_overall, levels = c(arm_levels, "all_arms", "missing_study_arm"))
+  ) %>%
   mutate(
     date = as.Date(date),
     collection_year = lubridate::year(date),
@@ -9175,7 +9214,10 @@ if (nrow(stove_composite_data) > 0) {
 ################################################################################
 
 stove_midline_intervention <- stove_daily %>%
-  clean_timepoint_arm() %>%
+  mutate(
+    timepoint = as_geocene_stove_timepoint(timepoint),
+    study_arm_overall = factor(study_arm_overall, levels = c(arm_levels, "all_arms", "missing_study_arm"))
+  ) %>%
   filter(timepoint == "midline", study_arm_overall == "intervention") %>%
   mutate(
     days_after_first_receiving = as_number(days_after_first_receiving),

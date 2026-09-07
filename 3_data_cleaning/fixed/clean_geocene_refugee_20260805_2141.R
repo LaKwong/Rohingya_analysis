@@ -98,8 +98,8 @@ if (file.exists(clean_final_path(monitor_source_rel))) {
     shareable_output_path = monitor_shareable_path,
     shareable_removed_identifier_columns = monitor_shareable$removed,
     notes = paste(
-      "Refugee-only Geocene monitored stove-day denominator rebuilt from mission_logs_22.csv.",
-      "Rows are unique mission-log sample days by household, fuel type, and date with num_samples > 0.",
+      "Refugee-only Geocene monitored stove-day denominator rebuilt from Geocene_210204 and Geocene_220705 mission-log exports.",
+      "Rows are unique mission-log sample days by household, fuel type, mission_id + mission_name, and date with num_samples > 0.",
       "Use this file as the denominator for monitored-day counts; use stove_use_geocene_refugee_daily.rds for stove-on event summaries."
     )
   )
@@ -114,7 +114,7 @@ entry <- make_inventory_entry(
   shareable_output_path = shareable_path,
   shareable_removed_identifier_columns = shareable$removed,
   notes = paste(
-    "Refugee-only daily stove-use dataset rebuilt from raw Geocene exports in 2_data_raw/Geocene_220705.",
+    "Refugee-only daily stove-use dataset rebuilt from raw Geocene exports in 2_data_raw/Geocene_210204 and 2_data_raw/Geocene_220705.",
     "No host Geocene output was created because there is no host-community Geocene data.",
     "Timepoint was recoded from the monitoring date."
   )
