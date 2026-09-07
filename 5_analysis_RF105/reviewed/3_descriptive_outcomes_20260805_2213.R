@@ -6214,7 +6214,7 @@ if (length(non_lpg_vars_available) > 0) {
 
 ################################################################################
 # Shared Geocene outputs use the cleaned all-event household-date datasets.
-source(file.path("5_analysis_RF105", "reviewed", "geocene_analysis_helpers.R"))
+source(file.path(project_root, "5_analysis_RF105", "reviewed", "geocene_analysis_helpers.R"))
 geocene_run_analysis("100_80_5_20")
 # Consolidated respiratory-health descriptive section
 ################################################################################

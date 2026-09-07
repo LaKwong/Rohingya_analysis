@@ -1,5 +1,13 @@
 # Shared summaries for primary and sensitivity Geocene event exports.
-source(file.path("1_data_import", "fixed", "geocene_pipeline_helpers.R"))
+source(file.path(Sys.getenv("ROHINGYA_ANALYSIS_ROOT", unset = "."),
+  "1_data_import", "fixed", "geocene_pipeline_helpers.R"))
+
+geocene_clean_data_root <- function() {
+  path <- Sys.getenv("RF105_CLEAN_DATA_DIR", unset = "4_data/clean_final")
+  if (!nzchar(path)) path <- "4_data/clean_final"
+  if (!grepl("^(/|[A-Za-z]:[/\\\\]|\\\\\\\\|~)", path)) path <- raw_import_path(path)
+  normalizePath(path, winslash = "/", mustWork = TRUE)
+}
 
 geocene_note <- paste("One household-day is one household and Bangladesh-local event start date with recorded stove use.",
   "Events from documented broken-probe missions are excluded; all other events are retained. Concurrent LPG and biomass count as one household-day and two recorded fuels.")
@@ -105,7 +113,8 @@ geocene_tables <- function(events, daily) {
 }
 
 geocene_run_analysis <- function(variant, figures = TRUE, output_root = NULL) {
-  source(file.path("5_analysis_RF105", "reviewed", "0_RF105_config_20260805_2213.R"), local = TRUE)
+  source(raw_import_path("5_analysis_RF105", "reviewed", "0_RF105_config_20260805_2213.R"), local = TRUE)
+  dir_clean_final <- geocene_clean_data_root()
   if (!is.null(output_root)) {
     dir_tables_reviewed <- file.path(output_root, "tables")
     dir_figures_reviewed <- file.path(output_root, "figures")
@@ -143,15 +152,15 @@ geocene_run_analysis <- function(variant, figures = TRUE, output_root = NULL) {
       df[[lower_name]] <- ci[, 1]; df[[upper_name]] <- ci[, 2]; df
     }
     set.seed(105)
-    source(file.path("5_analysis_RF105", "reviewed", "geocene_standard_figures.R"), local = TRUE)
-    source(file.path("5_analysis_RF105", "reviewed", "geocene_month_figures.R"), local = TRUE)
-    source(file.path("5_analysis_RF105", "reviewed", "geocene_composite_figures.R"), local = TRUE)
+    source(raw_import_path("5_analysis_RF105", "reviewed", "geocene_standard_figures.R"), local = TRUE)
+    source(raw_import_path("5_analysis_RF105", "reviewed", "geocene_month_figures.R"), local = TRUE)
+    source(raw_import_path("5_analysis_RF105", "reviewed", "geocene_composite_figures.R"), local = TRUE)
     stove_colors <- c(lpg = "#0072B2", biomass = "#D55E00")
     month_axis_label <- function(label, years) label
     save_plot_if_data <- function(data, plot, filename, width, height, ...) {
       if (nrow(data)) save_reviewed_plot(plot, filename, width = width, height = height, ...)
     }
-    source(file.path("5_analysis_RF105", "reviewed", "geocene_midline_figures.R"), local = TRUE)
+    source(raw_import_path("5_analysis_RF105", "reviewed", "geocene_midline_figures.R"), local = TRUE)
   }
   write_reviewed_csv(tibble(note = c(geocene_note,
     "Receipt date is not an eligibility criterion for overall monitoring or stove-use summaries.",

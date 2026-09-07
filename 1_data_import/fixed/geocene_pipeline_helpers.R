@@ -1,5 +1,6 @@
 # Shared Geocene event pipeline. Raw files are read-only; identifiers stay private.
-source(file.path("1_data_import", "fixed", "0_import_raw_helpers.R"))
+source(file.path(Sys.getenv("ROHINGYA_ANALYSIS_ROOT", unset = "."),
+  "1_data_import", "fixed", "0_import_raw_helpers.R"))
 suppressPackageStartupMessages({
   library(dplyr)
   library(tidyr)

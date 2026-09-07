@@ -106,3 +106,12 @@ concurrent fuels, baseline recoding, missing receipts, duplicate household-days,
 and aggregate equivalence after pseudonymization. Figure integration tests use
 synthetic data and write only under `8_restricted/geocene_pipeline/tests`.
 The real-data runner also checks public/private aggregate equality before publishing.
+
+The reviewed Geocene analysis can be sourced with `chdir = FALSE` from another
+working directory when `ROHINGYA_ANALYSIS_ROOT` points to this repository.
+Nested helpers and figure modules resolve against that root. For Geocene,
+relative `RF105_CLEAN_DATA_DIR` overrides are also project-root-relative;
+absolute overrides remain supported. The caller's working directory is unchanged.
+Run `Rscript --vanilla tests/test_geocene_external_workdir.R` from the repository
+root to test this workflow. This integration test uses existing cleaned inputs
+and regenerates primary and sensitivity Geocene outputs, not unrelated analyses.
