@@ -93,7 +93,6 @@ reviewed_scripts <- c(
   "0.1_fcn_id_presence_by_arm_20260805_2213.R",
   "6_participant_flow_20260812.R",
   "1_geocene_stove_use_20260805_2213.R",
-  "2_pm25_ambient_adjusted_analysis_20260805_2213.R",
   "3_descriptive_outcomes_20260805_2213.R",
   "4_rdid_xgboost_20260805_2213.R",
   "5_drDiD_comparison_20260805_2213.R"
@@ -108,11 +107,13 @@ if (is.na(geocene_pos) || is.na(descriptive_pos) || geocene_pos > descriptive_po
     call. = FALSE
   )
 }
-pm_script <- "2_pm25_ambient_adjusted_analysis_20260805_2213.R"
-pm_pos <- match(pm_script, reviewed_scripts)
-if (is.na(pm_pos) || pm_pos > descriptive_pos) {
+rdid_script <- "4_rdid_xgboost_20260805_2213.R"
+drdid_script <- "5_drDiD_comparison_20260805_2213.R"
+rdid_pos <- match(rdid_script, reviewed_scripts)
+drdid_pos <- match(drdid_script, reviewed_scripts)
+if (is.na(rdid_pos) || is.na(drdid_pos) || descriptive_pos > rdid_pos || rdid_pos > drdid_pos) {
   stop(
-    "RF105 runner order error: the ambient-adjusted PM2.5 script must run before descriptive outputs.",
+    "RF105 runner order error: descriptive outputs must run before rDiD, followed by DRDID.",
     call. = FALSE
   )
 }

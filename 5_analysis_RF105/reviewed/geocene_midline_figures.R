@@ -18,20 +18,8 @@ stove_midline_collection_years <- collapse_collection_years(
   stove_midline_intervention$collection_year
 )
 
-stove_exclusive_plot_data <- stove_midline_intervention %>%
-  filter(!is.na(months_after_first_receiving), !is.na(exclusive_lpg_recalc)) %>%
-  group_by(months_after_first_receiving) %>%
-  summarise(
-    collection_years = collapse_collection_years(collection_year),
-    n_daily_records = n(),
-    n_households = n_distinct(fcn_id),
-    n_exclusive_lpg_days = sum(exclusive_lpg_recalc == 1, na.rm = TRUE),
-    proportion_exclusive_lpg_days = mean(exclusive_lpg_recalc == 1, na.rm = TRUE),
-    percent_exclusive_lpg_days = 100 * proportion_exclusive_lpg_days,
-    .groups = "drop"
-  ) %>%
-  add_prop_ci("n_exclusive_lpg_days", "n_daily_records") %>%
-  arrange(months_after_first_receiving)
+stove_exclusive_plot_data <- geocene_percentage_summary(stove_midline_intervention, "months_after_first_receiving") %>%
+  mutate(collection_years = stove_midline_collection_years) %>% arrange(months_after_first_receiving)
 
 write_reviewed_csv(
   stove_exclusive_plot_data,
@@ -44,12 +32,12 @@ fig_stove_exclusive <- ggplot(
 ) +
   geom_line(color = "#138B87", linewidth = 0.8) +
   geom_point(color = "#138B87", size = 2) +
-  geom_text(aes(y = 1.05, label = n_daily_records), size = 3) +
+  geom_text(aes(y = 1.05, label = n_households), size = 3) +
   annotate(
     "text",
     x = min(stove_exclusive_plot_data$months_after_first_receiving, na.rm = TRUE) - 0.4,
     y = 1.05,
-    label = "n =",
+    label = "HH =",
     hjust = 1,
     size = 3
   ) +
@@ -62,7 +50,7 @@ fig_stove_exclusive <- ggplot(
       "Months after first receiving LPG through free distribution program",
       stove_midline_collection_years
     ),
-    y = "Percent of days household exclusively used LPG when cooking"
+    y = "Mean household percentage of monitored days with exclusive LPG use"
   ) +
   coord_cartesian(clip = "off")
 
@@ -98,23 +86,19 @@ stove_minutes_plot_data <- stove_midline_intervention %>%
     fuel_type_label = recode(as.character(fuel_type), lpg = "LPG", biomass = "Biomass")
   )
 
-stove_minutes_summary <- stove_minutes_plot_data %>%
-  group_by(fuel_type, fuel_type_label) %>%
-  summarise(
-    collection_years = collapse_collection_years(collection_year),
-    n_daily_records = n(),
-    n_households = n_distinct(fcn_id),
-    mean_minutes = mean(stove_on_min_sum, na.rm = TRUE),
-    median_minutes = median(stove_on_min_sum, na.rm = TRUE),
-    sd_minutes = sd(stove_on_min_sum, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  mutate(
-    label_x = quantile(stove_minutes_plot_data$days_after_first_receiving, 0.95,
-                       na.rm = TRUE, names = FALSE),
-    label_y = mean_minutes + 20,
-    label = paste0(round(mean_minutes, 1), " min")
-  )
+stove_minutes_summary <- bind_rows(lapply(c("lpg", "biomass"), function(fuel) {
+  s <- geocene_use_summary(stove_midline_intervention)
+  tibble(fuel_type = fuel, fuel_type_label = if (fuel == "lpg") "LPG" else "Biomass",
+    n_daily_records = s[[paste0("n_", fuel, "_use_household_days")]],
+    n_households = s[[paste0("n_households_", fuel, "_minutes_per_day")]],
+    mean_minutes = s[[paste0("mean_", fuel, "_minutes_per_day")]],
+    sd_minutes = s[[paste0("sd_", fuel, "_minutes_per_day")]],
+    median_minutes = s[[paste0("median_", fuel, "_minutes_per_day")]],
+    sd_reason = s[[paste0("sd_reason_", fuel, "_minutes_per_day")]],
+    denominator_note = geocene_weighting_note)
+})) %>% mutate(collection_years = stove_midline_collection_years,
+  label_x = quantile(stove_minutes_plot_data$days_after_first_receiving, .95, na.rm = TRUE, names = FALSE),
+  label_y = mean_minutes + 20, label = paste0(round(mean_minutes, 1), " min on use days"))
 
 write_reviewed_csv(
   stove_minutes_plot_data,

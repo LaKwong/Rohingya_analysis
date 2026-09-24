@@ -42,6 +42,36 @@ stove_composite_data <- stove_daily %>%
     !is.na(days_after_first_receiving)
   )
 
+# Each energy observation is now a household's category-specific daily mean.
+energy_households <- geocene_reconcilable(stove_daily)$household_values %>%
+  filter(n_category_days > 0, metric %in% c("energy_consumed_mj", "energy_pot_mj")) %>%
+  mutate(energy_metric = factor(if_else(metric == "energy_consumed_mj", "Daily energy consumed", "Daily energy reaching the pot"),
+    levels = c("Daily energy consumed", "Daily energy reaching the pot")),
+    cooking_method = factor(case_when(stove_use_category == "exclusive_lpg" ~ "exclusive LPG",
+      stove_use_category == "exclusive_biomass" ~ "exclusive biomass",
+      fuel == "total" ~ "mixed use combined", fuel == "lpg" ~ "mixed use LPG", TRUE ~ "mixed use biomass"),
+      levels = c("exclusive biomass", "exclusive LPG", "mixed use combined", "mixed use LPG", "mixed use biomass")),
+    energy_mj = conditional)
+# Panel B shows mutually exclusive use categories; component estimates stay in tables.
+stove_energy_method_plot_data <- energy_households %>%
+  filter(cooking_method %in% c("exclusive biomass", "exclusive LPG", "mixed use combined")) %>%
+  mutate(cooking_method = droplevels(cooking_method))
+write_reviewed_csv(energy_households %>% select(fcn_id, energy_metric, cooking_method, n_category_days, energy_mj),
+  "table_descriptive_stove_energy_household_means.csv")
+write_reviewed_csv(
+  energy_households %>% group_by(energy_metric, cooking_method) %>% summarise(
+    n_household_days = sum(n_category_days), n_households = n(),
+    n_valid_households = sum(is.finite(energy_mj)),
+    mean_energy_mj = geocene_stats(energy_mj)$mean, sd_energy_mj = geocene_stats(energy_mj)$sd,
+    sd_reason = geocene_stats(energy_mj)$sd_reason,
+    se_energy_mj = sd_energy_mj / sqrt(n_valid_households),
+    ci_lower_energy_mj = if (n_valid_households > 1) mean_energy_mj - qt(.975, n_valid_households - 1) * se_energy_mj else NA_real_,
+    ci_upper_energy_mj = if (n_valid_households > 1) mean_energy_mj + qt(.975, n_valid_households - 1) * se_energy_mj else NA_real_,
+    median_energy_mj = median(energy_mj), p25_energy_mj = quantile(energy_mj, .25, names = FALSE),
+    p75_energy_mj = quantile(energy_mj, .75, names = FALSE), min_energy_mj = min(energy_mj), max_energy_mj = max(energy_mj),
+    .groups = "drop") %>% mutate(denominator_note = geocene_weighting_note),
+  "table_descriptive_stove_energy_by_cooking_method_summary.csv")
+
 if (nrow(stove_composite_data) > 0) {
   stove_composite_month_breaks <- seq(
     0,
@@ -54,38 +84,30 @@ if (nrow(stove_composite_data) > 0) {
   )
   stove_composite_colors <- c(Biomass = "#D55E00", LPG = "#0072B2")
   stove_energy_colors <- c(
-    biomass = "#D55E00",
-    lpg = "#0072B2",
-    `mixed use` = "#6A51A3"
+    `exclusive biomass` = "#D55E00",
+    `exclusive LPG` = "#0072B2",
+    `mixed use combined` = "#6A51A3"
   )
+  stove_energy_labels <- c("Exclusive\nbiomass", "Exclusive\nLPG", "Mixed\ncombined")
   stove_composite_x_label <-
     "Months after first receiving LPG through free distribution program"
 
   make_stove_period_summary <- function(df, period_var, period_type) {
-    df %>%
-      group_by(period_value = .data[[period_var]]) %>%
-      summarise(
-        collection_years = collapse_collection_years(collection_year),
-        n_household_days = n(),
-        n_households = n_distinct(fcn_id),
-        n_lpg_stoves_monitored = sum(lpg_recorded, na.rm = TRUE),
-        n_biomass_stoves_monitored = sum(biomass_recorded, na.rm = TRUE),
-        mean_lpg_minutes_per_day =
-          mean(stove_on_min_sum_lpg_zero, na.rm = TRUE),
-        mean_biomass_minutes_per_day =
-          mean(stove_on_min_sum_biomass_zero, na.rm = TRUE),
-        n_days_exclusive_denominator =
-          sum(valid_exclusive_use_denominator, na.rm = TRUE),
-        n_exclusive_lpg_days = sum(exclusive_lpg_recalc, na.rm = TRUE),
-        pct_exclusive_lpg_days = if_else(
-          n_days_exclusive_denominator > 0,
-          100 * n_exclusive_lpg_days / n_days_exclusive_denominator,
-          NA_real_
-        ),
-        .groups = "drop"
-      ) %>%
-      mutate(period_type = period_type, .before = 1) %>%
-      arrange(period_value)
+    d <- mutate(df, period_value = .data[[period_var]])
+    if (period_var == "days_after_first_receiving") {
+      out <- d %>% group_by(period_value) %>% summarise(
+        n_household_days = n(), n_households = n_distinct(fcn_id),
+        mean_lpg_minutes_per_day = mean(stove_on_min_sum_lpg_zero),
+        mean_biomass_minutes_per_day = mean(stove_on_min_sum_biomass_zero),
+        n_days_exclusive_denominator = n(), n_exclusive_lpg_days = sum(exclusive_lpg_recalc),
+        pct_exclusive_lpg_days = 100 * mean(exclusive_lpg_recalc), .groups = "drop")
+    } else {
+      out <- geocene_use_summary(d, "period_value") %>% mutate(n_household_days = n_household_days_monitored)
+    }
+    metadata <- d %>% group_by(period_value) %>% summarise(
+      collection_years = collapse_collection_years(collection_year),
+      n_lpg_stoves_monitored = sum(lpg_recorded), n_biomass_stoves_monitored = sum(biomass_recorded), .groups = "drop")
+    left_join(out, metadata, by = "period_value") %>% mutate(period_type = period_type, .before = 1) %>% arrange(period_value)
   }
 
   make_stove_monitored_plot_data <- function(df, period_var) {
@@ -109,19 +131,16 @@ if (nrow(stove_composite_data) > 0) {
   }
 
   make_stove_minutes_plot_data <- function(df, period_var) {
-    df %>%
-      group_by(period_value = .data[[period_var]]) %>%
-      summarise(
-        n_household_days = n(),
-        Biomass = mean(stove_on_min_sum_biomass_zero, na.rm = TRUE),
-        LPG = mean(stove_on_min_sum_lpg_zero, na.rm = TRUE),
-        .groups = "drop"
-      ) %>%
-      pivot_longer(
-        cols = c(Biomass, LPG),
-        names_to = "stove",
-        values_to = "average_minutes_of_use"
-      ) %>%
+    d <- mutate(df, period_value = .data[[period_var]])
+    if (period_var == "days_after_first_receiving") {
+      out <- d %>% group_by(period_value) %>% summarise(n_household_days = n(),
+        Biomass = mean(stove_on_min_sum_biomass_zero), LPG = mean(stove_on_min_sum_lpg_zero), .groups = "drop")
+    } else {
+      out <- geocene_use_summary(d, "period_value") %>% transmute(period_value,
+        n_household_days = n_household_days_monitored,
+        Biomass = mean_biomass_minutes_per_day, LPG = mean_lpg_minutes_per_day)
+    }
+    out %>% pivot_longer(c(Biomass, LPG), names_to = "stove", values_to = "average_minutes_of_use") %>%
       mutate(stove = factor(stove, levels = c("Biomass", "LPG")))
   }
 
@@ -175,27 +194,8 @@ if (nrow(stove_composite_data) > 0) {
       percent_exclusive_lpg_day = 100 * exclusive_lpg_day
     )
 
-  stove_exclusive_30day_summary <- stove_composite_data %>%
-    filter(
-      valid_exclusive_use_denominator,
-      !is.na(exclusive_lpg_recalc),
-      !is.na(period30_after_first_receiving)
-    ) %>%
-    group_by(
-      period30_after_first_receiving,
-      period30_midpoint_days,
-      period30_midpoint_weeks,
-      period30_midpoint_months
-    ) %>%
-    summarise(
-      n_daily_records = n(),
-      n_households = n_distinct(fcn_id),
-      n_exclusive_lpg_days = sum(exclusive_lpg_recalc, na.rm = TRUE),
-      percent_exclusive_lpg_days =
-        100 * n_exclusive_lpg_days / n_daily_records,
-      .groups = "drop"
-    ) %>%
-    add_prop_ci("n_exclusive_lpg_days", "n_daily_records") %>%
+  stove_exclusive_30day_summary <- geocene_percentage_summary(stove_composite_data,
+    c("period30_after_first_receiving", "period30_midpoint_days", "period30_midpoint_weeks", "period30_midpoint_months")) %>%
     arrange(period30_after_first_receiving)
 
   write_reviewed_csv(
@@ -211,105 +211,6 @@ if (nrow(stove_composite_data) > 0) {
     "table_descriptive_stove_use_composite_30day_exclusive_summary.csv"
   )
 
-  # Constants carried forward from the prior RF105 energy figure calculation.
-  lpg_efficiency <- 0.67
-  biomass_efficiency <- 0.128
-  conv_mj <- 3.6
-  power_wood <- 6.824 / conv_mj
-  power_lpg <- 3.4 / conv_mj
-
-  stove_energy_method_plot_data <- bind_rows(
-    stove_composite_data %>%
-      mutate(
-        biomass_energy_mj =
-          (stove_on_min_sum_biomass_zero / 60) * power_wood,
-        lpg_energy_mj = (stove_on_min_sum_lpg_zero / 60) * power_lpg,
-        mixed_use_energy_mj = if_else(
-          mixed_use_recalc,
-          biomass_energy_mj + lpg_energy_mj,
-          NA_real_
-        )
-      ) %>%
-      transmute(
-        energy_metric = "Daily energy consumed",
-        biomass = biomass_energy_mj,
-        lpg = lpg_energy_mj,
-        `mixed use` = mixed_use_energy_mj
-      ),
-    stove_composite_data %>%
-      mutate(
-        biomass_energy_mj =
-          (stove_on_min_sum_biomass_zero / 60) *
-          power_wood * biomass_efficiency,
-        lpg_energy_mj =
-          (stove_on_min_sum_lpg_zero / 60) * power_lpg * lpg_efficiency,
-        mixed_use_energy_mj = if_else(
-          mixed_use_recalc,
-          biomass_energy_mj + lpg_energy_mj,
-          NA_real_
-        )
-      ) %>%
-      transmute(
-        energy_metric = "Daily energy reaching the pot",
-        biomass = biomass_energy_mj,
-        lpg = lpg_energy_mj,
-        `mixed use` = mixed_use_energy_mj
-      )
-  ) %>%
-    pivot_longer(
-      cols = c(biomass, lpg, `mixed use`),
-      names_to = "cooking_method",
-      values_to = "energy_mj"
-    ) %>%
-    filter(!is.na(energy_mj), energy_mj > 0) %>%
-    mutate(
-      energy_metric = factor(
-        energy_metric,
-        levels = c("Daily energy consumed", "Daily energy reaching the pot")
-      ),
-      cooking_method = factor(
-        cooking_method,
-        levels = c("biomass", "lpg", "mixed use")
-      )
-    )
-
-  write_reviewed_csv(
-    stove_energy_method_plot_data %>%
-      group_by(energy_metric, cooking_method) %>%
-      summarise(
-        n_household_days = n(),
-        mean_energy_mj = mean(energy_mj, na.rm = TRUE),
-        sd_energy_mj = if_else(n() > 1, sd(energy_mj, na.rm = TRUE), NA_real_),
-        se_energy_mj = if_else(
-          n() > 1,
-          sd_energy_mj / sqrt(n_household_days),
-          NA_real_
-        ),
-        ci_lower_energy_mj = if_else(
-          n_household_days > 1,
-          mean_energy_mj -
-            qt(0.975, df = n_household_days - 1) * se_energy_mj,
-          NA_real_
-        ),
-        ci_upper_energy_mj = if_else(
-          n_household_days > 1,
-          mean_energy_mj +
-            qt(0.975, df = n_household_days - 1) * se_energy_mj,
-          NA_real_
-        ),
-        median_energy_mj = median(energy_mj, na.rm = TRUE),
-        p25_energy_mj = quantile(
-          energy_mj, 0.25, na.rm = TRUE, names = FALSE
-        ),
-        p75_energy_mj = quantile(
-          energy_mj, 0.75, na.rm = TRUE, names = FALSE
-        ),
-        min_energy_mj = min(energy_mj, na.rm = TRUE),
-        max_energy_mj = max(energy_mj, na.rm = TRUE),
-        .groups = "drop"
-      ),
-    "table_descriptive_stove_energy_by_cooking_method_summary.csv"
-  )
 
   make_stove_monitored_plot <- function(plot_data, x_breaks, x_label,
                                         show_legend = TRUE) {
@@ -348,7 +249,7 @@ if (nrow(stove_composite_data) > 0) {
       )
   }
 
-  make_stove_minutes_plot <- function(plot_data, x_breaks, x_label) {
+  make_stove_minutes_plot <- function(plot_data, x_breaks, x_label, conditional = FALSE) {
     y_minor_breaks <- seq(
       0,
       max(
@@ -372,7 +273,7 @@ if (nrow(stove_composite_data) > 0) {
       scale_color_manual(values = stove_composite_colors) +
       labs(
         x = x_label,
-        y = "Av. minutes\nstove use per day",
+        y = if (conditional) "Household mean minutes\nper fuel-use day" else "Av. minutes\nstove use per day",
         color = "Fuel type"
       ) +
       theme_bw(base_size = 9) +
@@ -426,7 +327,7 @@ if (nrow(stove_composite_data) > 0) {
       ) +
       labs(
         x = x_label,
-        y = "Percent of time household\ncooked exclusively with LPG"
+        y = "Mean household percentage\nof exclusive-LPG days"
       ) +
       theme_bw(base_size = 9) +
       theme(
@@ -463,7 +364,7 @@ if (nrow(stove_composite_data) > 0) {
   fig_stove_minutes_week <- make_stove_minutes_plot(
     stove_minutes_week_plot_data,
     stove_composite_month_breaks,
-    NULL
+    NULL, conditional = TRUE
   )
   fig_stove_exclusive_week <- make_stove_exclusive_plot(
     stove_exclusive_household_day_plot_data,
@@ -479,6 +380,7 @@ if (nrow(stove_composite_data) > 0) {
   ) +
     geom_boxplot(alpha = 0.5, outlier.alpha = 0.45) +
     scale_color_manual(values = stove_energy_colors, drop = FALSE) +
+    scale_x_discrete(labels = setNames(stove_energy_labels, names(stove_energy_colors))) +
     scale_y_continuous(
       breaks = seq(0, 20, by = 5),
       minor_breaks = seq(0, 20, by = 1)
@@ -486,7 +388,7 @@ if (nrow(stove_composite_data) > 0) {
     coord_cartesian(ylim = c(0, 20)) +
     labs(
       x = "cooking method",
-      y = "Daily energy consumed (MJ/hh/day)"
+      y = "Household mean energy consumed\n(MJ per category-use day)"
     ) +
     theme_bw(base_size = 9) +
     theme(
@@ -503,6 +405,7 @@ if (nrow(stove_composite_data) > 0) {
   ) +
     geom_boxplot(alpha = 0.5, outlier.alpha = 0.45) +
     scale_color_manual(values = stove_energy_colors, drop = FALSE) +
+    scale_x_discrete(labels = setNames(stove_energy_labels, names(stove_energy_colors))) +
     scale_y_continuous(
       breaks = seq(0, 20, by = 5),
       minor_breaks = seq(0, 20, by = 1)
@@ -510,7 +413,7 @@ if (nrow(stove_composite_data) > 0) {
     coord_cartesian(ylim = c(0, 20)) +
     labs(
       x = "cooking method",
-      y = "Daily energy that reached the pot (MJ/hh/day)"
+      y = "Household mean energy reaching the pot\n(MJ per category-use day)"
     ) +
     theme_bw(base_size = 9) +
     theme(

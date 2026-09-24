@@ -268,6 +268,9 @@ exclusive_use_by_month_summary <- exclusive_use_by_month_hh %>%
       mean(pct_days_exclusive_lpg, na.rm = TRUE),
     median_pct_days_exclusive_lpg =
       median(pct_days_exclusive_lpg, na.rm = TRUE),
+    sd_pct_days_exclusive_lpg = geocene_stats(pct_days_exclusive_lpg)$sd,
+    sd_reason = geocene_stats(pct_days_exclusive_lpg)$sd_reason,
+    n_valid_households = sum(is.finite(pct_days_exclusive_lpg)),
     .groups = "drop"
   ) %>%
   filter(n_households >= 3)
@@ -377,44 +380,21 @@ supplement_day_data <- stove_daily %>%
   filter(observed_stove_use_day) %>%
   filter(!is.na(days_after_group))
 
-supplement_day_summary <- supplement_day_data %>%
-  group_by(days_after_group) %>%
-  summarise(
-    n_household_days = n(),
-    n_households = n_distinct(fcn_id),
-    mean_pct_lpg_events = mean(pct_lpg_events, na.rm = TRUE),
-    median_pct_lpg_events = median(pct_lpg_events, na.rm = TRUE),
-    mean_pct_lpg_minutes = mean(pct_lpg_minutes, na.rm = TRUE),
-    median_pct_lpg_minutes = median(pct_lpg_minutes, na.rm = TRUE),
-    n_days_exclusive_denominator =
-      sum(valid_exclusive_use_denominator, na.rm = TRUE),
-    pct_exclusive_lpg_days = if_else(
-      n_days_exclusive_denominator > 0,
-      100 * sum(exclusive_lpg_recalc, na.rm = TRUE) / n_days_exclusive_denominator,
-      NA_real_
-    ),
-    pct_exclusive_biomass_days = if_else(
-      n_days_exclusive_denominator > 0,
-      100 * sum(exclusive_biomass_recalc, na.rm = TRUE) / n_days_exclusive_denominator,
-      NA_real_
-    ),
-    pct_mixed_use_days = if_else(
-      n_days_exclusive_denominator > 0,
-      100 * sum(mixed_use_recalc, na.rm = TRUE) / n_days_exclusive_denominator,
-      NA_real_
-    ),
-    .groups = "drop"
-  )
+supplement_day_summary <- geocene_use_summary(supplement_day_data, "days_after_group") %>%
+  mutate(n_household_days = n_household_days_monitored)
 
+# Distribution of household-level LPG minute shares, not of individual days.
 supplement_pct_lpg_distribution <- supplement_day_data %>%
-  filter(!is.na(pct_lpg_minutes_group)) %>%
-  count(days_after_group, pct_lpg_minutes_group, name = "n_household_days") %>%
-  group_by(days_after_group) %>%
-  mutate(
-    pct_household_days =
-      100 * n_household_days / sum(n_household_days, na.rm = TRUE)
-  ) %>%
-  ungroup()
+  group_by(days_after_group, fcn_id) %>%
+  summarise(n_monitored_days = n(), pct_lpg_minutes = 100 * sum(stove_on_min_sum_lpg_zero) / sum(stove_on_min_sum_total_zero), .groups = "drop") %>%
+  mutate(pct_lpg_minutes_group = case_when(
+    pct_lpg_minutes == 0 ~ "0", pct_lpg_minutes < 20 ~ "1-19", pct_lpg_minutes < 40 ~ "20-39",
+    pct_lpg_minutes < 60 ~ "40-59", pct_lpg_minutes < 80 ~ "60-79", pct_lpg_minutes < 100 ~ "80-99", TRUE ~ "100")) %>%
+  group_by(days_after_group, pct_lpg_minutes_group) %>%
+  summarise(n_households = n(), n_household_days = sum(n_monitored_days), .groups = "drop") %>%
+  group_by(days_after_group) %>% mutate(pct_households = 100 * n_households / sum(n_households),
+    denominator_note = "One household per window, classified by its ratio of total LPG minutes to total stove minutes.",
+    sd_reason = "not_applicable_to_bin_counts") %>% ungroup()
 
 write_reviewed_csv(
   supplement_day_summary,
@@ -450,17 +430,13 @@ energy_day <- df_days_receive %>%
     total_energy_mj = biomass_energy_mj + lpg_energy_mj
   )
 
-energy_summary <- energy_day %>%
-  summarise(
-    n_household_days = n(),
-    n_households = n_distinct(fcn_id),
-    mean_lpg_energy_mj = mean(lpg_energy_mj, na.rm = TRUE),
-    median_lpg_energy_mj = median(lpg_energy_mj, na.rm = TRUE),
-    mean_biomass_energy_mj = mean(biomass_energy_mj, na.rm = TRUE),
-    median_biomass_energy_mj = median(biomass_energy_mj, na.rm = TRUE),
-    mean_total_energy_mj = mean(total_energy_mj, na.rm = TRUE),
-    median_total_energy_mj = median(total_energy_mj, na.rm = TRUE)
-  )
+energy_summary <- energy_day %>% group_by(fcn_id) %>% summarise(
+  n_days = n(), across(c(lpg_energy_mj, biomass_energy_mj, total_energy_mj), mean), .groups = "drop")
+energy_summary <- bind_cols(tibble(n_household_days = sum(energy_summary$n_days), n_households = nrow(energy_summary)),
+  geocene_wide_stats(energy_summary$lpg_energy_mj, "lpg_energy_mj"),
+  geocene_wide_stats(energy_summary$biomass_energy_mj, "biomass_energy_mj"),
+  geocene_wide_stats(energy_summary$total_energy_mj, "total_energy_mj")) %>%
+  mutate(denominator_note = "Equal household averages over all monitored post-receipt days, including zero fuel-use days.")
 
 write_reviewed_csv(
   energy_summary,

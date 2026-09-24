@@ -1,6 +1,32 @@
 # Standalone focused tests: Rscript --vanilla tests/test_geocene_pipeline.R
 source(file.path("5_analysis_RF105", "reviewed", "geocene_analysis_helpers.R"))
 
+cooking_fixture <- tibble(fcn_id = rep(c("test_household_1", "test_household_2"), 3), observed_stove_use_day = TRUE,
+  exclusive_lpg_recalc = c(TRUE, TRUE, FALSE, FALSE, FALSE, FALSE),
+  exclusive_biomass_recalc = c(FALSE, FALSE, TRUE, TRUE, FALSE, FALSE),
+  mixed_use_recalc = c(FALSE, FALSE, FALSE, FALSE, TRUE, TRUE),
+  cooking_events_with_lpg_zero = c(1, 3, 0, 0, 1, 3),
+  cooking_events_with_biomass_zero = c(0, 0, 2, 4, 2, 4),
+  stove_on_min_sum_total_zero = c(10, 30, 20, 40, 30, 70))
+cooking_summary <- geocene_cooking_by_use(cooking_fixture)
+stopifnot(identical(cooking_summary$n_household_days, rep(2L, 3)),
+  isTRUE(all.equal(cooking_summary$mean_cooking_events_per_day, c(2, 3, 5))),
+  isTRUE(all.equal(cooking_summary$sd_cooking_events_per_day, sqrt(c(2, 2, 8)))),
+  isTRUE(all.equal(cooking_summary$mean_daily_cooking_minutes, c(20, 30, 50))),
+  isTRUE(all.equal(cooking_summary$sd_daily_cooking_minutes, sqrt(c(200, 200, 800)))))
+stopifnot(all(is.na(geocene_cooking_by_use(cooking_fixture[1, ])$sd_daily_cooking_minutes)))
+mixed_fixture <- cooking_fixture %>% mutate(lpg_recorded = !exclusive_biomass_recalc,
+  biomass_recorded = !exclusive_lpg_recalc,
+  stove_on_min_sum_lpg_zero = c(10, 30, 0, 0, 10, 30),
+  stove_on_min_sum_biomass_zero = c(0, 0, 20, 40, 20, 40))
+mixed_summary <- geocene_mixed_use_by_fuel(mixed_fixture)
+stopifnot(all(mixed_summary$n_household_days == 2L),
+  isTRUE(all.equal(mixed_summary$mean_cooking_events_per_day, c(5, 2, 3))),
+  isTRUE(all.equal(mixed_summary$mean_daily_cooking_minutes, c(50, 20, 30))),
+  isTRUE(all.equal(mixed_summary$sd_daily_cooking_minutes, sqrt(c(800, 200, 200)))),
+  mixed_summary$total_cooking_events[1] == sum(mixed_summary$total_cooking_events[2:3]),
+  mixed_summary$total_cooking_minutes[1] == sum(mixed_summary$total_cooking_minutes[2:3]))
+
 names_fixture <- tibble(mission_name = c("CF_20191120_0_10FF34123456_11:34",
   "CF_20191120_1_4EPP21123457_11:34", "CF_ 20191120_0,10FF34123456_11:34",
   "CF_20191120_10FF34123456_11:34", "CF_20191120_0_10FF12345_11:34"))
@@ -50,11 +76,57 @@ mixed <- daily %>% filter(fcn_id == "123456", date == as.Date("2019-11-21"))
 stopifnot(nrow(mixed) == 1, mixed$mixed_use_recalc, mixed$n_stoves_with_recorded_use == 2,
   mixed$days_after_first_receiving < 0)
 tables <- geocene_tables(clean, daily)
+household_minutes_test <- geocene_household_stove_minutes(daily)
+stopifnot(nrow(household_minutes_test) == n_distinct(daily$fcn_id),
+  sum(household_minutes_test$total_stove_use_minutes) == sum(daily$stove_on_min_sum_total_zero))
+minute_bins_test <- geocene_household_minutes_bins(tibble(total_stove_use_minutes = c(0, 59, 60, 119, 120, 240)))
+stopifnot(identical(minute_bins_test$n_households, c(2L, 2L, 1L, 0L, 1L)),
+  all(minute_bins_test$bin_end_minutes - minute_bins_test$bin_start_minutes == 60))
+local({
+  summary <- geocene_use_summary(daily)
+  minute_columns <- c(lpg = "stove_on_min_sum_lpg_zero", biomass = "stove_on_min_sum_biomass_zero", total_stove = "stove_on_min_sum_total_zero")
+  for (fuel in names(minute_columns)) {
+    mean_name <- paste0("mean_", fuel, "_minutes_per_day")
+    sd_name <- paste0("sd_", fuel, "_minutes_per_day")
+    stopifnot(match(sd_name, names(summary)) == match(mean_name, names(summary)) + 1L,
+      isTRUE(all.equal(summary[[sd_name]], sd(daily %>%
+        filter(if (fuel == "lpg") lpg_recorded else if (fuel == "biomass") biomass_recorded else TRUE) %>%
+        group_by(fcn_id) %>% summarise(value = mean(.data[[minute_columns[[fuel]]]]), .groups = "drop") %>% pull(value)))),
+      is.na(geocene_use_summary(daily[1, ])[[sd_name]]))
+  }
+})
 stopifnot(sum(tables$table_descriptive_geocene_post_lpg_exclusive_use_summary$n_household_days) == 2,
   sum(tables$table_descriptive_geocene_stoves_monitored_by_days_after_receipt$n_household_days_monitored) == 5,
   identical(tables$table_descriptive_geocene_daily_summary, tables$table_descriptive_stove_daily_summary))
 public_events <- mutate(clean, fcn_id = paste0("public_", fcn_id), hh_id = paste0("public_", hh_id))
+calendar_expected <- daily %>% group_by(date) %>% summarise(n_stoves = sum(lpg_recorded) + sum(biomass_recorded), .groups = "drop")
+stopifnot(tables$table_descriptive_geocene_max_stoves_monitored_on_calendar_date$max_n_stoves_monitored_on_calendar_date == max(calendar_expected$n_stoves))
+concurrent_events <- bind_rows(clean, mutate(clean, fcn_id = paste0("other_", fcn_id), hh_id = paste0("other_", hh_id)))
+concurrent_tables <- geocene_tables(concurrent_events, geocene_collapse_days(concurrent_events))
+stopifnot(concurrent_tables$table_descriptive_geocene_max_stoves_monitored_on_calendar_date$max_n_stoves_monitored_on_calendar_date == 2 * max(calendar_expected$n_stoves))
 public_daily <- geocene_collapse_days(public_events)
+local({
+  # Energy must still be summarized when no receipt-relative plots are possible.
+  arm_levels <- c("comparison", "intervention")
+  as_number <- function(x) suppressWarnings(as.numeric(as.character(x)))
+  energy_results <- list()
+  write_reviewed_csv <- function(data, filename, ...) energy_results[[filename]] <<- data
+  for (receipt_offset in c(NA_real_, -1)) {
+    stove_daily <- mutate(daily, days_after_first_receiving = receipt_offset)
+    source(raw_import_path("5_analysis_RF105", "reviewed", "geocene_composite_figures.R"), local = TRUE)
+    energy <- energy_results[["table_descriptive_stove_energy_by_cooking_method_summary.csv"]]
+    expected <- c("exclusive biomass" = sum(daily$exclusive_biomass_recalc), "exclusive LPG" = sum(daily$exclusive_lpg_recalc),
+      "mixed use combined" = sum(daily$mixed_use_recalc), "mixed use LPG" = sum(daily$mixed_use_recalc), "mixed use biomass" = sum(daily$mixed_use_recalc))
+    stopifnot(nrow(stove_composite_data) == 0,
+      all(energy$n_household_days == unname(expected[as.character(energy$cooking_method)])))
+    for (metric in unique(energy$energy_metric)) {
+      e <- filter(energy, energy_metric == metric)
+      means <- setNames(e$mean_energy_mj, as.character(e$cooking_method))
+      stopifnot(isTRUE(all.equal(unname(means['mixed use combined']), unname(means['mixed use LPG'] + means['mixed use biomass']))),
+        sum(e$n_household_days[e$cooking_method %in% c('exclusive biomass', 'exclusive LPG', 'mixed use combined')]) == nrow(daily))
+    }
+  }
+})
 stopifnot(isTRUE(all.equal(tables, geocene_tables(public_events, public_daily))))
 stopifnot(inherits(try(geocene_tables(clean, bind_rows(daily, daily[1, ])), silent = TRUE), "try-error"))
 stopifnot(is.na(geocene_timepoint(as.Date("2021-01-01"))), geocene_timepoint(as.Date("2022-01-02")) == "endline")

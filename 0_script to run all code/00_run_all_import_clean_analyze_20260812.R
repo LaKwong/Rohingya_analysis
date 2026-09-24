@@ -36,6 +36,8 @@
 #     "G:/My Drive/Coding in r (lakwong@stanford.edu)/Rohingya_analysis")
 ################################################################################
 
+# Keep the project working directory active until a sourced run finishes.
+local({
 get_script_path <- function() {
   command_args <- commandArgs(trailingOnly = FALSE)
   file_arg <- grep("^--file=", command_args, value = TRUE)
@@ -203,62 +205,23 @@ write_manifest <- function(results) {
   utils::write.csv(manifest, manifest_file, row.names = FALSE, na = "")
   invisible(manifest)
 }
-read_project_dependency_packages <- function() {
-  description_path <- file.path(project_root, "DESCRIPTION")
-  if (!file.exists(description_path)) {
-    return(character())
-  }
-
-  dependency_fields <- read.dcf(
-    description_path,
-    fields = c("Depends", "Imports")
-  )
-  dependency_fields <- dependency_fields[1, !is.na(dependency_fields[1, ]), drop = FALSE]
-  dependency_text <- paste(dependency_fields[1, ], collapse = ",")
-  dependency_entries <- unlist(strsplit(dependency_text, ",", fixed = TRUE))
-  dependency_names <- trimws(gsub("\\s*\\(.*\\)", "", dependency_entries))
-  dependency_names <- dependency_names[nzchar(dependency_names)]
-  sort(setdiff(unique(dependency_names), "R"))
-}
-
 check_project_dependencies <- function() {
-  required_packages <- read_project_dependency_packages()
-  if (length(required_packages) == 0) {
-    return(invisible(TRUE))
+  # RStudio may use a different library than fresh Rscript pipeline processes.
+  check_script <- file.path(project_root, "0_script to run all code",
+                            "check_pipeline_dependencies.R")
+  output <- suppressWarnings(
+    system2(rscript, args = shQuote(check_script), stdout = TRUE, stderr = TRUE)
+  )
+  if (length(output)) {
+    cat(paste(output, collapse = "\n"), "\n", file = log_file, append = TRUE, sep = "")
   }
-
-  available_packages <- vapply(
-    required_packages,
-    function(package) requireNamespace(package, quietly = TRUE),
-    FUN.VALUE = logical(1)
-  )
-  missing_packages <- required_packages[!available_packages]
-
-  if (length(missing_packages) == 0) {
-    return(invisible(TRUE))
+  status <- attr(output, "status")
+  if (!is.null(status) && status != 0L) {
+    stop(paste(c("Pipeline dependency check failed before imports started.",
+                 output, paste("See log:", log_file)), collapse = "\n"), call. = FALSE)
   }
-
-  runner_path <- normalizePath(
-    file.path(
-      project_root,
-      "0_script to run all code",
-      "00_run_all_import_clean_analyze_20260812.R"
-    ),
-    winslash = "/",
-    mustWork = FALSE
-  )
-
-  message_lines <- c(
-    "The project package library is incomplete.",
-    paste0("Missing required package(s): ", paste(missing_packages, collapse = ", ")),
-    "",
-    "Run this once from the Rohingya_analysis project root before running the pipeline:",
-    "  renv::restore()",
-    "",
-    "Then restart R and rerun:",
-    paste0("  source(\"", runner_path, "\")")
-  )
-  stop(paste(message_lines, collapse = "\n"), call. = FALSE)
+  log_message("Dependency check passed in the pipeline Rscript environment.")
+  invisible(TRUE)
 }
 
 rscript <- file.path(R.home("bin"), if (.Platform$OS.type == "windows") {
@@ -435,3 +398,4 @@ if (env_flag("ROHINGYA_RUN_DRY_RUN")) {
   log_message("Pipeline complete.")
   log_message("Run manifest written to: ", manifest_file)
 }
+})

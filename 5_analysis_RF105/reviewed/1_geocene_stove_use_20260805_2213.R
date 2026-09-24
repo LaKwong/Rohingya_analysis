@@ -12,4 +12,4 @@ geocene_comparison <- bind_rows(lapply(seq_along(geocene_variants), function(i) 
     n_events = sum(d$cooking_events_with_lpg_zero + d$cooking_events_with_biomass_zero),
     n_missing_receipt_household_days = sum(is.na(d$days_after_first_receiving)))
 }))
-geocene_write(geocene_comparison, raw_import_path("7_tables", paste0("RF105_reviewed_", format(Sys.Date(), "%Y%m%d")), "table_descriptive_geocene_primary_sensitivity_comparison.csv"))
+geocene_write(geocene_comparison, raw_import_path("7_tables", paste0("RF105_reviewed_", format(Sys.Date(), "%Y%m%d")), "table_descriptive_geocene_primary_sensitivity_comparison_100_80_5_20_vs_100_80_5_30.csv"))

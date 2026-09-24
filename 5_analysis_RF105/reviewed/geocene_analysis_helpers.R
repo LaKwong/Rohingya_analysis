@@ -15,22 +15,7 @@ geocene_note <- paste("One household-day is one household and Bangladesh-local e
 geocene_all_arms <- function(d) bind_rows(d, mutate(d, study_arm_overall = "all_arms"))
 geocene_safe_max <- function(x) if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)
 
-geocene_use_summary <- function(d, groups = character()) {
-  d %>% group_by(across(all_of(groups))) %>% summarise(
-    n_daily_records = n(), n_household_days_monitored = n(), n_households = n_distinct(fcn_id),
-    n_days_exclusive_denominator = n(), n_stoves_monitored = sum(n_stoves_with_recorded_use),
-    n_exclusive_lpg_days = sum(exclusive_lpg_recalc), n_exclusive_biomass_days = sum(exclusive_biomass_recalc),
-    n_mixed_use_days = sum(mixed_use_recalc),
-    mean_lpg_events_per_day = mean(cooking_events_with_lpg_zero),
-    mean_biomass_events_per_day = mean(cooking_events_with_biomass_zero),
-    mean_lpg_minutes_per_day = mean(stove_on_min_sum_lpg_zero),
-    mean_biomass_minutes_per_day = mean(stove_on_min_sum_biomass_zero),
-    mean_total_stove_minutes_per_day = mean(stove_on_min_sum_total_zero), .groups = "drop") %>%
-    mutate(pct_exclusive_lpg_days = if_else(n_daily_records > 0, 100 * n_exclusive_lpg_days / n_daily_records, NA_real_),
-      pct_exclusive_biomass_days = if_else(n_daily_records > 0, 100 * n_exclusive_biomass_days / n_daily_records, NA_real_),
-      pct_mixed_use_days = if_else(n_daily_records > 0, 100 * n_mixed_use_days / n_daily_records, NA_real_),
-      denominator_note = geocene_note)
-}
+source(raw_import_path("5_analysis_RF105", "reviewed", "geocene_household_weighting.R"))
 
 geocene_scope <- function(d, groups = character()) {
   d %>% group_by(across(all_of(groups))) %>% summarise(
@@ -42,6 +27,25 @@ geocene_scope <- function(d, groups = character()) {
     max_n_stoves_monitored_per_household_day_gt0 = if (n()) max(n_stoves_with_recorded_use) else NA_integer_,
     max_days_after_first_receiving_to_monitoring = geocene_safe_max(days_after_first_receiving), .groups = "drop") %>%
     mutate(monitoring_denominator_note = geocene_note)
+}
+
+# Cooking summaries are defined in the shared household-weighting module.
+
+geocene_household_stove_minutes <- function(daily) {
+  stopifnot(!anyDuplicated(daily[c("fcn_id", "date")]),
+    !anyNA(daily$fcn_id), all(daily$observed_stove_use_day),
+    all(is.finite(daily$stove_on_min_sum_total_zero)), all(daily$stove_on_min_sum_total_zero >= 0))
+  daily %>% group_by(fcn_id) %>% summarise(
+    n_household_days = n(),
+    total_stove_use_minutes = sum(stove_on_min_sum_total_zero), .groups = "drop")
+}
+
+geocene_household_minutes_bins <- function(totals) {
+  if (!nrow(totals)) return(tibble(bin_start_minutes = numeric(), bin_end_minutes = numeric(), n_households = integer()))
+  totals %>% count(bin_start_minutes = 60 * floor(total_stove_use_minutes / 60), name = "n_households") %>%
+    tidyr::complete(bin_start_minutes = seq(0, max(bin_start_minutes), by = 60), fill = list(n_households = 0L)) %>%
+    mutate(bin_end_minutes = bin_start_minutes + 60) %>%
+    select(bin_start_minutes, bin_end_minutes, n_households)
 }
 
 geocene_tables <- function(events, daily) {
@@ -63,22 +67,35 @@ geocene_tables <- function(events, daily) {
     n_stoves_monitored = sum(n_stoves_with_recorded_use), .groups = "drop")
   counts <- stove_counts("days_after_first_receiving")
   counts_arm <- stove_counts(c("study_arm_overall", "days_after_first_receiving"))
+  counts_calendar <- stove_counts("date") %>% arrange(date)
+  peak_calendar <- counts_calendar %>% filter(n_stoves_monitored == max(n_stoves_monitored))
+  maximum_calendar <- tibble(
+    max_n_stoves_monitored_on_calendar_date = if (nrow(counts_calendar)) max(counts_calendar$n_stoves_monitored) else NA_integer_,
+    n_calendar_dates_at_maximum = nrow(peak_calendar),
+    calendar_dates_at_maximum = paste(peak_calendar$date, collapse = "; "),
+    note = "Across all households and both arms on each Bangladesh-local calendar date; counts one recorded LPG and/or biomass fuel per household, not distinct devices. Only recorded-use days are counted."
+  )
+  stopifnot(sum(counts_calendar$n_household_days_monitored) == nrow(daily),
+    sum(counts_calendar$n_stoves_monitored) == sum(daily$n_stoves_with_recorded_use),
+    all(counts_calendar$n_stoves_monitored == counts_calendar$n_lpg_stoves_monitored + counts_calendar$n_biomass_stoves_monitored))
   stopifnot(sum(counts$n_household_days_monitored) == nrow(daily),
     sum(counts_arm$n_household_days_monitored) == nrow(daily),
     sum(counts$n_stoves_monitored) == sum(daily$n_stoves_with_recorded_use),
     all(summary$n_exclusive_lpg_days + summary$n_exclusive_biomass_days + summary$n_mixed_use_days == summary$n_household_days_monitored))
   post <- function(minimum) {
     d <- filter(daily, !is.na(days_after_first_receiving), days_after_first_receiving >= minimum)
-    categories <- c("exclusive_lpg_recalc", "exclusive_biomass_recalc", "mixed_use_recalc")
-    tibble(stove_use_category = c("exclusive_lpg", "exclusive_biomass", "both_stoves"),
-      n_household_days = vapply(categories, function(x) sum(d[[x]]), integer(1)),
-      n_household_days_monitored = nrow(d), n_households = n_distinct(d$fcn_id),
-      pct_household_days = if (nrow(d)) 100 * n_household_days / nrow(d) else NA_real_,
-      minimum_days_after_first_receiving = minimum, denominator_note = geocene_note)
+    result <- geocene_reconcilable(d)$prevalence
+    counts <- tibble(stove_use_category = geocene_categories,
+      n_household_days = c(sum(d$exclusive_lpg_recalc), sum(d$exclusive_biomass_recalc), sum(d$mixed_use_recalc)))
+    result %>% left_join(counts, by = "stove_use_category", suffix = c("_monitored", "")) %>%
+      mutate(minimum_days_after_first_receiving = minimum, denominator_note = geocene_weighting_note)
   }
   event_summary <- geocene_all_arms(events) %>% group_by(timepoint, study_arm_overall, fuel_type) %>%
     summarise(n_events = n(), n_households = n_distinct(fcn_id), n_household_days = n_distinct(fcn_id, date),
-      total_minutes = sum(stove_on_min), mean_event_minutes = mean(stove_on_min), .groups = "drop")
+      total_minutes = sum(stove_on_min), mean_event_minutes = mean(stove_on_min),
+      sd_event_minutes = if (n() > 1) sd(stove_on_min) else NA_real_, median_event_minutes = median(stove_on_min),
+      sd_reason = if (n() > 1) NA_character_ else "fewer_than_two_events", .groups = "drop") %>%
+    mutate(aggregation_note = "Event-duration QA: individual events, not household-average daily use. Counts and cumulative totals have no applicable SD.")
   recodes <- events %>% filter(recode_baseline_intervention_lpg_date) %>% group_by(timepoint, study_arm_overall, fuel_type) %>%
     summarise(n_events = n(), n_households = n_distinct(fcn_id), n_household_days = n_distinct(fcn_id, date), .groups = "drop")
   list(
@@ -87,6 +104,10 @@ geocene_tables <- function(events, daily) {
     table_descriptive_geocene_daily_summary = summary,
     table_descriptive_stove_daily_summary = summary,
     table_descriptive_geocene_monitoring_scope_summary = scope,
+    table_descriptive_geocene_cooking_by_stove_use_category = geocene_cooking_by_use(daily),
+    table_descriptive_geocene_mixed_use_cooking_by_fuel = geocene_mixed_use_by_fuel(daily),
+    table_descriptive_geocene_stoves_monitored_by_calendar_date = counts_calendar,
+    table_descriptive_geocene_max_stoves_monitored_on_calendar_date = maximum_calendar,
     table_descriptive_geocene_stoves_monitored_by_days_after_receipt = counts,
     table_descriptive_geocene_stoves_monitored_by_days_after_receipt_by_arm = counts_arm,
     table_descriptive_geocene_post_lpg_exclusive_use_summary = post(0L),
@@ -112,8 +133,32 @@ geocene_tables <- function(events, daily) {
   )
 }
 
+geocene_output_filename <- function(filename, variant) {
+  stopifnot(length(variant) == 1L, variant %in% geocene_variants)
+  extension <- tools::file_ext(filename)
+  stopifnot(nzchar(extension))
+  paste0(tools::file_path_sans_ext(filename), "_", variant, ".", extension)
+}
+
+geocene_event_definition <- function(variant) {
+  stopifnot(length(variant) == 1L, variant %in% geocene_variants)
+  separation <- if (variant == "100_80_5_20") 20L else 30L
+  paste0("Cooking events: thermocouple temperature above 80 C for at least 5 minutes, ",
+    "with at least one recording >100 C during that time, and at least ", separation,
+    " minutes since the prior cooking event. Applied upstream to exported events; not re-detected during analysis.")
+}
+
 geocene_run_analysis <- function(variant, figures = TRUE, output_root = NULL) {
   source(raw_import_path("5_analysis_RF105", "reviewed", "0_RF105_config_20260805_2213.R"), local = TRUE)
+  # Scope naming to this variant without changing survey/PM writers or privacy routing.
+  csv_writer <- write_reviewed_csv
+  plot_writer <- save_reviewed_plot
+  write_reviewed_csv <- function(x, filename, subfolder = NULL) {
+    csv_writer(x, geocene_output_filename(filename, variant), subfolder)
+  }
+  save_reviewed_plot <- function(plot, filename, ...) {
+    plot_writer(plot, geocene_output_filename(filename, variant), ...)
+  }
   dir_clean_final <- geocene_clean_data_root()
   if (!is.null(output_root)) {
     dir_tables_reviewed <- file.path(output_root, "tables")
@@ -135,8 +180,19 @@ geocene_run_analysis <- function(variant, figures = TRUE, output_root = NULL) {
   for (path in c(dir_tables_reviewed, dir_tables_qa, dir_tables_release, dir_figures_reviewed, dir_restricted_qa)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
   stove_daily <- readRDS(file.path(dir_clean_final, "geocene", variant, "household_days.rds"))
   events <- readRDS(file.path(dir_clean_final, "geocene", variant, "events.rds"))
+  stopifnot(all(events$analysis_variant == variant), all(stove_daily$analysis_variant == variant),
+    !anyNA(events$analysis_variant), !anyNA(stove_daily$analysis_variant))
   tables <- geocene_tables(events, stove_daily)
   for (name in names(tables)) write_reviewed_csv(tables[[name]], paste0(name, ".csv"))
+  linked <- geocene_window_tables(stove_daily)
+  for (name in names(linked)) {
+    if (name %in% c("household_values", "overall_household_values")) {
+      geocene_write(linked[[name]], file.path(dir_restricted_qa,
+        geocene_output_filename(paste0("geocene_weighted_", name, ".rds"), variant)))
+    } else {
+      write_reviewed_csv(linked[[name]], paste0("table_descriptive_geocene_household_weighted_", name, ".csv"))
+    }
+  }
   exclusion_path <- file.path(dir_clean_final, "geocene", variant, "mission_exclusion_summary.rds")
   if (file.exists(exclusion_path)) write_reviewed_csv(readRDS(exclusion_path), "table_descriptive_geocene_mission_exclusion_summary.csv")
   write_reviewed_csv(stove_daily, "table_descriptive_stove_daily_dataset.csv")
@@ -152,6 +208,7 @@ geocene_run_analysis <- function(variant, figures = TRUE, output_root = NULL) {
       df[[lower_name]] <- ci[, 1]; df[[upper_name]] <- ci[, 2]; df
     }
     set.seed(105)
+    source(raw_import_path("5_analysis_RF105", "reviewed", "geocene_household_minutes_histogram.R"), local = TRUE)
     source(raw_import_path("5_analysis_RF105", "reviewed", "geocene_standard_figures.R"), local = TRUE)
     source(raw_import_path("5_analysis_RF105", "reviewed", "geocene_month_figures.R"), local = TRUE)
     source(raw_import_path("5_analysis_RF105", "reviewed", "geocene_composite_figures.R"), local = TRUE)
@@ -162,7 +219,8 @@ geocene_run_analysis <- function(variant, figures = TRUE, output_root = NULL) {
     }
     source(raw_import_path("5_analysis_RF105", "reviewed", "geocene_midline_figures.R"), local = TRUE)
   }
-  write_reviewed_csv(tibble(note = c(geocene_note,
+  write_reviewed_csv(tibble(note = c(paste("Analysis variant:", variant), geocene_event_definition(variant),
+    geocene_note, geocene_weighting_note,
     "Receipt date is not an eligibility criterion for overall monitoring or stove-use summaries.",
     "Post-receipt summaries require a known receipt date and nonnegative elapsed days; 30-day summaries require at least 30 elapsed days.",
     "Mission logs are not available in these exports. No sensor-window denominator is used.",

@@ -28,6 +28,12 @@ renv::snapshot(type = "explicit", prompt = FALSE)
 
 Analysis scripts should check for required packages but should not call `install.packages()` at runtime.
 
+After moving or copying this project to a new folder, run `renv::restore()` from
+that project root again. The default `renv` library is specific to the project
+path. The full runner checks dependencies in a fresh R process with the same
+startup settings as its pipeline steps, including during a dry run, before any
+data are imported. The log records the library paths and any missing packages.
+
 ## Workflow
 
 With GNU Make available:

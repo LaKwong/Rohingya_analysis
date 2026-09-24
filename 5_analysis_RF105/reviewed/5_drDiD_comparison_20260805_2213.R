@@ -9,7 +9,7 @@
 # Inputs:
 #   4_data/clean_final/survey_refugee_household.rds
 #   4_data/clean_final/survey_refugee_hh_members.rds
-#   8_restricted/pm25_ambient_adjusted_YYYYMMDD/table_rDiD_pm25_panel_internal.csv
+#   8_restricted/RF105_reviewed_YYYYMMDD/identified_tables/table_descriptive_pm25_household_timepoint_internal.csv
 #   7_tables/RF105_reviewed_YYYYMMDD/table_rDiD_xgboost_all_results.csv
 #
 # Outputs:
@@ -211,60 +211,43 @@ outcome_specs <- rdid_xgboost_reference %>%
   arrange(contrast, domain, outcome)
 
 ################################################################################
-# PM2.5 household-timepoint outcome preparation
+# PM2.5 canonical household-timepoint outcomes
 ################################################################################
 
-find_ambient_adjusted_pm_file <- function() {
-  same_day_candidates <- c(
-    file.path(
-      project_root,
-      "8_restricted",
-      paste0("pm25_ambient_adjusted_", date_stamp),
-      "table_rDiD_pm25_panel_internal.csv"
-    ),
-    file.path(
-      project_root,
-      "7_tables",
-      paste0("pm25_ambient_adjusted_", date_stamp),
-      "table_rDiD_pm25_panel_internal.csv"
-    )
+pm_adjusted_file <- file.path(
+  project_root,
+  "8_restricted",
+  paste0("RF105_reviewed_", date_stamp),
+  "identified_tables",
+  "table_descriptive_pm25_household_timepoint_internal.csv"
+)
+if (!file.exists(pm_adjusted_file)) {
+  stop(
+    "Same-run canonical PM2.5 file not found: ", pm_adjusted_file, ". Run ",
+    "3_descriptive_outcomes_20260805_2213.R before 5_drDiD_comparison_20260805_2213.R.",
+    call. = FALSE
   )
-  same_day_candidates <- same_day_candidates[file.exists(same_day_candidates)]
-  if (length(same_day_candidates) > 0) {
-    return(normalizePath(same_day_candidates[[1]], winslash = "/", mustWork = FALSE))
-  }
-
-  candidate_roots <- c(file.path(project_root, "8_restricted"), file.path(project_root, "7_tables"))
-  candidate_dirs <- unlist(lapply(
-    candidate_roots[file.exists(candidate_roots)],
-    list.dirs,
-    full.names = TRUE,
-    recursive = FALSE
-  ))
-  candidate_dirs <- candidate_dirs[grepl("^pm25_ambient_adjusted_[0-9]{8}$", basename(candidate_dirs))]
-  candidate_files <- file.path(candidate_dirs, "table_rDiD_pm25_panel_internal.csv")
-  candidate_files <- candidate_files[file.exists(candidate_files)]
-
-  if (length(candidate_files) == 0) {
-    stop(
-      "No ambient-adjusted PM2.5 household-timepoint file found. Run ",
-      "2_pm25_ambient_adjusted_analysis_20260805_2213.R first.",
-      call. = FALSE
-    )
-  }
-
-  candidate_info <- tibble(
-    candidate_file = candidate_files,
-    source_date = basename(dirname(candidate_files)),
-    restricted_rank = if_else(str_detect(candidate_files, "/8_restricted/"), 1L, 0L)
-  ) %>%
-    arrange(desc(source_date), desc(restricted_rank))
-
-  normalizePath(candidate_info$candidate_file[[1]], winslash = "/", mustWork = FALSE)
 }
 
-pm_adjusted_file <- find_ambient_adjusted_pm_file()
+pm_required_cols <- c(
+  "fcn_id", "timepoint", "study_arm_overall",
+  "pm25_ambient_excess_f000", "pm25_ambient_excess_f025",
+  "pm25_ambient_excess_f050", "pm25_ambient_excess_f075",
+  "pm25_ambient_excess_f100"
+)
 pm_adjusted_raw <- readr::read_csv(pm_adjusted_file, show_col_types = FALSE)
+pm_missing_cols <- setdiff(pm_required_cols, names(pm_adjusted_raw))
+if (length(pm_missing_cols) > 0) {
+  stop("Canonical PM2.5 file is missing: ", paste(pm_missing_cols, collapse = ", "), call. = FALSE)
+}
+
+pm_duplicate_keys <- pm_adjusted_raw %>%
+  transmute(fcn_id = as.character(fcn_id), timepoint = as.character(timepoint)) %>%
+  count(fcn_id, timepoint) %>%
+  filter(is.na(fcn_id) | fcn_id == "" | is.na(timepoint) | n != 1)
+if (nrow(pm_duplicate_keys) > 0) {
+  stop("Canonical PM2.5 file must contain exactly one row per nonmissing fcn_id-timepoint.", call. = FALSE)
+}
 
 pm_household <- pm_adjusted_raw %>%
   clean_timepoint_arm() %>%
@@ -272,44 +255,26 @@ pm_household <- pm_adjusted_raw %>%
     fcn_id = as.character(fcn_id),
     timepoint,
     study_arm_overall = as.character(study_arm_overall),
-    collection_date_min = as.Date(collection_date_min),
-    collection_date_max = as.Date(collection_date_max),
-    n_windows = as_number(n_windows),
-    n_monitor_files = as_number(n_monitor_files),
-    pm25_n_observations = as_number(n_pm_observations),
-    mean_ambient_coverage_prop = as_number(mean_ambient_coverage_prop),
-    pm25_ambient_excess_default = as_number(indoor_minus_ambient_material_default),
-    pm25_ambient_excess_f025 = as_number(indoor_minus_ambient_f025),
-    pm25_ambient_excess_f050 = as_number(indoor_minus_ambient_f050),
-    pm25_ambient_excess_f100 = as_number(indoor_minus_ambient_f100)
-  ) %>%
-  filter(
-    !is.na(fcn_id),
-    fcn_id != "",
-    !is.na(timepoint),
-    !is.na(study_arm_overall)
-  ) %>%
-  group_by(fcn_id, timepoint) %>%
-  summarise(
-    study_arm_overall = as.character(first_nonmissing(study_arm_overall)),
-    collection_date_min = if (all(is.na(collection_date_min))) as.Date(NA) else min(collection_date_min, na.rm = TRUE),
-    collection_date_max = if (all(is.na(collection_date_max))) as.Date(NA) else max(collection_date_max, na.rm = TRUE),
-    n_windows = sum(n_windows, na.rm = TRUE),
-    n_monitor_files = sum(n_monitor_files, na.rm = TRUE),
-    pm25_n_observations = sum(pm25_n_observations, na.rm = TRUE),
-    mean_ambient_coverage_prop = mean(mean_ambient_coverage_prop, na.rm = TRUE),
-    across(starts_with("pm25_ambient_excess_"), ~ mean(.x, na.rm = TRUE)),
-    .groups = "drop"
-  ) %>%
-  mutate(
-    across(starts_with("pm25_ambient_excess_"), ~ ifelse(is.nan(.x), NA_real_, .x)),
-    mean_ambient_coverage_prop = ifelse(
-      is.nan(mean_ambient_coverage_prop),
-      NA_real_,
-      mean_ambient_coverage_prop
-    )
+    pm25_ambient_excess_default = as_number(pm25_ambient_excess_f075),
+    pm25_ambient_excess_f000 = as_number(pm25_ambient_excess_f000),
+    pm25_ambient_excess_f025 = as_number(pm25_ambient_excess_f025),
+    pm25_ambient_excess_f050 = as_number(pm25_ambient_excess_f050),
+    pm25_ambient_excess_f100 = as_number(pm25_ambient_excess_f100)
   )
 
+if (any(is.na(pm_household$timepoint)) || any(!pm_household$study_arm_overall %in% arm_levels)) {
+  stop("Canonical PM2.5 file contains an invalid timepoint or study arm.", call. = FALSE)
+}
+
+pm_outcome_cols <- c(
+  "pm25_ambient_excess_default", "pm25_ambient_excess_f000",
+  "pm25_ambient_excess_f025", "pm25_ambient_excess_f050",
+  "pm25_ambient_excess_f100"
+)
+pm_complete_patterns <- pm_household %>% transmute(across(all_of(pm_outcome_cols), is.na)) %>% distinct()
+if (nrow(pm_complete_patterns) != 1 || any(unlist(pm_complete_patterns[1, ]))) {
+  stop("Canonical PM2.5 outcomes do not share one complete analytic population.", call. = FALSE)
+}
 ################################################################################
 # Panel construction and DRDID wrappers
 ################################################################################

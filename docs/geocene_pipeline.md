@@ -1,5 +1,8 @@
 # Geocene event pipeline
 
+For current summary denominators, category contributions, SD interpretation,
+and linked tables, see [household weighting](geocene_household_weighting.md).
+
 Run from the project root with `make geocene-reviewed`, or:
 
 ```sh
@@ -19,6 +22,13 @@ Primary inputs are `2_data_raw/geocene_biomass_100_80_5_20` and
 `100_80_5_30` suffix. Only `events_by_mission.csv` supplies events. The two summary
 CSVs in each folder verify event counts and durations, including mission totals.
 The primary snapshot contains 51,163 events and the sensitivity snapshot 44,955.
+
+Event definition `100_80_5_20` requires thermocouple temperature above 80 C for
+at least 5 minutes, including at least one recording >100 C during that time,
+and at least 20 minutes since the prior cooking event. The sensitivity definition
+`100_80_5_30` uses the same temperature and duration criteria but requires at
+least 30 minutes since the prior event. These definitions were applied upstream;
+the R pipeline analyzes the corresponding exported events without re-detecting them.
 
 Raw imports, original mission names, mission IDs, device IDs, source rows, receipt
 date audits, and persistent opaque mission-key crosswalks remain in
@@ -88,9 +98,24 @@ analyses require known elapsed days >=0; the 30-day analysis requires >=30.
 Cleaned events and household-days are written to
 `4_data/clean_final/geocene/<variant>/`; public counterparts use
 `4_data/clean_final_public/geocene/<variant>/`. Primary reviewed tables and figures
-retain their filenames under the current dated RF105 folders. Sensitivity results
-use the `sensitivity_100_80_5_30` subfolder. Household/date-level outputs stay restricted.
+have `_100_80_5_20` appended before the extension under the current dated RF105
+folders. The full parallel sensitivity tables and figures have `_100_80_5_30`
+appended and use the `sensitivity_100_80_5_30` subfolder. This includes descriptive
+aliases and energy/plot-summary tables. Earlier dated outputs are unchanged.
+Household/date-level outputs stay restricted, with the same variant suffixes.
 The comparison table reports both variants' monitoring and use totals.
+Its filename ends in `_100_80_5_20_vs_100_80_5_30.csv`.
+Run `Rscript --vanilla tests/verify_geocene_variant_outputs.R` after regeneration
+to check matching primary/sensitivity table and figure inventories and their
+event-definition notes. `tests/verify_geocene_weighted_outputs.R` verifies the
+labelled tables against each variant's private and public analysis inputs.
+
+Energy summaries and composite energy panels use all monitored household-days,
+including missing receipt dates and pre-receipt monitoring. LPG and biomass
+rows are restricted to exclusive use of that fuel. Mixed-use days have three
+rows: both fuels combined, LPG contribution, and biomass contribution, each
+using the same mixed-use household-days. Only receipt-relative plots retain the known-date,
+on-or-after-receipt restriction.
 
 The targeted runner reuses existing survey imports and does not rerun survey,
 PM, health, or causal analyses. The descriptive script calls the shared primary

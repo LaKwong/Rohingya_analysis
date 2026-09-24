@@ -617,6 +617,12 @@ add_rf105_aliases <- function(df) {
     df$gather_scraps_dead <- df$gather_wood_dead
   }
 
+  if ("times_wood_day" %in% names(df) &&
+      "times_wood_week" %notin% names(df)) {
+    # The source field name is historical; the questionnaire asks for trips/week.
+    df$times_wood_week <- df$times_wood_day
+  }
+
   if ("cook_to_sell" %in% names(df) &&
       "cook_to_sell_percent" %notin% names(df)) {
     df$cook_to_sell_percent <- df$cook_to_sell

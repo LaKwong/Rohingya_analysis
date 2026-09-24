@@ -382,25 +382,6 @@ format_weighted_components_rdid <- function(weight_lookup, variables) {
 }
 
 
-weighted_mean_pm_rdid <- function(x, weight) {
-  x <- as_number(x)
-  weight <- as_number(weight)
-  keep <- !is.na(x) & is.finite(x)
-
-  if (!any(keep)) {
-    return(NA_real_)
-  }
-
-  x_keep <- x[keep]
-  weight_keep <- weight[keep]
-  weight_keep[is.na(weight_keep) | !is.finite(weight_keep) | weight_keep < 0] <- 0
-
-  if (sum(weight_keep, na.rm = TRUE) <= 0) {
-    return(mean(x_keep, na.rm = TRUE))
-  }
-
-  weighted.mean(x_keep, weight_keep, na.rm = TRUE)
-}
 
 derive_rdid_empirical_coping_weights <- function(df, label_data, component_map,
                                                  difficult_var, easiest_var,
@@ -701,6 +682,84 @@ format_est_ci <- function(estimate, conf_low, conf_high) {
 # Outcome derivations from clean_final survey data
 ################################################################################
 
+rdid_mental_health_item_vars <- c(
+  "bothered",
+  "no_appetite",
+  "feeling_down",
+  "self_worth",
+  "diff_concentrating",
+  "depressed",
+  "exert_effort",
+  "hopeful",
+  "life_failure",
+  "fearful",
+  "restless_sleep",
+  "happy",
+  "less_talkative",
+  "lonely",
+  "unfriendly_people",
+  "enjoyed_life",
+  "crying_spells",
+  "sick",
+  "feeling_disliked",
+  "cant_get_going",
+  "suicidal_thoughts_30"
+)
+
+rdid_mental_health_good_vars <- c("happy", "enjoyed_life", "self_worth", "hopeful")
+rdid_mental_health_bad_vars <- setdiff(
+  rdid_mental_health_item_vars,
+  c(rdid_mental_health_good_vars, "suicidal_thoughts_30")
+)
+rdid_cesd_item_vars <- c(rdid_mental_health_bad_vars, rdid_mental_health_good_vars)
+
+rdid_mental_health_item_labels <- c(
+  bothered = "Bothered by things",
+  no_appetite = "No appetite",
+  feeling_down = "Feeling down",
+  self_worth = "Low self-worth",
+  diff_concentrating = "Difficulty concentrating",
+  depressed = "Depressed",
+  exert_effort = "Everything was an effort",
+  hopeful = "Hopeful",
+  life_failure = "Life felt like a failure",
+  fearful = "Fearful",
+  restless_sleep = "Restless sleep",
+  happy = "Happy",
+  less_talkative = "Less talkative",
+  lonely = "Lonely",
+  unfriendly_people = "People were unfriendly",
+  enjoyed_life = "Enjoyed life",
+  crying_spells = "Crying spells",
+  sick = "Felt sick",
+  feeling_disliked = "Felt disliked",
+  cant_get_going = "Could not get going",
+  suicidal_thoughts_30 = "Suicidal thoughts in past 30 days frequency"
+)
+
+clean_mental_health_item_score_rdid <- function(x) {
+  out <- as_number(x)
+  out[out %in% c(77, 88, 99)] <- NA_real_
+  out[!is.na(out) & !out %in% 0:4] <- NA_real_
+  out
+}
+
+mental_health_frequency_score_rdid <- function(x, var) {
+  out <- clean_mental_health_item_score_rdid(x)
+  if (var %in% rdid_mental_health_good_vars) {
+    out <- 4 - out
+  }
+  pmin(out, 3)
+}
+
+mental_health_cesd_item_score_rdid <- function(x, var) {
+  out <- clean_mental_health_item_score_rdid(x)
+  if (var %in% rdid_mental_health_good_vars) {
+    return(pmax(out - 1, 0))
+  }
+  pmin(out, 3)
+}
+
 derive_rdid_survey_outcomes <- function(df) {
   health_roots <- c(
     "target_child_clinic_resp",
@@ -865,19 +924,12 @@ derive_rdid_survey_outcomes <- function(df) {
 
   df <- calculate_fcs_from_weekly_vars(df)
 
-  mental_health_good_vars <- c("happy", "enjoyed_life", "self_worth", "hopeful")
-  mental_health_bad_vars <- c(
-    "bothered", "sick", "no_appetite", "diff_concentrating",
-    "restless_sleep", "exert_effort", "less_talkative",
-    "feeling_disliked", "unfriendly_people", "fearful", "lonely",
-    "crying_spells", "cant_get_going", "feeling_down", "life_failure",
-    "depressed"
-  )
-  cesd_vars <- c(mental_health_bad_vars, mental_health_good_vars)
-  cesd_vars <- cesd_vars[cesd_vars %in% names(df)]
-
-  if (length(cesd_vars) > 0) {
-    cesd_mat <- as.data.frame(lapply(cesd_vars, function(var) as_number(df[[var]])))
+  cesd_vars <- rdid_cesd_item_vars[rdid_cesd_item_vars %in% names(df)]
+  if (length(cesd_vars) == length(rdid_cesd_item_vars)) {
+    cesd_mat <- as.data.frame(lapply(
+      cesd_vars,
+      function(var) mental_health_cesd_item_score_rdid(df[[var]], var)
+    ))
     cesd_missing_items <- rowSums(is.na(cesd_mat))
     df$CES_D_score <- rowSums(cesd_mat)
     df$CES_D_score[cesd_missing_items > 0] <- NA_real_
@@ -889,6 +941,10 @@ derive_rdid_survey_outcomes <- function(df) {
   } else {
     df$CES_D_score <- NA_real_
     df$CES_D_o16_score <- NA_integer_
+  }
+
+  for (var in intersect(rdid_mental_health_item_vars, names(df))) {
+    df[[var]] <- mental_health_frequency_score_rdid(df[[var]], var)
   }
 
   df
@@ -1123,13 +1179,7 @@ safe_write_reviewed_csv(
   "table_rDiD_fcs_arm_summary.csv"
 )
 
-cesd_input_vars <- c(
-  "bothered", "sick", "no_appetite", "diff_concentrating",
-  "restless_sleep", "exert_effort", "less_talkative",
-  "feeling_disliked", "unfriendly_people", "fearful", "lonely",
-  "crying_spells", "cant_get_going", "feeling_down", "life_failure",
-  "depressed", "happy", "enjoyed_life", "self_worth", "hopeful"
-)
+cesd_input_vars <- rdid_cesd_item_vars
 cesd_present_vars <- cesd_input_vars[cesd_input_vars %in% names(survey_model_data)]
 
 cesd_item_missingness <- survey_model_data %>%
@@ -1242,6 +1292,28 @@ survey_outcomes <- tribble(
   "fuel_coping_action_66", "Fuel coping: other strategy", "Fuel coping", "binary", "percentage_points",
   "income_skill_labor_any", "Any skilled-labor income", "Livelihoods", "binary", "percentage_points",
   "income_skill_labor_usd", "Skilled-labor income", "Livelihoods", "continuous", "USD",
+  "bothered", "Bothered by things", "Mental health", "continuous", "item_score",
+  "no_appetite", "No appetite", "Mental health", "continuous", "item_score",
+  "feeling_down", "Feeling down", "Mental health", "continuous", "item_score",
+  "self_worth", "Low self-worth", "Mental health", "continuous", "item_score",
+  "diff_concentrating", "Difficulty concentrating", "Mental health", "continuous", "item_score",
+  "depressed", "Depressed", "Mental health", "continuous", "item_score",
+  "exert_effort", "Everything was an effort", "Mental health", "continuous", "item_score",
+  "hopeful", "Hopeful", "Mental health", "continuous", "item_score",
+  "life_failure", "Life felt like a failure", "Mental health", "continuous", "item_score",
+  "fearful", "Fearful", "Mental health", "continuous", "item_score",
+  "restless_sleep", "Restless sleep", "Mental health", "continuous", "item_score",
+  "happy", "Happy", "Mental health", "continuous", "item_score",
+  "less_talkative", "Less talkative", "Mental health", "continuous", "item_score",
+  "lonely", "Lonely", "Mental health", "continuous", "item_score",
+  "unfriendly_people", "People were unfriendly", "Mental health", "continuous", "item_score",
+  "enjoyed_life", "Enjoyed life", "Mental health", "continuous", "item_score",
+  "crying_spells", "Crying spells", "Mental health", "continuous", "item_score",
+  "sick", "Felt sick", "Mental health", "continuous", "item_score",
+  "feeling_disliked", "Felt disliked", "Mental health", "continuous", "item_score",
+  "cant_get_going", "Could not get going", "Mental health", "continuous", "item_score",
+  "suicidal_thoughts_30", "Suicidal thoughts in past 30 days frequency", "Mental health", "continuous", "item_score",
+  "CES_D_score", "CES-D score", "Mental health", "continuous", "score",
   "CES_D_o16_score", "CES-D score >16", "Mental health", "binary", "percentage_points",
   "suicidal_thoughts_30_yn", "Suicidal thoughts in past 30 days", "Mental health", "binary", "percentage_points"
 ) %>%
@@ -1262,8 +1334,9 @@ safe_write_reviewed_csv(
 survey_outcomes <- survey_outcomes %>%
   filter(outcome %in% survey_outcome_availability$variable[survey_outcome_availability$available])
 
-rf105_source_outcome_audit <- tribble(
-  ~source_outcome, ~reviewed_outcome, ~source_file, ~reviewed_status, ~calculation_note,
+rf105_source_outcome_audit <- bind_rows(
+  tribble(
+    ~source_outcome, ~reviewed_outcome, ~source_file, ~reviewed_status, ~calculation_note,
 "target_child_eye_itch_yn", "target_child_eye_itch_yn", "implemented_in_current_rdid_script", "included", "Binary yes/no derived from target_child_eye_itch using the current binary recode: 0 = no, positive values = yes.",
 "target_child_eye_red_yn", "target_child_eye_red_yn", "implemented_in_current_rdid_script", "included", "Binary yes/no derived from target_child_eye_red using the current binary recode.",
 "target_child_clinic_resp_yn", "target_child_clinic_resp_yn", "implemented_in_current_rdid_script", "included", "Binary yes/no derived from target_child_clinic_resp; refused/don't know values are set to missing.",
@@ -1306,7 +1379,7 @@ rf105_source_outcome_audit <- tribble(
 "total_income_30", "total_income_30_usd", "implemented_in_current_rdid_script", "included_corrected", "Baseline total_income_30 is calculated as the sum of income_cash_ngo, income_own_business, income_wage_labor, income_skill_labor, income_selling_wood, income_abroad, income_humanitarian_asst, income_handicrafts_tailoring, and income_farming when the aggregate is missing; follow-up reported aggregates are preserved when nonmissing. Converted from BDT to USD using timepoint-specific exchange rates.",
 "csi_survey_weighted", "csi_survey_weighted", "3_descriptive_outcomes_20260805_2213.R", "included", "Survey-weighted food coping strategy index using weekly frequency midpoint days and empirical difficulty weights derived from food_cant_afford_difficult and food_cant_afford_easiest, matching the descriptive outcome table.",
 "fuel_coping_strategy_index", "fuel_coping_strategy_index", "3_descriptive_outcomes_20260805_2213.R", "included", "Survey-weighted fuel coping strategy index using weekly frequency midpoint days and empirical difficulty weights from the analogous food coping strategies, matching the descriptive outcome table.",
-"CES_D_o16_score", "CES_D_o16_score", "implemented_in_current_rdid_script", "included_corrected", "CES-D score is the sum of all 20 cleaned CES-D items; reviewed code now sets the score to missing if any item is missing, matching rowwise sum() behavior.",
+"CES_D_o16_score", "CES_D_o16_score", "implemented_in_current_rdid_script", "included_corrected", "CES-D score is the complete-case sum of 20 standard 0-3 item scores; the four positive-affect items are reverse-scored and suicidal_thoughts_30 is excluded.",
 "suicidal_thoughts_30_yn", "suicidal_thoughts_30_yn", "implemented_in_current_rdid_script", "included", "Binary indicator equals 0 for never and 1 for any nonzero frequency.",
 "target_child_asthma", "target_child_asthma", "implemented_in_current_rdid_script", "included", "Binary asthma proxy equals child wheeze.",
 "target_child_severe_asthma", "target_child_severe_asthma", "implemented_in_current_rdid_script", "included_corrected_na_preserving", "Severe asthma equals child wheeze AND disturbed speech. Missing disturbed-speech severity responses remain missing in this primary definition; skipped no-wheeze responses are not silently recoded here.",
@@ -1317,6 +1390,20 @@ rf105_source_outcome_audit <- tribble(
 "respondent_eye_itch", "respondent_eye_itch_yn", "implemented_in_current_rdid_script", "represented_as_binary", "The old exploratory DiD file also included raw ordinal/frequency symptom variables; reviewed RF105B rDiD models the binary any-symptom indicators used by the RF105B XGBoost workflow.",
 "respondent_eye_sore", "respondent_eye_sore_yn", "implemented_in_current_rdid_script", "represented_as_binary", "The old exploratory DiD file also included raw ordinal/frequency symptom variables; reviewed RF105B rDiD models the binary any-symptom indicators used by the RF105B XGBoost workflow.",
 "respondent_wheezing", "respondent_wheezing_yn", "implemented_in_current_rdid_script", "represented_as_binary", "The old exploratory DiD file also included raw yes/no variables; reviewed RF105B rDiD models the cleaned binary indicator."
+  ),
+  tibble(
+    source_outcome = c(rdid_mental_health_item_vars, "CES_D_score"),
+    reviewed_outcome = c(rdid_mental_health_item_vars, "CES_D_score"),
+    source_file = "implemented_in_current_rdid_script",
+    reviewed_status = "included",
+    calculation_note = c(
+      paste0(
+        "Mental-health response frequency recoded to the standard 0-3 scale (never, rarely, sometimes, most or all of the time) and modeled as a continuous rDiD outcome. The 5-6 days/week and every-day categories are combined as 3. Label: ",
+        unname(rdid_mental_health_item_labels[rdid_mental_health_item_vars]), "."
+      ),
+      "CES-D score modeled as a continuous rDiD outcome; score is the complete-case sum of 20 standard 0-3 CES-D item scores, reverse-scores the four positive-affect items, and excludes suicidal_thoughts_30."
+    )
+  )
 ) %>%
   mutate(
     reviewed_outcome_available = if_else(
@@ -1639,7 +1726,8 @@ requested_rdid_outcome_coverage <- tribble(
   9, "Dietary diversity", "modeled", "hdds_assume_misc_1", "clean_final hdds_assume_misc_1; weekly adult food-frequency variables", "HDDS assuming miscellaneous group equals 1 is now available at baseline, midline, and endline from clean_final and is modeled as a continuous rDiD outcome.",
   10, "Coping strategies", "modeled", paste(c("food_cant_afford_2wk_yn", "csi_survey_weighted", paste0("food_coping_action_", c(1:13, 66)), "fuel_cant_afford_2wk_yn", "fuel_coping_strategy_index", paste0("fuel_coping_action_", c(1:15, 66))), collapse = "; "), "food_cant_afford_2wk; food_cant_afford_action*; food_cant_afford_difficult; food_cant_afford_easiest; borrow_food; reduce_food; reduce_meals; not_eat; restrict_food; fuel_cant_afford_2wk; fuel_cant_afford_action*; borrow_fuel; reduce_fuel; reduce_meals1; not_eat1", "Models include overall food/fuel shortage indicators, individual shortage-management strategies, and survey-weighted food/fuel coping strategy index scores from the descriptive outcome workflow. Households without the relevant shortage are coded 0 for strategy use; missing strategy data among households with a shortage remain missing.",
   11, "Verbal, physical, sexual, and combined harassment prevalence", "not_rdid_estimable_documented", NA_character_, "baseline *_hh variables; midline *_hh_ever variables; no nonmissing endline household harassment variables", "Reviewed code writes table_rDiD_harassment_estimability.csv with result-shaped NA rDiD rows for verbal/emotional, physical, sexual, and any harassment. Estimates are intentionally not modeled because the draft harassment code says baseline recall was not specified, midline uses _ever since-arrival wording, and endline harassment data are missing in clean_final.",
-  12, "Livelihood training and use of skills", "partially_modeled_use_of_skilled_labor_only", "income_skill_labor_any; income_skill_labor_usd", "income_skill_labor; livlihood_training_ever; livlihood_skills_freq; livlihood_training_SAFE", "Use of skilled labor is represented by any skilled-labor income and skilled-labor income amount. Livelihood training variables are midline/endline only with no baseline values, so training uptake and training-related skill use cannot be estimated with baseline-to-follow-up rDiD."
+  12, "Livelihood training and use of skills", "partially_modeled_use_of_skilled_labor_only", "income_skill_labor_any; income_skill_labor_usd", "income_skill_labor; livlihood_training_ever; livlihood_skills_freq; livlihood_training_SAFE", "Use of skilled labor is represented by any skilled-labor income and skilled-labor income amount. Livelihood training variables are midline/endline only with no baseline values, so training uptake and training-related skill use cannot be estimated with baseline-to-follow-up rDiD.",
+  13, "Mental health item scores and CES-D", "modeled", paste(c(rdid_mental_health_item_vars, "CES_D_score", "CES_D_o16_score", "suicidal_thoughts_30_yn"), collapse = "; "), paste(rdid_mental_health_item_vars, collapse = "; "), "Models each requested mental-health item on the standard 0-3 response-frequency scale as a continuous rDiD outcome, combining 5-6 days/week and every day as 3 = most or all of the time. Aggregate CES-D is modeled as a continuous score, and the existing binary CES-D >16 and any suicidal-thoughts indicators are retained. CES-D reverse-scores the four positive-affect items and excludes suicidal_thoughts_30."
 ) %>%
   rowwise() %>%
   mutate(
@@ -1674,7 +1762,8 @@ writeLines(
     "Corrections made in the reviewed workflow:",
     "- FCS is recalculated from weekly food-group variables using embedded caps, weights, and category cutoffs.",
     "- Dietary diversity is modeled using clean_final hdds_assume_misc_1, which is baseline-compatible and derived in the cleaner from weekly food-frequency variables using the embedded HDDS food-group mapping.",
-    "- CES-D now requires all 20 cleaned CES-D items to be nonmissing, using complete-case CES-D scoring.",
+    "- CES-D requires all 20 items to be nonmissing, uses standard 0-3 scoring, and reverse-scores the four positive-affect items.",
+    "- Each requested mental-health item is modeled on the standard 0-3 response-frequency scale as a continuous rDiD outcome, combining 5-6 days/week and every day as 3; aggregate CES-D is also continuous, and suicidal thoughts is retained as the existing binary any-thoughts outcome.",
     "- The severe-asthma proxy now uses child wheeze AND disturbed speech with an NA-preserving primary definition plus a skip-as-no sensitivity for structurally skipped no-wheeze responses.",
     "- Food and wood expenditures now use the project exchange rates defined in the active RF105 configuration: 84.88, 84.74, and 93.45 BDT/USD for baseline, midline, and endline.",
     "- Additional requested health outcomes were added as binary rDiD outcomes where the clean_final columns are available: child lethargy, child weight loss, respondent cough, respondent disturbed sleep, respondent headache, and respondent backache.",
@@ -1693,100 +1782,52 @@ writeLines(
 message("Wrote QA summary: ", outcome_audit_summary_file)
 
 ################################################################################
-# PM2.5 household-timepoint outcome
+# PM2.5 canonical household-timepoint outcomes
 ################################################################################
 
-find_ambient_adjusted_pm_file <- function() {
-  same_day_candidates <- c(
-    file.path(
-      project_root,
-      "8_restricted",
-      paste0("pm25_ambient_adjusted_", date_stamp),
-      "table_rDiD_pm25_panel_internal.csv"
-    ),
-    file.path(
-      project_root,
-      "7_tables",
-      paste0("pm25_ambient_adjusted_", date_stamp),
-      "table_rDiD_pm25_panel_internal.csv"
-    )
-  )
-  same_day_candidates <- same_day_candidates[file.exists(same_day_candidates)]
-
-  if (length(same_day_candidates) > 0) {
-    same_day_file <- same_day_candidates[[1]]
-    return(tibble(
-      ambient_adjusted_table_dir = dirname(same_day_file),
-      ambient_adjusted_pm_file = same_day_file,
-      source_recency = "same_date_as_reviewed_rdid_run"
-    ))
-  }
-
-  candidate_roots <- c(
-    file.path(project_root, "8_restricted"),
-    file.path(project_root, "7_tables")
-  )
-  candidate_dirs <- unlist(lapply(
-    candidate_roots[file.exists(candidate_roots)],
-    list.dirs,
-    full.names = TRUE,
-    recursive = FALSE
-  ))
-  candidate_dirs <- candidate_dirs[
-    str_detect(basename(candidate_dirs), "^pm25_ambient_adjusted_[0-9]{8}$")
-  ]
-  candidate_files <- file.path(
-    candidate_dirs,
-    "table_rDiD_pm25_panel_internal.csv"
-  )
-  candidate_files <- candidate_files[file.exists(candidate_files)]
-
-  if (length(candidate_files) == 0) {
-    stop(
-      "No ambient-adjusted PM2.5 household-timepoint file found. Run ",
-      "5_analysis_RF105/reviewed/2_pm25_ambient_adjusted_analysis_20260805_2213.R before ",
-      "4_rdid_xgboost_20260805_2213.R so the reviewed PM rDiD uses adjusted data.",
-      call. = FALSE
-    )
-  }
-
-  candidate_info <- tibble(
-    candidate_file = candidate_files,
-    source_date = basename(dirname(candidate_files)),
-    restricted_rank = if_else(str_detect(candidate_files, "/8_restricted/"), 1L, 0L)
-  ) %>%
-    arrange(desc(source_date), desc(restricted_rank))
-
-  latest_file <- candidate_info$candidate_file[[1]]
-  tibble(
-    ambient_adjusted_table_dir = dirname(latest_file),
-    ambient_adjusted_pm_file = latest_file,
-    source_recency = "latest_available_prior_ambient_adjusted_run"
+pm_adjusted_file <- file.path(
+  project_root,
+  "8_restricted",
+  paste0("RF105_reviewed_", date_stamp),
+  "identified_tables",
+  "table_descriptive_pm25_household_timepoint_internal.csv"
+)
+if (!file.exists(pm_adjusted_file)) {
+  stop(
+    "Same-run canonical PM2.5 file not found: ", pm_adjusted_file, ". Run ",
+    "3_descriptive_outcomes_20260805_2213.R before 4_rdid_xgboost_20260805_2213.R.",
+    call. = FALSE
   )
 }
 
-pm_adjusted_source <- find_ambient_adjusted_pm_file()
-pm_adjusted_file <- pm_adjusted_source$ambient_adjusted_pm_file[[1]]
-
 pm_adjusted_required_vars <- c(
   "fcn_id", "timepoint", "study_arm_overall", "collection_date_min",
-  "collection_date_max", "n_windows", "n_monitor_files",
-  "n_pm_observations", "mean_ambient_coverage_prop",
-  "indoor_minus_ambient_material_default", "indoor_minus_ambient_f025",
-  "indoor_minus_ambient_f050", "indoor_minus_ambient_f100"
+  "collection_date_max", "n_monitoring_windows", "n_monitor_files",
+  "n_valid_24h_periods", "valid_monitoring_hours", "n_pm_observations",
+  "mean_ambient_coverage_prop", "pm25_ambient_excess_f000",
+  "pm25_ambient_excess_f025", "pm25_ambient_excess_f050",
+  "pm25_ambient_excess_f075", "pm25_ambient_excess_f100"
 )
 
 pm_adjusted_raw <- readr::read_csv(pm_adjusted_file, show_col_types = FALSE)
 pm_adjusted_missing_vars <- setdiff(pm_adjusted_required_vars, names(pm_adjusted_raw))
 if (length(pm_adjusted_missing_vars) > 0) {
   stop(
-    "Ambient-adjusted PM2.5 file is missing required column(s): ",
+    "Canonical PM2.5 file is missing required column(s): ",
     paste(pm_adjusted_missing_vars, collapse = ", "),
     call. = FALSE
   )
 }
 
-pm_adjusted_clean <- pm_adjusted_raw %>%
+pm_key_audit <- pm_adjusted_raw %>%
+  transmute(fcn_id = as.character(fcn_id), timepoint = as.character(timepoint)) %>%
+  count(fcn_id, timepoint, name = "n_rows") %>%
+  filter(is.na(fcn_id) | fcn_id == "" | is.na(timepoint) | n_rows != 1)
+if (nrow(pm_key_audit) > 0) {
+  stop("Canonical PM2.5 file must contain exactly one row per nonmissing fcn_id-timepoint.", call. = FALSE)
+}
+
+pm_household <- pm_adjusted_raw %>%
   clean_timepoint_arm() %>%
   transmute(
     fcn_id = as.character(fcn_id),
@@ -1794,104 +1835,49 @@ pm_adjusted_clean <- pm_adjusted_raw %>%
     study_arm_overall = as.character(study_arm_overall),
     collection_date_min = as.Date(collection_date_min),
     collection_date_max = as.Date(collection_date_max),
-    n_windows = as_number(n_windows),
+    n_windows = as_number(n_monitoring_windows),
     n_monitor_files = as_number(n_monitor_files),
+    n_valid_24h_periods = as_number(n_valid_24h_periods),
+    valid_monitoring_hours = as_number(valid_monitoring_hours),
     pm25_n_observations = as_number(n_pm_observations),
     mean_ambient_coverage_prop = as_number(mean_ambient_coverage_prop),
-    pm25_ambient_excess_default = as_number(indoor_minus_ambient_material_default),
-    pm25_ambient_excess_f025 = as_number(indoor_minus_ambient_f025),
-    pm25_ambient_excess_f050 = as_number(indoor_minus_ambient_f050),
-    pm25_ambient_excess_f100 = as_number(indoor_minus_ambient_f100)
-  ) %>%
-  filter(
-    !is.na(fcn_id),
-    fcn_id != "",
-    !is.na(timepoint),
-    !is.na(study_arm_overall)
+    pm25_ambient_excess_default = as_number(pm25_ambient_excess_f075),
+    pm25_ambient_excess_f000 = as_number(pm25_ambient_excess_f000),
+    pm25_ambient_excess_f025 = as_number(pm25_ambient_excess_f025),
+    pm25_ambient_excess_f050 = as_number(pm25_ambient_excess_f050),
+    pm25_ambient_excess_f100 = as_number(pm25_ambient_excess_f100)
   )
 
-pm_source_household_timepoint_counts <- pm_adjusted_clean %>%
-  group_by(fcn_id, timepoint) %>%
-  summarise(
-    study_arm_overall = as.character(first_nonmissing(study_arm_overall)),
-    n_source_rows = n(),
-    n_windows_source = sum(n_windows, na.rm = TRUE),
-    n_pm_observations_source = sum(pm25_n_observations, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-# PM2.5 rDiD is household-level. Repeated short-term PM rows within a
-# household-timepoint are aggregated before the rDiD panel is paired, so valid
-# 24-hour periods/windows are not counted as independent households.
-pm_household <- pm_adjusted_clean %>%
-  group_by(fcn_id, timepoint) %>%
-  summarise(
-    study_arm_overall = as.character(first_nonmissing(study_arm_overall)),
-    collection_date_min = if (all(is.na(collection_date_min))) as.Date(NA) else min(collection_date_min, na.rm = TRUE),
-    collection_date_max = if (all(is.na(collection_date_max))) as.Date(NA) else max(collection_date_max, na.rm = TRUE),
-    n_source_rows = n(),
-    n_windows = sum(n_windows, na.rm = TRUE),
-    n_monitor_files = sum(n_monitor_files, na.rm = TRUE),
-    pm25_n_observations = sum(pm25_n_observations, na.rm = TRUE),
-    mean_ambient_coverage_prop = weighted_mean_pm_rdid(mean_ambient_coverage_prop, n_windows),
-    across(starts_with("pm25_ambient_excess_"), ~ weighted_mean_pm_rdid(.x, pm25_n_observations)),
-    .groups = "drop"
-  ) %>%
-  mutate(
-    across(starts_with("pm25_ambient_excess_"), ~ ifelse(is.nan(.x), NA_real_, .x)),
-    mean_ambient_coverage_prop = ifelse(
-      is.nan(mean_ambient_coverage_prop),
-      NA_real_,
-      mean_ambient_coverage_prop
-    )
-  )
-
-pm_household_duplicate_audit <- pm_household %>%
-  count(fcn_id, timepoint, name = "n_rows_after_aggregation") %>%
-  filter(n_rows_after_aggregation > 1)
-
-if (nrow(pm_household_duplicate_audit) > 0) {
-  stop(
-    "PM2.5 rDiD panel still has duplicate fcn_id/timepoint rows after household-level aggregation.",
-    call. = FALSE
-  )
+if (any(is.na(pm_household$timepoint)) || any(!pm_household$study_arm_overall %in% arm_levels)) {
+  stop("Canonical PM2.5 file contains an invalid timepoint or study arm.", call. = FALSE)
 }
 
-pm_adjusted_source_audit <- pm_adjusted_source %>%
-  mutate(
-    pm_data_source_for_reviewed_rdid = "ambient_adjusted_household_timepoint",
-    generating_script = file.path(
-      project_root,
-      "5_analysis",
-      "6_PM_analysis",
-      "2_pm25_ambient_adjusted_analysis_20260805_2213.R"
-    ),
-    reviewed_pm_outcome_primary = "pm25_ambient_excess_default",
-    reviewed_pm_outcome_primary_definition = paste(
-      "time-weighted household mean indoor PM2.5 minus 0.75 times",
-      "concurrent ambient PM2.5; generated by",
-      "2_pm25_ambient_adjusted_analysis_20260805_2213.R"
-    ),
-    reviewed_pm_outcome_sensitivity = paste(
-      c("pm25_ambient_excess_f025", "pm25_ambient_excess_f050",
-        "pm25_ambient_excess_f100"),
-      collapse = "; "
-    ),
-    reviewed_rdid_uses_raw_indoor_pm = FALSE,
-    reviewed_rdid_analysis_unit = "one fcn_id household-timepoint aggregate row",
-    reviewed_rdid_cluster_unit = "fcn_id",
-    reviewed_rdid_repeated_measure_handling = paste(
-      "Valid 24-hour periods/windows for the same fcn_id and timepoint are",
-      "treated as repeated short-term measures and aggregated before rDiD;",
-      "they are not counted as independent households."
-    )
-  )
-
-safe_write_reviewed_csv(
-  pm_adjusted_source_audit,
-  "table_rDiD_pm25_data_source.csv",
-  subfolder = "qa"
+pm_outcome_cols <- c(
+  "pm25_ambient_excess_default", "pm25_ambient_excess_f000",
+  "pm25_ambient_excess_f025", "pm25_ambient_excess_f050",
+  "pm25_ambient_excess_f100"
 )
+pm_complete_patterns <- pm_household %>% transmute(across(all_of(pm_outcome_cols), is.na)) %>% distinct()
+if (nrow(pm_complete_patterns) != 1 || any(unlist(pm_complete_patterns[1, ]))) {
+  stop("Canonical PM2.5 outcomes do not share one complete analytic population.", call. = FALSE)
+}
+
+pm_adjusted_source_audit <- tibble(
+  canonical_file = normalizePath(pm_adjusted_file, winslash = "/", mustWork = TRUE),
+  source_recency = "same_date_as_reviewed_rdid_run",
+  generating_script = "5_analysis_RF105/reviewed/3_descriptive_outcomes_20260805_2213.R",
+  pm_data_source_for_reviewed_rdid = "canonical_descriptive_household_timepoint",
+  reviewed_pm_outcome_primary = "pm25_ambient_excess_default",
+  reviewed_pm_outcome_primary_definition = "Canonical valid-hour-weighted indoor PM2.5 minus 0.75 times concurrent outdoor PM2.5.",
+  reviewed_pm_outcome_sensitivity = paste(
+    c("pm25_ambient_excess_f000", "pm25_ambient_excess_f025", "pm25_ambient_excess_f050", "pm25_ambient_excess_f100"),
+    collapse = "; "
+  ),
+  reviewed_rdid_recalculates_pm25 = FALSE,
+  reviewed_rdid_analysis_unit = "one canonical fcn_id household-timepoint row",
+  reviewed_rdid_cluster_unit = "fcn_id"
+)
+safe_write_reviewed_csv(pm_adjusted_source_audit, "table_rDiD_pm25_data_source.csv", subfolder = "qa")
 
 pm_household_counts <- pm_household %>%
   group_by(timepoint, study_arm_overall) %>%
@@ -1899,6 +1885,8 @@ pm_household_counts <- pm_household %>%
     n_households = n_distinct(fcn_id),
     n_windows = sum(n_windows, na.rm = TRUE),
     n_monitor_files = sum(n_monitor_files, na.rm = TRUE),
+    n_valid_24h_periods = sum(n_valid_24h_periods, na.rm = TRUE),
+    valid_monitoring_hours = sum(valid_monitoring_hours, na.rm = TRUE),
     n_pm_observations = sum(pm25_n_observations, na.rm = TRUE),
     mean_ambient_coverage_prop = mean(mean_ambient_coverage_prop, na.rm = TRUE),
     n_nonmissing_primary_adjusted_pm = sum(!is.na(pm25_ambient_excess_default)),
@@ -1906,204 +1894,40 @@ pm_household_counts <- pm_household %>%
     max_collection_date = max(collection_date_max, na.rm = TRUE),
     .groups = "drop"
   ) %>%
-  mutate(
-    mean_ambient_coverage_prop = ifelse(
-      is.nan(mean_ambient_coverage_prop),
-      NA_real_,
-      mean_ambient_coverage_prop
-    )
-  ) %>%
   arrange(timepoint, study_arm_overall)
+safe_write_reviewed_csv(pm_household_counts, "table_rDiD_pm25_household_counts.csv", subfolder = "qa")
 
-safe_write_reviewed_csv(
-  pm_household_counts,
-  "table_rDiD_pm25_household_counts.csv",
-  subfolder = "qa"
-)
-
-pm_household_timepoint_unit_audit <- pm_source_household_timepoint_counts %>%
-  group_by(timepoint, study_arm_overall) %>%
-  summarise(
-    n_rdid_household_timepoints = n(),
-    n_households = n_distinct(fcn_id),
-    n_source_rows_before_aggregation = sum(n_source_rows, na.rm = TRUE),
-    n_household_timepoints_with_multiple_source_rows = sum(n_source_rows > 1, na.rm = TRUE),
-    max_source_rows_per_household_timepoint = max(n_source_rows, na.rm = TRUE),
-    n_ambient_matched_windows = sum(n_windows_source, na.rm = TRUE),
-    n_pm_observations = sum(n_pm_observations_source, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  mutate(
-    rdid_analysis_unit = "one fcn_id household-timepoint aggregate row",
+pm_household_timepoint_unit_audit <- pm_household_counts %>%
+  transmute(
+    timepoint, study_arm_overall,
+    n_rdid_household_timepoints = n_households,
+    n_households,
+    n_valid_24h_periods,
+    valid_monitoring_hours,
+    rdid_analysis_unit = "one canonical fcn_id household-timepoint row",
     rdid_cluster_unit = "fcn_id",
-    rdid_repeated_measure_handling = paste(
-      "Any repeated PM source rows within fcn_id/timepoint are averaged before",
-      "rDiD. The rDiD sample size and standard error are therefore based on",
-      "paired households, not source rows or valid 24-hour periods."
-    )
-  ) %>%
-  arrange(timepoint, study_arm_overall)
-
+    rdid_repeated_measure_handling = "No aggregation occurs in this script; valid periods and repeated windows were combined with valid-hour weights in the descriptive script."
+  )
 safe_write_reviewed_csv(
   pm_household_timepoint_unit_audit,
   "table_rDiD_pm25_household_timepoint_unit_audit.csv",
   subfolder = "qa"
 )
 
-pm_24h_period_file <- file.path(
-  dirname(pm_adjusted_file),
-  "table_pm25_hapin_24h_period_summary_internal.csv"
-)
-
-make_pm_24h_cluster_audit_note <- function(status, note) {
-  tibble(
-    timepoint = NA_character_,
-    study_arm_overall = NA_character_,
-    n_household_timepoints = NA_integer_,
-    n_households = NA_integer_,
-    n_valid_24h_periods = NA_integer_,
-    n_household_timepoints_with_gt1_valid_24h = NA_integer_,
-    mean_valid_24h_periods_per_household_timepoint = NA_real_,
-    max_valid_24h_periods_per_household_timepoint = NA_integer_,
-    valid_24h_source_file = pm_24h_period_file,
-    audit_status = status,
-    rdid_analysis_unit = "one fcn_id household-timepoint aggregate row",
-    rdid_cluster_unit = "fcn_id",
-    rdid_repeated_measure_handling = note
-  )
-}
-
-pm_valid_24h_period_cluster_audit <- make_pm_24h_cluster_audit_note(
-  "not_run",
-  "Valid 24-hour-period source file was not inspected."
-)
-
-if (file.exists(pm_24h_period_file)) {
-  pm_24h_required_vars <- c(
-    "fcn_id", "timepoint", "study_arm_overall", "metric_name",
-    "metric_valid_24h", "metric_value_24h", "monitoring_coverage_window_id",
-    "period_number"
-  )
-  pm_24h_raw <- readr::read_csv(pm_24h_period_file, show_col_types = FALSE)
-  pm_24h_missing_vars <- setdiff(pm_24h_required_vars, names(pm_24h_raw))
-
-  if (length(pm_24h_missing_vars) > 0) {
-    pm_valid_24h_period_cluster_audit <- make_pm_24h_cluster_audit_note(
-      "not_available_missing_columns",
-      paste(
-        "The valid 24-hour-period source file is missing required column(s):",
-        paste(pm_24h_missing_vars, collapse = ", ")
-      )
-    )
-  } else {
-    pm_valid_24h_periods <- pm_24h_raw %>%
-      clean_timepoint_arm() %>%
-      mutate(
-        fcn_id = as.character(fcn_id),
-        metric_valid_24h_flag = metric_valid_24h %in% TRUE |
-          str_to_lower(as.character(metric_valid_24h)) %in% c("true", "1", "yes")
-      ) %>%
-      filter(
-        metric_name == "ambient_adjusted_indoor_excess_pm25",
-        metric_valid_24h_flag,
-        !is.na(fcn_id),
-        fcn_id != "",
-        timepoint %in% timepoint_levels,
-        study_arm_overall %in% arm_levels,
-        !is.na(metric_value_24h),
-        is.finite(metric_value_24h)
-      )
-
-    if (nrow(pm_valid_24h_periods) == 0) {
-      pm_valid_24h_period_cluster_audit <- make_pm_24h_cluster_audit_note(
-        "no_valid_24h_period_rows",
-        "No valid ambient-adjusted 24-hour PM2.5 period rows were available for the clustering audit."
-      )
-    } else {
-      pm_valid_24h_household_timepoints <- pm_valid_24h_periods %>%
-        mutate(
-          valid_24h_period_id = paste(monitoring_coverage_window_id, period_number, sep = "__")
-        ) %>%
-        group_by(fcn_id, timepoint, study_arm_overall) %>%
-        summarise(
-          n_valid_24h_periods_per_household_timepoint = n_distinct(valid_24h_period_id),
-          .groups = "drop"
-        )
-
-      pm_valid_24h_period_cluster_audit <- pm_valid_24h_household_timepoints %>%
-        group_by(timepoint, study_arm_overall) %>%
-        summarise(
-          n_household_timepoints = n(),
-          n_households = n_distinct(fcn_id),
-          n_valid_24h_periods = sum(n_valid_24h_periods_per_household_timepoint, na.rm = TRUE),
-          n_household_timepoints_with_gt1_valid_24h = sum(n_valid_24h_periods_per_household_timepoint > 1, na.rm = TRUE),
-          mean_valid_24h_periods_per_household_timepoint = mean(n_valid_24h_periods_per_household_timepoint, na.rm = TRUE),
-          max_valid_24h_periods_per_household_timepoint = max(n_valid_24h_periods_per_household_timepoint, na.rm = TRUE),
-          .groups = "drop"
-        ) %>%
-        mutate(
-          mean_valid_24h_periods_per_household_timepoint = round(
-            mean_valid_24h_periods_per_household_timepoint,
-            2
-          ),
-          valid_24h_source_file = pm_24h_period_file,
-          audit_status = "ok",
-          rdid_analysis_unit = "one fcn_id household-timepoint aggregate row",
-          rdid_cluster_unit = "fcn_id",
-          rdid_repeated_measure_handling = paste(
-            "Valid 24-hour PM2.5 periods are repeated short-term measures",
-            "nested within fcn_id/timepoint. They are summarized into the",
-            "household-timepoint PM outcome before rDiD, so they do not inflate",
-            "the rDiD sample size or standard error denominator."
-          )
-        ) %>%
-        arrange(timepoint, study_arm_overall)
-    }
-  }
-} else {
-  pm_valid_24h_period_cluster_audit <- make_pm_24h_cluster_audit_note(
-    "valid_24h_source_file_not_found",
-    paste(
-      "The rDiD PM panel still uses one household-timepoint row from",
-      basename(pm_adjusted_file),
-      "but the 24-hour-period source table was not available for this audit."
-    )
-  )
-}
-
-safe_write_reviewed_csv(
-  pm_valid_24h_period_cluster_audit,
-  "table_rDiD_pm25_valid_24h_cluster_audit.csv",
-  subfolder = "qa"
-)
-
 pm_missing_timepoint_counts <- pm_adjusted_raw %>%
-  mutate(
+  transmute(
     fcn_id = as.character(fcn_id),
     timepoint = as_ordered_timepoint(timepoint),
-    study_arm_overall = str_squish(str_to_lower(as.character(study_arm_overall)))
+    has_default_pm = is.finite(as_number(pm25_ambient_excess_f075))
   ) %>%
-  filter(
-    !is.na(fcn_id),
-    fcn_id != "",
-    !(timepoint %in% timepoint_levels),
-    !is.na(indoor_minus_ambient_material_default)
-  ) %>%
-  summarise(
-    n_rows = n(),
-    n_households = n_distinct(fcn_id),
-    .groups = "drop"
-  )
-
-safe_write_reviewed_csv(
-  pm_missing_timepoint_counts,
-  "table_rDiD_pm25_missing_timepoints.csv",
-  subfolder = "qa"
-)
+  filter(!is.na(fcn_id), fcn_id != "", !(timepoint %in% timepoint_levels), has_default_pm) %>%
+  summarise(n_rows = n(), n_households = n_distinct(fcn_id), .groups = "drop")
+safe_write_reviewed_csv(pm_missing_timepoint_counts, "table_rDiD_pm25_missing_timepoints.csv", subfolder = "qa")
 
 pm_outcomes <- tribble(
   ~outcome, ~outcome_label, ~domain, ~outcome_type, ~unit, ~outcome_source,
   "pm25_ambient_excess_default", "Ambient-adjusted indoor PM2.5, default 0.75 ambient factor", "PM2.5 exposure", "continuous", "ug/m3", "pm25_ambient_adjusted_household_timepoint",
+  "pm25_ambient_excess_f000", "Ambient-adjusted indoor PM2.5, sensitivity 0.00 ambient factor", "PM2.5 exposure", "continuous", "ug/m3", "pm25_ambient_adjusted_household_timepoint_sensitivity",
   "pm25_ambient_excess_f025", "Ambient-adjusted indoor PM2.5, sensitivity 0.25 ambient factor", "PM2.5 exposure", "continuous", "ug/m3", "pm25_ambient_adjusted_household_timepoint_sensitivity",
   "pm25_ambient_excess_f050", "Ambient-adjusted indoor PM2.5, sensitivity 0.50 ambient factor", "PM2.5 exposure", "continuous", "ug/m3", "pm25_ambient_adjusted_household_timepoint_sensitivity",
   "pm25_ambient_excess_f100", "Ambient-adjusted indoor PM2.5, sensitivity 1.00 ambient factor", "PM2.5 exposure", "continuous", "ug/m3", "pm25_ambient_adjusted_household_timepoint_sensitivity"
@@ -2748,6 +2572,14 @@ safe_write_reviewed_csv(
   rdid_glm_results,
   "table_rDiD_glm_sensitivity_results.csv"
 )
+safe_write_reviewed_csv(
+  filter(rdid_xgboost_results, domain == "Mental health"),
+  "table_rDiD_mental_health_xgboost_results.csv"
+)
+safe_write_reviewed_csv(
+  filter(rdid_glm_results, domain == "Mental health"),
+  "table_rDiD_mental_health_glm_sensitivity_results.csv"
+)
 
 safe_write_reviewed_csv(
   filter(rdid_xgboost_results, contrast == "primary_baseline_midline"),
@@ -2925,7 +2757,7 @@ writeLines(
     paste(
       "The reviewed PM2.5 rDiD/XGBoost analysis uses the ambient-adjusted",
       "household-timepoint file generated by",
-      "5_analysis_RF105/reviewed/2_pm25_ambient_adjusted_analysis_20260805_2213.R.",
+      "5_analysis_RF105/reviewed/3_descriptive_outcomes_20260805_2213.R.",
       "The primary PM outcome is household indoor PM2.5 minus 0.75 times",
       "concurrent ambient PM2.5; 0.25, 0.50, and 1.00 ambient factors are",
       "included as sensitivity outcomes."
@@ -3026,9 +2858,9 @@ make_rdid_plot <- function(results, contrast_name, outcome_type_filter) {
 plot_specs <- tribble(
   ~contrast, ~outcome_type, ~filename, ~width, ~height,
   "primary_baseline_midline", "binary", "fig_rDiD_primary_binary_estimates.png", 11, 16,
-  "primary_baseline_midline", "continuous", "fig_rDiD_primary_continuous_estimates.png", 9, 4,
+  "primary_baseline_midline", "continuous", "fig_rDiD_primary_continuous_estimates.png", 10, 14,
   "secondary_baseline_endline", "binary", "fig_rDiD_secondary_binary_estimates.png", 11, 16,
-  "secondary_baseline_endline", "continuous", "fig_rDiD_secondary_continuous_estimates.png", 9, 4
+  "secondary_baseline_endline", "continuous", "fig_rDiD_secondary_continuous_estimates.png", 10, 14
 )
 
 pwalk(plot_specs, function(contrast, outcome_type, filename, width, height) {
@@ -3206,400 +3038,4 @@ summary_file <- file.path(
 )
 writeLines(summary_lines, summary_file)
 message("Wrote summary document: ", summary_file)
-
-################################################################################
-# Consolidated rDiD post-processing section
-#
-# This section refreshes split result tables, comparison tables, QA counts,
-# rDiD figures, and significance-change summaries from the all-results files
-# produced above. Keeping it in this file ensures all rDiD-related code lives
-# in 4_rdid_xgboost_20260805_2213.R.
-################################################################################
-local({
-################################################################################
-# RF105 reviewed rDiD/XGBoost result post-processing
-#
-# Purpose:
-#   Rebuild downstream rDiD result tables and figures from the saved all-results
-#   CSV files written by 4_rdid_xgboost_20260805_2213.R. This script does not refit
-#   models. It is useful after adding supplemental outcomes because the XGBoost fitting
-#   step is slow, while comparison tables, split tables, QA counts, and figures
-#   can be regenerated quickly from the completed all-results files.
-#
-# Inputs:
-#   7_tables/RF105_reviewed_YYYYMMDD/table_rDiD_xgboost_all_results.csv
-#   7_tables/RF105_reviewed_YYYYMMDD/table_rDiD_glm_sensitivity_results.csv
-#
-# Outputs:
-#   7_tables/RF105_reviewed_YYYYMMDD/table_rDiD_*_results.csv
-#   7_tables/RF105_reviewed_YYYYMMDD/table_rDiD_*_glm_sensitivity.csv
-#   7_tables/RF105_reviewed_YYYYMMDD/table_rDiD_primary_secondary_comparison.csv
-#   7_tables/RF105_reviewed_YYYYMMDD/qa/table_rDiD_outcome_sample_counts.csv
-#   6_figures/RF105_reviewed_YYYYMMDD/fig_rDiD_*_estimates.png
-################################################################################
-
-get_script_dir <- function() {
-  cmd_args <- commandArgs(trailingOnly = FALSE)
-  file_arg <- grep("^--file=", cmd_args, value = TRUE)
-
-  if (length(file_arg) == 1) {
-    return(dirname(normalizePath(sub("^--file=", "", file_arg),
-                                 winslash = "/", mustWork = FALSE)))
-  }
-
-  source_files <- vapply(sys.frames(), function(frame) {
-    if (!is.null(frame$ofile)) frame$ofile else NA_character_
-  }, character(1))
-  source_files <- source_files[!is.na(source_files)]
-
-  if (length(source_files) > 0) {
-    return(dirname(normalizePath(source_files[[length(source_files)]],
-                                 winslash = "/", mustWork = FALSE)))
-  }
-
-  getwd()
-}
-
-script_dir <- get_script_dir()
-config_file <- file.path(script_dir, "0_RF105_config_20260805_2213.R")
-if (!file.exists(config_file)) {
-  config_file <- file.path("5_analysis_RF105", "reviewed", "0_RF105_config_20260805_2213.R")
-}
-source(config_file)
-
-read_required_reviewed_csv <- function(filename, subfolder = NULL) {
-  in_dir <- if (is.null(subfolder)) dir_tables_reviewed else file.path(dir_tables_reviewed, subfolder)
-  in_file <- file.path(in_dir, filename)
-  if (!file.exists(in_file)) {
-    stop("Required rDiD results file not found: ", in_file, call. = FALSE)
-  }
-  readr::read_csv(in_file, show_col_types = FALSE)
-}
-
-estimate_significance <- function(estimate, conf_low, conf_high, p_value) {
-  case_when(
-    !is.na(p_value) ~ p_value < 0.05,
-    !is.na(conf_low) & !is.na(conf_high) ~ conf_low > 0 | conf_high < 0,
-    TRUE ~ NA
-  )
-}
-
-ensure_columns <- function(df, columns) {
-  for (column in columns) {
-    if (!column %in% names(df)) {
-      df[[column]] <- NA
-    }
-  }
-  df
-}
-
-safe_write_reviewed_csv <- function(x, filename, subfolder = NULL) {
-  tryCatch(
-    write_reviewed_csv(x, filename, subfolder = subfolder),
-    error = function(e) {
-      fallback_filename <- str_replace(filename, "\\.csv$", paste0("_refreshed_", date_stamp, ".csv"))
-      warning(
-        "Could not overwrite ", filename, "; writing refreshed copy ",
-        fallback_filename, ". Original error: ", conditionMessage(e),
-        call. = FALSE
-      )
-      write_reviewed_csv(x, fallback_filename, subfolder = subfolder)
-    }
-  )
-}
-
-rdid_xgboost_results <- read_required_reviewed_csv("table_rDiD_xgboost_all_results.csv")
-rdid_glm_results <- read_required_reviewed_csv("table_rDiD_glm_sensitivity_results.csv")
-
-required_result_columns <- c(
-  "contrast", "population", "followup_timepoint", "outcome", "outcome_label",
-  "domain", "outcome_type", "unit", "outcome_source", "estimate", "se",
-  "conf.low", "conf.high", "p.value", "statistically_significant",
-  "estimate_ci", "sample_size", "n_households", "n_intervention",
-  "n_comparison", "note"
-)
-
-missing_xgb_columns <- setdiff(required_result_columns, names(rdid_xgboost_results))
-missing_glm_columns <- setdiff(required_result_columns, names(rdid_glm_results))
-if (length(missing_xgb_columns) > 0) {
-  stop("XGBoost all-results file is missing columns: ", paste(missing_xgb_columns, collapse = ", "), call. = FALSE)
-}
-if (length(missing_glm_columns) > 0) {
-  stop("GLM sensitivity all-results file is missing columns: ", paste(missing_glm_columns, collapse = ", "), call. = FALSE)
-}
-
-safe_write_reviewed_csv(
-  filter(rdid_xgboost_results, contrast == "primary_baseline_midline"),
-  "table_rDiD_primary_xgboost_results.csv"
-)
-safe_write_reviewed_csv(
-  filter(rdid_xgboost_results, contrast == "secondary_baseline_endline"),
-  "table_rDiD_secondary_xgboost_results.csv"
-)
-safe_write_reviewed_csv(
-  filter(rdid_glm_results, contrast == "primary_baseline_midline"),
-  "table_rDiD_primary_glm_sensitivity.csv"
-)
-safe_write_reviewed_csv(
-  filter(rdid_glm_results, contrast == "secondary_baseline_endline"),
-  "table_rDiD_secondary_glm_sensitivity.csv"
-)
-
-rdid_xgboost_primary_secondary_comparison <- rdid_xgboost_results %>%
-  filter(contrast %in% c("primary_baseline_midline", "secondary_baseline_endline")) %>%
-  mutate(
-    analysis = recode(
-      contrast,
-      primary_baseline_midline = "primary_baseline_midline",
-      secondary_baseline_endline = "secondary_baseline_endline"
-    )
-  ) %>%
-  select(
-    outcome, outcome_label, domain, outcome_type, unit, outcome_source,
-    analysis, estimate, se, conf.low, conf.high, p.value,
-    statistically_significant, estimate_ci, sample_size, n_intervention,
-    n_comparison, note
-  ) %>%
-  pivot_wider(
-    names_from = analysis,
-    values_from = c(
-      estimate, se, conf.low, conf.high, p.value, statistically_significant,
-      estimate_ci, sample_size, n_intervention, n_comparison, note
-    ),
-    names_glue = "{.value}_{analysis}"
-  ) %>%
-  ensure_columns(c(
-    "estimate_primary_baseline_midline", "estimate_secondary_baseline_endline",
-    "statistically_significant_primary_baseline_midline",
-    "statistically_significant_secondary_baseline_endline"
-  )) %>%
-  mutate(
-    estimate_difference_secondary_minus_primary =
-      estimate_secondary_baseline_endline - estimate_primary_baseline_midline,
-    absolute_estimate_difference = abs(estimate_difference_secondary_minus_primary),
-    significance_comparison = case_when(
-      is.na(statistically_significant_primary_baseline_midline) |
-        is.na(statistically_significant_secondary_baseline_endline) ~ "significance_unavailable",
-      statistically_significant_primary_baseline_midline &
-        statistically_significant_secondary_baseline_endline ~ "significant_in_primary_and_secondary",
-      statistically_significant_primary_baseline_midline &
-        !statistically_significant_secondary_baseline_endline ~ "significant_in_primary_only",
-      !statistically_significant_primary_baseline_midline &
-        statistically_significant_secondary_baseline_endline ~ "significant_in_secondary_only",
-      TRUE ~ "not_significant_in_either"
-    ),
-    direction_comparison = case_when(
-      is.na(estimate_primary_baseline_midline) | is.na(estimate_secondary_baseline_endline) ~ "direction_unavailable",
-      sign(estimate_primary_baseline_midline) == sign(estimate_secondary_baseline_endline) ~ "same_direction",
-      estimate_primary_baseline_midline == 0 | estimate_secondary_baseline_endline == 0 ~ "one_estimate_zero",
-      TRUE ~ "opposite_direction"
-    ),
-    comparison_note = paste(
-      "Estimate difference is descriptive only; the workflow does not estimate",
-      "the covariance needed for a formal test comparing the primary and",
-      "secondary rDiD estimates."
-    )
-  ) %>%
-  arrange(domain, outcome_type, outcome_label)
-
-safe_write_reviewed_csv(
-  rdid_xgboost_primary_secondary_comparison,
-  "table_rDiD_primary_secondary_comparison.csv"
-)
-
-rdid_sample_counts <- rdid_xgboost_results %>%
-  select(
-    contrast, population, followup_timepoint, outcome, outcome_label, domain,
-    outcome_source, sample_size, n_households, n_intervention, n_comparison, minimum_arm_households, passes_minimum_arm_households, note
-  )
-safe_write_reviewed_csv(rdid_sample_counts, "table_rDiD_outcome_sample_counts.csv", subfolder = "qa")
-
-make_rdid_plot <- function(results, contrast_name, outcome_type_filter) {
-  plot_data <- results %>%
-    filter(
-      contrast == contrast_name,
-      outcome_type == outcome_type_filter,
-      !is.na(estimate), !is.na(conf.low), !is.na(conf.high)
-    ) %>%
-    mutate(
-      outcome_label = forcats::fct_reorder(outcome_label, estimate),
-      significant_label = if_else(
-        coalesce(statistically_significant, FALSE),
-        "p < 0.05", "p >= 0.05 or unavailable"
-      )
-    )
-
-  if (nrow(plot_data) == 0) {
-    return(NULL)
-  }
-
-  ggplot(plot_data, aes(x = estimate, y = outcome_label, xmin = conf.low, xmax = conf.high)) +
-    geom_vline(xintercept = 0, color = "grey55", linewidth = 0.4) +
-    geom_errorbar(aes(color = significant_label), orientation = "y", width = 0.18, linewidth = 0.55) +
-    geom_point(aes(color = significant_label), size = 1.9) +
-    facet_grid(domain ~ unit, scales = "free", space = "free_y") +
-    scale_color_manual(values = c("p < 0.05" = "#D55E00", "p >= 0.05 or unavailable" = "#4E79A7")) +
-    labs(x = "rDiD/XGBoost estimate with 95% CI", y = NULL, color = NULL) +
-    theme_bw(base_size = 10) +
-    theme(
-      legend.position = "bottom",
-      panel.grid.minor = element_blank(),
-      strip.text.y = element_text(angle = 0)
-    )
-}
-
-plot_specs <- tribble(
-  ~contrast, ~outcome_type, ~filename, ~width, ~height,
-  "primary_baseline_midline", "binary", "fig_rDiD_primary_binary_estimates.png", 11, 22,
-  "primary_baseline_midline", "continuous", "fig_rDiD_primary_continuous_estimates.png", 9, 6,
-  "secondary_baseline_endline", "binary", "fig_rDiD_secondary_binary_estimates.png", 11, 22,
-  "secondary_baseline_endline", "continuous", "fig_rDiD_secondary_continuous_estimates.png", 9, 6
-)
-
-pwalk(plot_specs, function(contrast, outcome_type, filename, width, height) {
-  fig <- make_rdid_plot(rdid_xgboost_results, contrast, outcome_type)
-  if (!is.null(fig)) {
-    save_reviewed_plot(fig, filename, width = width, height = height)
-  }
-})
-
-previous_results <- tibble(
-  outcome = character(),
-  contrast = character(),
-  previous_estimator = character(),
-  previous_population = character(),
-  previous_estimate = numeric(),
-  previous_conf.low = numeric(),
-  previous_conf.high = numeric(),
-  previous_p.value = numeric(),
-  previous_significant = logical()
-)
-
-find_previous_rdid_results <- function(current_dir) {
-  explicit_file <- Sys.getenv("RF105_PREVIOUS_RESULTS_FILE", unset = "")
-  if (nzchar(explicit_file) && file.exists(explicit_file)) {
-    return(normalizePath(explicit_file, winslash = "/", mustWork = FALSE))
-  }
-
-  explicit_dir <- Sys.getenv("RF105_PREVIOUS_OUTPUT_DIR", unset = "")
-  if (nzchar(explicit_dir)) {
-    candidate_file <- file.path(explicit_dir, "table_rDiD_xgboost_all_results.csv")
-    if (file.exists(candidate_file)) {
-      return(normalizePath(candidate_file, winslash = "/", mustWork = FALSE))
-    }
-  }
-
-  parent_dir <- dirname(current_dir)
-  current_name <- basename(normalizePath(current_dir, winslash = "/", mustWork = FALSE))
-  candidate_dirs <- list.dirs(parent_dir, recursive = FALSE, full.names = TRUE)
-  candidate_dirs <- candidate_dirs[grepl("^RF105_reviewed_[0-9]{8}$", basename(candidate_dirs))]
-  candidate_dirs <- candidate_dirs[basename(candidate_dirs) < current_name]
-  candidate_dirs <- sort(candidate_dirs)
-
-  if (length(candidate_dirs) == 0) {
-    return(NA_character_)
-  }
-
-  candidate_file <- file.path(tail(candidate_dirs, 1), "table_rDiD_xgboost_all_results.csv")
-  if (file.exists(candidate_file)) {
-    return(normalizePath(candidate_file, winslash = "/", mustWork = FALSE))
-  }
-
-  NA_character_
-}
-
-previous_results_file <- find_previous_rdid_results(dir_tables_reviewed)
-if (!is.na(previous_results_file) && file.exists(previous_results_file)) {
-  previous_results <- readr::read_csv(previous_results_file, show_col_types = FALSE) %>%
-    filter(estimator == "rDID_XGBoost") %>%
-    transmute(
-      outcome,
-      contrast,
-      previous_estimator = estimator,
-      previous_population = population,
-      previous_estimate = estimate,
-      previous_conf.low = conf.low,
-      previous_conf.high = conf.high,
-      previous_p.value = p.value,
-      previous_significant = statistically_significant
-    )
-  message("Using previous rDiD results for significance-change audit: ", previous_results_file)
-} else {
-  message("No previous rDiD results file found for automated significance-change audit.")
-}
-significance_change_audit <- rdid_xgboost_results %>%
-  select(
-    outcome, outcome_label, contrast, domain, unit,
-    new_estimate = estimate, new_conf.low = conf.low, new_conf.high = conf.high,
-    new_p.value = p.value, new_significant = statistically_significant
-  ) %>%
-  left_join(previous_results, by = c("outcome", "contrast")) %>%
-  mutate(
-    comparison_status = case_when(
-      is.na(previous_estimator) ~ "no_matching_previous_result",
-      is.na(previous_significant) | is.na(new_significant) ~ "significance_unknown",
-      previous_significant == new_significant ~ "significance_unchanged",
-      previous_significant & !new_significant ~ "no_longer_statistically_significant",
-      !previous_significant & new_significant ~ "became_statistically_significant",
-      TRUE ~ "significance_unknown"
-    )
-  ) %>%
-  arrange(contrast, comparison_status, domain, outcome)
-
-safe_write_reviewed_csv(significance_change_audit, "table_rDiD_significance_change_audit.csv")
-
-changed_significance <- significance_change_audit %>%
-  filter(comparison_status %in% c("no_longer_statistically_significant", "became_statistically_significant"))
-
-summary_lines <- c(
-  "# RF105 rDiD/XGBoost Previous-vs-Current Results Summary",
-  "",
-  paste0("Generated: ", Sys.time()),
-  "",
-  "## What Changed",
-  "",
-  "The reviewed workflow uses reverse difference-in-differences (rDiD) with cross-fit XGBoost nuisance models for all eligible impact outcomes.",
-  "",
-  "Primary analysis is baseline-to-midline among households with both baseline and midline outcome data. Secondary analysis is baseline-to-endline among households with both baseline and endline outcome data.",
-  "",
-  "## Comparison Source",
-  "",
-  if (nrow(previous_results) == 0) {
-    "No previous result files are read by this self-contained workflow; automated significance comparison is therefore not performed."
-  } else {
-    paste0("Automated comparisons used previous result rows for ", n_distinct(previous_results$outcome), " matched outcomes where available.")
-  },
-  "",
-  "## Statistical Significance",
-  "",
-  paste0("Matched rows with unchanged significance: ", sum(significance_change_audit$comparison_status == "significance_unchanged", na.rm = TRUE)),
-  paste0("Rows that became statistically significant: ", sum(significance_change_audit$comparison_status == "became_statistically_significant", na.rm = TRUE)),
-  paste0("Rows that were no longer statistically significant: ", sum(significance_change_audit$comparison_status == "no_longer_statistically_significant", na.rm = TRUE)),
-  paste0("Rows without a matching previous result: ", sum(significance_change_audit$comparison_status == "no_matching_previous_result", na.rm = TRUE)),
-  "",
-  "See `table_rDiD_significance_change_audit.csv` for current estimates, confidence intervals, p-values, and comparison-status flags.",
-  "",
-  "## Rows With Changed Statistical Significance",
-  ""
-)
-
-if (nrow(changed_significance) == 0) {
-  summary_lines <- c(summary_lines, "No matched rows changed statistical significance.")
-} else {
-  changed_lines <- changed_significance %>%
-    mutate(line = paste0("- ", contrast, ": ", outcome_label, " (", comparison_status, ")")) %>%
-    pull(line)
-  summary_lines <- c(summary_lines, changed_lines)
-}
-
-summary_file <- file.path(dir_tables_reviewed, "table_rDiD_results_comparison_summary.md")
-writeLines(summary_lines, summary_file)
-message("Wrote summary document: ", summary_file)
-
-message("RF105 reviewed rDiD/XGBoost result post-processing complete.")
-})
-
-
-
-
 
