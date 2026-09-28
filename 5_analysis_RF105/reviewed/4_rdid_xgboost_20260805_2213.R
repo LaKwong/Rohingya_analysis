@@ -71,10 +71,19 @@ suppressPackageStartupMessages({
   library(xgboost)
 })
 
-safe_write_reviewed_csv <- function(x, filename, subfolder = NULL) {
+safe_write_reviewed_csv <- function(x, filename, subfolder = NULL, allow_fallback = TRUE) {
   tryCatch(
     write_reviewed_csv(x, filename, subfolder = subfolder),
     error = function(e) {
+      if (!allow_fallback) {
+        stop(
+          "Could not overwrite required canonical RF105 rDiD output ",
+          filename, ". Close any application locking the file and rerun the ",
+          "workflow so downstream benchmark scripts cannot read stale results. ",
+          "Original error: ", conditionMessage(e),
+          call. = FALSE
+        )
+      }
       fallback_filename <- str_replace(filename, "\\.csv$", paste0("_refreshed_", date_stamp, ".csv"))
       warning(
         "Could not overwrite ", filename, "; writing refreshed copy ",
@@ -2758,11 +2767,13 @@ safe_write_reviewed_csv(
 
 safe_write_reviewed_csv(
   rdid_xgboost_results,
-  "table_rDiD_xgboost_all_results.csv"
+  "table_rDiD_xgboost_all_results.csv",
+  allow_fallback = FALSE
 )
 safe_write_reviewed_csv(
   rdid_glm_results,
-  "table_rDiD_glm_sensitivity_results.csv"
+  "table_rDiD_glm_sensitivity_results.csv",
+  allow_fallback = FALSE
 )
 safe_write_reviewed_csv(
   filter(rdid_xgboost_results, domain == "Mental health"),

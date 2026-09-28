@@ -20,7 +20,8 @@
 #   5. Generate all descriptive tables, figures, and embedded descriptive QA.
 #      This includes the child physical-health panel sample-size diagnostic.
 #   6. Fit and post-process all rDiD/XGBoost and GLM sensitivity models.
-#   7. Run the DRDID benchmark comparison for the reviewed rDiD estimates.
+#   7. Fit the time-weighted PM2.5 rDiD/XGBoost exposure models.
+#   8. Run the DRDID benchmark comparison for the reviewed rDiD estimates.
 #
 # Outputs:
 #   Tables:  7_tables/RF105_reviewed_YYYYMMDD/
@@ -96,6 +97,7 @@ reviewed_scripts <- c(
   "3_descriptive_outcomes_20260805_2213.R",
   "3.1_fuel_time_burden_estimate_scaled_20260928.R",
   "4_rdid_xgboost_20260805_2213.R",
+  "4.1_rdid_time_weighted_pm25_20260928.R",
   "5_drDiD_comparison_20260805_2213.R"
 )
 geocene_script <- "1_geocene_stove_use_20260805_2213.R"
@@ -109,12 +111,18 @@ if (is.na(geocene_pos) || is.na(descriptive_pos) || geocene_pos > descriptive_po
   )
 }
 rdid_script <- "4_rdid_xgboost_20260805_2213.R"
+time_weighted_pm25_rdid_script <- "4.1_rdid_time_weighted_pm25_20260928.R"
 drdid_script <- "5_drDiD_comparison_20260805_2213.R"
 rdid_pos <- match(rdid_script, reviewed_scripts)
+time_weighted_pm25_rdid_pos <- match(time_weighted_pm25_rdid_script, reviewed_scripts)
 drdid_pos <- match(drdid_script, reviewed_scripts)
-if (is.na(rdid_pos) || is.na(drdid_pos) || descriptive_pos > rdid_pos || rdid_pos > drdid_pos) {
+if (
+  is.na(rdid_pos) || is.na(time_weighted_pm25_rdid_pos) || is.na(drdid_pos) ||
+    descriptive_pos > rdid_pos || rdid_pos > time_weighted_pm25_rdid_pos ||
+    time_weighted_pm25_rdid_pos > drdid_pos
+) {
   stop(
-    "RF105 runner order error: descriptive outputs must run before rDiD, followed by DRDID.",
+    "RF105 runner order error: descriptive outputs must run before rDiD, time-weighted PM2.5 rDiD, and DRDID.",
     call. = FALSE
   )
 }

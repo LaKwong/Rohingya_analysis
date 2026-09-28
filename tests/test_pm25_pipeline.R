@@ -29,6 +29,7 @@ restricted_dir <- file.path(
 scripts <- c(
   "3_descriptive_outcomes_20260805_2213.R",
   "4_rdid_xgboost_20260805_2213.R",
+  "4.1_rdid_time_weighted_pm25_20260928.R",
   "5_drDiD_comparison_20260805_2213.R",
   "00_run_RF105_20260805_2213.R"
 )
@@ -119,6 +120,15 @@ pm25_ambient_daily_mean_internal_file <- file.path(
 )
 rdid_results_file <- file.path(table_dir, "table_rDiD_xgboost_all_results.csv")
 drdid_results_file <- file.path(table_dir, "table_DRDID_all_results.csv")
+time_weighted_rdid_file <- file.path(
+  table_dir,
+  "table_rDiD_pm25_time_weighted_exposure_baseline_midline.csv"
+)
+time_weighted_rdid_counts_file <- file.path(
+  table_dir,
+  "qa",
+  "table_rDiD_pm25_time_weighted_exposure_panel_counts.csv"
+)
 pm25_sampling_overlap_file <- file.path(
   table_dir, "qa", "table_rDiD_pm25_sampling_date_overlap.csv"
 )
@@ -154,6 +164,8 @@ stopifnot(
   file.exists(pm25_collection_timeline_internal_file),
   file.exists(pm25_ambient_daily_mean_internal_file),
   file.exists(rdid_results_file),
+  file.exists(time_weighted_rdid_file),
+  file.exists(time_weighted_rdid_counts_file),
   file.exists(drdid_results_file),
   file.exists(pm25_sampling_overlap_file),
   file.exists(mental_health_file),
@@ -581,6 +593,10 @@ drdid_text <- paste(
   readLines(file.path(reviewed_dir, "5_drDiD_comparison_20260805_2213.R"), warn = FALSE),
   collapse = "\n"
 )
+time_weighted_rdid_text <- paste(
+  readLines(file.path(reviewed_dir, "4.1_rdid_time_weighted_pm25_20260928.R"), warn = FALSE),
+  collapse = "\n"
+)
 stopifnot(
   grepl("reviewed_pm_default_infiltration_factor <- 0.25", drdid_text, fixed = TRUE),
   grepl("pm25_ambient_excess_default = as_number(pm25_ambient_excess_f025)", drdid_text, fixed = TRUE),
@@ -588,6 +604,15 @@ stopifnot(
   !grepl("ambient_pm25_followup", drdid_text, fixed = TRUE),
   grepl('colnames(X)[[1]] <- "(Intercept)"', drdid_text, fixed = TRUE),
   grepl("if (skip_pm25)", drdid_text, fixed = TRUE)
+)
+runner_text <- paste(readLines(file.path(reviewed_dir, "00_run_RF105_20260805_2213.R"), warn = FALSE), collapse = "\n")
+stopifnot(
+  grepl("4.1_rdid_time_weighted_pm25_20260928.R", runner_text, fixed = TRUE),
+  grepl(
+    "table_rDiD_pm25_time_weighted_exposure_baseline_midline.csv",
+    time_weighted_rdid_text,
+    fixed = TRUE
+  )
 )
 
 rdid_pm <- read_csv(rdid_results_file, show_col_types = FALSE) %>%
@@ -619,6 +644,22 @@ stopifnot(
   setequal(pm25_sampling_overlap$timepoint, c("baseline", "midline", "endline")),
   all(pm25_sampling_overlap$n_calendar_days_overlap == 0),
   all(!pm25_sampling_overlap$arm_monitoring_date_windows_overlap)
+)
+
+time_weighted_rdid <- read_csv(time_weighted_rdid_file, show_col_types = FALSE)
+time_weighted_rdid_counts <- read_csv(time_weighted_rdid_counts_file, show_col_types = FALSE)
+stopifnot(
+  nrow(time_weighted_rdid) == 2,
+  setequal(time_weighted_rdid$population, c("caregiver", "target_child")),
+  all(time_weighted_rdid$contrast == "primary_baseline_midline"),
+  all(time_weighted_rdid$estimator == "rDID_XGBoost"),
+  all(time_weighted_rdid$outcome == "time_weighted_average_pm25_ug_m3"),
+  all(time_weighted_rdid$unit == "ug/m3"),
+  all(time_weighted_rdid$outcome %in% names(read_csv(exposure_internal_file, show_col_types = FALSE, n_max = 0))),
+  nrow(time_weighted_rdid_counts) == 4,
+  setequal(time_weighted_rdid_counts$population, c("caregiver", "target_child")),
+  setequal(time_weighted_rdid_counts$study_arm, c("comparison", "intervention")),
+  all(time_weighted_rdid_counts$passes_minimum)
 )
 
 drdid_pm_default <- read_csv(drdid_results_file, show_col_types = FALSE) %>%
@@ -676,7 +717,6 @@ legacy_dirs <- c(
 )
 stopifnot(!any(dir.exists(legacy_dirs)))
 
-runner_text <- paste(readLines(file.path(reviewed_dir, "00_run_RF105_20260805_2213.R"), warn = FALSE), collapse = "\n")
 stopifnot(!grepl("2_pm25_ambient_adjusted_analysis_20260805_2213.R", runner_text, fixed = TRUE))
 
 for (script in c("4_rdid_xgboost_20260805_2213.R", "5_drDiD_comparison_20260805_2213.R")) {
@@ -691,5 +731,14 @@ for (script in c("4_rdid_xgboost_20260805_2213.R", "5_drDiD_comparison_20260805_
   stopifnot(!grepl("pm25_raw_indoor", text, fixed = TRUE))
   stopifnot(!grepl("pm25_indoor_excess_estimated_infiltration", text, fixed = TRUE))
 }
+
+stopifnot(
+  grepl("table_descriptive_pm25_household_timepoint_internal.csv", time_weighted_rdid_text, fixed = TRUE),
+  grepl("table_descriptive_pm25_time_weighted_exposure_internal.csv", time_weighted_rdid_text, fixed = TRUE),
+  grepl("time_weighted_average_pm25_ug_m3", time_weighted_rdid_text, fixed = TRUE),
+  !grepl("find_ambient_adjusted_pm_file", time_weighted_rdid_text, fixed = TRUE),
+  !grepl("weighted_mean_pm_rdid", time_weighted_rdid_text, fixed = TRUE),
+  !grepl("pm25_raw_indoor", time_weighted_rdid_text, fixed = TRUE)
+)
 
 cat("Unified PM2.5 pipeline checks passed for RF105_reviewed_", date_stamp, ".\n", sep = "")
