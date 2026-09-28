@@ -378,14 +378,18 @@ if (nrow(stove_composite_data) > 0) {
       filter(energy_metric == "Daily energy consumed"),
     aes(x = cooking_method, y = energy_mj, color = cooking_method)
   ) +
-    geom_boxplot(alpha = 0.5, outlier.alpha = 0.45) +
+    geom_boxplot(width = 0.5, alpha = 0.5, outlier.alpha = 0.45) +
     scale_color_manual(values = stove_energy_colors, drop = FALSE) +
     scale_x_discrete(labels = setNames(stove_energy_labels, names(stove_energy_colors))) +
     scale_y_continuous(
-      breaks = seq(0, 20, by = 5),
-      minor_breaks = seq(0, 20, by = 1)
+      breaks = seq(0, 10, by = 2),
+      minor_breaks = seq(0, 10, by = 1),
+      expand = expansion(mult = c(0, 0.02))
     ) +
-    coord_cartesian(ylim = c(0, 20)) +
+    coord_cartesian(
+      ylim = c(0, 10),
+      expand = c(bottom = FALSE, left = TRUE, top = FALSE, right = TRUE)
+    ) +
     labs(
       x = "cooking method",
       y = "Household mean energy consumed\n(MJ per category-use day)"
@@ -403,14 +407,18 @@ if (nrow(stove_composite_data) > 0) {
       filter(energy_metric == "Daily energy reaching the pot"),
     aes(x = cooking_method, y = energy_mj, color = cooking_method)
   ) +
-    geom_boxplot(alpha = 0.5, outlier.alpha = 0.45) +
+    geom_boxplot(width = 0.5, alpha = 0.5, outlier.alpha = 0.45) +
     scale_color_manual(values = stove_energy_colors, drop = FALSE) +
     scale_x_discrete(labels = setNames(stove_energy_labels, names(stove_energy_colors))) +
     scale_y_continuous(
-      breaks = seq(0, 20, by = 5),
-      minor_breaks = seq(0, 20, by = 1)
+      breaks = seq(0, 5, by = 1),
+      minor_breaks = seq(0, 5, by = 0.5),
+      expand = expansion(mult = c(0, 0.02))
     ) +
-    coord_cartesian(ylim = c(0, 20)) +
+    coord_cartesian(
+      ylim = c(0, 5),
+      expand = c(bottom = FALSE, left = TRUE, top = FALSE, right = TRUE)
+    ) +
     labs(
       x = "cooking method",
       y = "Household mean energy reaching the pot\n(MJ per category-use day)"
@@ -423,15 +431,31 @@ if (nrow(stove_composite_data) > 0) {
       plot.margin = margin(2, 5.5, 2, 5.5)
     )
 
+  extract_bottom_legend <- function(plot) {
+    plot_grob <- ggplotGrob(plot + theme(legend.position = "bottom"))
+    legend_index <- which(
+      grepl("^guide-box", plot_grob$layout$name) &
+        !vapply(plot_grob$grobs, inherits, logical(1), what = "zeroGrob")
+    )
+    if (length(legend_index) != 1L) {
+      stop("Expected exactly one Panel A legend grob.", call. = FALSE)
+    }
+    plot_grob$grobs[[legend_index]]
+  }
+
   make_stove_use_panel <- function(monitored_plot, minutes_plot, exclusive_plot) {
+    panel_a_legend <- extract_bottom_legend(monitored_plot)
     gridExtra::arrangeGrob(
-      grobs = align_ggplot_widths(
-        monitored_plot,
-        minutes_plot,
-        exclusive_plot
+      grobs = c(
+        align_ggplot_widths(
+          monitored_plot + theme(legend.position = "none"),
+          minutes_plot,
+          exclusive_plot
+        ),
+        list(panel_a_legend)
       ),
       ncol = 1,
-      heights = c(1.3, 1, 1.3)
+      heights = c(1.3, 1, 1.3, 0.22)
     )
   }
 
@@ -464,7 +488,7 @@ if (nrow(stove_composite_data) > 0) {
         heights = c(0.1, 1)
       ),
       ncol = 1,
-      heights = c(3, 2)
+      heights = c(3, 1.3)
     )
   }
 
@@ -487,19 +511,19 @@ if (nrow(stove_composite_data) > 0) {
     fig_stove_use_energy_composite_day,
     "fig_descriptive_stove_use_composite_panel.png",
     width = 8,
-    height = 11
+    height = 9.5
   )
   save_reviewed_plot(
     fig_stove_use_energy_composite_day,
     "fig_descriptive_stove_use_composite_panel_days.png",
     width = 8,
-    height = 11
+    height = 9.5
   )
   save_reviewed_plot(
     fig_stove_use_energy_composite_week,
     "fig_descriptive_stove_use_composite_panel_weeks.png",
     width = 8,
-    height = 11
+    height = 9.5
   )
 } else {
   message("Skipped composite stove-use energy panel: no eligible stove-use records.")

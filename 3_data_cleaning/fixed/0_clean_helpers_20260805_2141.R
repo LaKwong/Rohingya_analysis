@@ -413,8 +413,8 @@ write_final_rds <- function(data, relative_path) {
   normalizePath(path, winslash = "/", mustWork = TRUE)
 }
 
-write_shareable_rds <- function(data, relative_path) {
-  remaining_identifiers <- shareable_identifier_columns(data)
+write_shareable_rds <- function(data, relative_path, keep = character()) {
+  remaining_identifiers <- shareable_identifier_columns(data, keep = keep)
   if (length(remaining_identifiers)) {
     stop(
       "Shareable output still contains identifier-like columns: ",

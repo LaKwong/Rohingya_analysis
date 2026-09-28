@@ -11,6 +11,7 @@ suppressPackageStartupMessages({
 
 geocene_variants <- c("100_80_5_20", "100_80_5_30")
 geocene_private <- raw_import_path("8_restricted", "geocene_pipeline")
+geocene_public_crosswalk_dir <- raw_import_path("8_restricted", "public_clean_final")
 dir.create(geocene_private, recursive = TRUE, showWarnings = FALSE)
 
 geocene_write <- function(x, path) {
@@ -287,23 +288,93 @@ geocene_clean <- function() {
 geocene_export_public <- function(household_lookup = NULL,
                                   private_root = raw_import_path("4_data", "clean_final"),
                                   public_root = raw_import_path("4_data", "clean_final_public"),
-                                  crosswalk_dir = geocene_private) {
+                                  crosswalk_dir = geocene_public_crosswalk_dir) {
   # Use the existing household mapping when available, so survey joins remain valid.
-  paths <- file.path(crosswalk_dir, "household_key_crosswalk.csv")
-  map_path <- paths[file.exists(paths)][1]
-  mapping <- if (!is.null(household_lookup)) household_lookup else if (!is.na(map_path)) geocene_read_csv(map_path) else tibble(original = character(), public = character())
-  stopifnot(all(c("original", "public") %in% names(mapping)))
+  clean_id <- function(x) {
+    out <- str_squish(as.character(x))
+    out[out == ""] <- NA_character_
+    out
+  }
+  random_ids <- function(n, existing = character()) {
+    if (n == 0L) return(character())
+    if (!requireNamespace("openssl", quietly = TRUE)) {
+      stop("Package 'openssl' is required to create public Geocene IDs.", call. = FALSE)
+    }
+    generated <- character()
+    while (length(generated) < n) {
+      batch_size <- max(32L, n - length(generated))
+      candidates <- vapply(seq_len(batch_size), function(i) {
+        token <- paste(format(openssl::rand_bytes(12L)), collapse = "")
+        paste0("hh_", token)
+      }, character(1))
+      generated <- unique(c(generated, setdiff(candidates, c(existing, generated))))
+    }
+    generated[seq_len(n)]
+  }
+  canonical_household_id <- function(data) {
+    fcn <- if ("fcn_id" %in% names(data)) clean_id(data$fcn_id) else rep(NA_character_, nrow(data))
+    hh <- if ("hh_id" %in% names(data)) clean_id(data$hh_id) else rep(NA_character_, nrow(data))
+    coalesce(fcn, hh)
+  }
+
+  dir.create(crosswalk_dir, recursive = TRUE, showWarnings = FALSE)
+  map_path <- file.path(crosswalk_dir, "household_key_crosswalk.csv")
+  stored_mapping <- if (file.exists(map_path)) {
+    geocene_read_csv(map_path)
+  } else {
+    tibble(original = character(), public = character())
+  }
+  supplied_mapping <- if (is.null(household_lookup)) {
+    tibble(original = character(), public = character())
+  } else {
+    as_tibble(household_lookup)
+  }
+  if (!all(c("original", "public") %in% names(stored_mapping)) ||
+      !all(c("original", "public") %in% names(supplied_mapping))) {
+    stop("Geocene household crosswalk has an invalid schema.", call. = FALSE)
+  }
+  combined_mapping <- bind_rows(
+    transmute(stored_mapping, original = clean_id(original), public = clean_id(public)),
+    transmute(supplied_mapping, original = clean_id(original), public = clean_id(public))
+  ) %>%
+    filter(!is.na(original), !is.na(public))
+  conflicting_originals <- combined_mapping %>%
+    group_by(original) %>%
+    summarise(n_public = n_distinct(public), .groups = "drop") %>%
+    filter(n_public > 1L)
+  if (nrow(conflicting_originals)) {
+    stop("Stored and supplied Geocene household crosswalks conflict.", call. = FALSE)
+  }
+  mapping <- combined_mapping %>% distinct(original, .keep_all = TRUE)
+  if (anyDuplicated(mapping$public)) {
+    stop("Geocene household crosswalk reuses a public ID.", call. = FALSE)
+  }
+
   datasets <- lapply(geocene_variants, function(v) lapply(c("events.rds", "household_days.rds"), function(f) readRDS(file.path(private_root, "geocene", v, f))))
-  ids <- unique(unlist(lapply(datasets, function(pair) unlist(lapply(pair, function(d) c(d$fcn_id, d$hh_id))))))
+  ids <- sort(unique(unlist(lapply(datasets, function(pair) {
+    unlist(lapply(pair, canonical_household_id), use.names = FALSE)
+  }), use.names = FALSE)))
   new_ids <- setdiff(ids[!is.na(ids)], mapping$original)
-  if (length(new_ids)) mapping <- bind_rows(mapping, tibble(original = new_ids, public = vapply(new_ids, function(id) paste0("geocene_hh_", paste(sample(c(letters, 0:9), 24, TRUE), collapse = "")), character(1))))
+  if (length(new_ids)) {
+    mapping <- bind_rows(
+      mapping,
+      tibble(original = new_ids, public = random_ids(length(new_ids), mapping$public))
+    )
+  }
   stopifnot(!anyDuplicated(mapping$original), !anyDuplicated(mapping$public))
+  mapping <- arrange(mapping, original)
   geocene_write(mapping, file.path(crosswalk_dir, "household_key_crosswalk.csv"))
   for (i in seq_along(geocene_variants)) for (j in 1:2) {
     d <- datasets[[i]][[j]]
-    d$fcn_id <- mapping$public[match(d$fcn_id, mapping$original)]
-    d$hh_id <- mapping$public[match(d$hh_id, mapping$original)]
-    stopifnot(!anyNA(d$fcn_id), !any(grepl("mission_name|device_id|source_path|camp_id|block_id|subblock_id", names(d))))
+    canonical_id <- canonical_household_id(d)
+    public_id <- mapping$public[match(canonical_id, mapping$original)]
+    if ("fcn_id" %in% names(d)) d$fcn_id <- public_id
+    if ("hh_id" %in% names(d)) d$hh_id <- public_id
+    stopifnot(
+      !anyNA(public_id),
+      !any(grepl("mission_name|device_id|source_path|camp_id|block_id|subblock_id", names(d))),
+      !("fcn_id" %in% names(d) && "hh_id" %in% names(d)) || identical(d$fcn_id, d$hh_id)
+    )
     geocene_write(d, file.path(public_root, "geocene", geocene_variants[i], c("events.rds", "household_days.rds")[j]))
     if (i == 1 && j == 2) geocene_write(d, file.path(public_root, "stove_use_geocene_refugee_daily.rds"))
   }

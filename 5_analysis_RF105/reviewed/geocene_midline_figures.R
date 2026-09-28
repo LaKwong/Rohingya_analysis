@@ -30,8 +30,8 @@ fig_stove_exclusive <- ggplot(
   stove_exclusive_plot_data,
   aes(x = months_after_first_receiving, y = proportion_exclusive_lpg_days)
 ) +
-  geom_line(color = "#138B87", linewidth = 0.8) +
-  geom_point(color = "#138B87", size = 2) +
+  geom_line(color = "#ea801c", linewidth = 0.8) +
+  geom_point(color = "#ea801c", size = 2) +
   geom_text(aes(y = 1.05, label = n_households), size = 3) +
   annotate(
     "text",

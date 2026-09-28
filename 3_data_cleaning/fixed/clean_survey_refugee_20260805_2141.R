@@ -1558,9 +1558,35 @@ baseline_endline_no_midline_result <- write_refugee_baseline_endline_no_midline_
 )
 dietary_diversity_result <- derive_refugee_dietary_diversity(survey)
 survey <- dietary_diversity_result$data
+
+# Phone fields are household asset counts, but the generic identifier filter
+# removes every column containing "phone" or "mobile". Retain only binary
+# ownership indicators so Table 1 is reproducible without private raw files.
+derive_asset_ownership <- function(x) {
+  x_chr <- trimws(tolower(as.character(x)))
+  x_num <- suppressWarnings(as.numeric(x_chr))
+  out <- rep(NA_integer_, length(x_chr))
+  out[!is.na(x_num)] <- as.integer(x_num[!is.na(x_num)] > 0)
+  out[x_chr %in% c("yes", "y", "true", "present")] <- 1L
+  out[x_chr %in% c("no", "n", "false", "absent")] <- 0L
+  out
+}
+survey$mobile_phone_yn <- if ("mobile_phone" %in% names(survey)) {
+  derive_asset_ownership(survey$mobile_phone)
+} else {
+  rep(NA_integer_, nrow(survey))
+}
+survey$smartphone_yn <- if ("smartphone" %in% names(survey)) {
+  derive_asset_ownership(survey$smartphone)
+} else {
+  rep(NA_integer_, nrow(survey))
+}
 write_timepoint_summary(make_timepoint_summary(survey, dataset_name), dataset_name)
 
-deidentified <- drop_identifier_columns(survey)
+deidentified <- drop_identifier_columns(
+  survey,
+  keep = c("mobile_phone_yn", "smartphone_yn")
+)
 survey <- deidentified$data
 survey <- move_columns_first(
   survey,
@@ -1576,8 +1602,16 @@ survey <- move_columns_first(
 )
 
 output_path <- write_final_rds(survey, "4_data/clean_final/survey_refugee_household.rds")
-shareable <- make_shareable_dataset(survey, dataset_name)
-shareable_path <- write_shareable_rds(shareable$data, "survey_refugee_household.rds")
+shareable <- make_shareable_dataset(
+  survey,
+  dataset_name,
+  keep = c("mobile_phone_yn", "smartphone_yn")
+)
+shareable_path <- write_shareable_rds(
+  shareable$data,
+  "survey_refugee_household.rds",
+  keep = c("mobile_phone_yn", "smartphone_yn")
+)
 
 entry <- make_inventory_entry(
   dataset_name = dataset_name,
@@ -1592,6 +1626,7 @@ entry <- make_inventory_entry(
     "Baseline household IDs were corrected using 2_data_raw/survey_baseline_survey and data review/Rohingya HH Data_Correction_Saeed_20210124.xlsx; embedded manual corrections in this file were applied using intervention/comparison study_arm names; structured endline review corrections were applied from 2_data_raw/survey_endline_survey and data review.",
     "Includes 2022 refugee survey files from survey_endline and 2021 midline files from survey_midline despite misleading endline filenames.",
     "Timepoint was recoded from parsed collection timestamps, so 2019/2020 are baseline, 2021 is midline, and 2022 is endline.",
+    "Derived binary mobile_phone_yn and smartphone_yn household asset indicators before identifier removal; raw phone-named fields remain excluded.",
     paste0("Added baseline-compatible dietary diversity variables from weekly food-frequency items using the HDDS food-group mapping in the embedded HDDS/FCS mappings in this file; hdds_assume_misc_1 nonmissing by timepoint: ", dietary_diversity_result$nonmissing_summary, ". Audit: ", dietary_diversity_result$audit_path, "."),
     paste0(
       "Checked cleaned refugee households with baseline and endline records but no midline record against imported raw midline rows by fcn_id, hh_id, hh_id before the underscore suffix, and UNHCR_id; the audit records the raw source files and paths checked. Households flagged: ",
@@ -1626,6 +1661,7 @@ message("Wrote ", output_path)
 # entry point for household and related survey files.
 ################################################################################
 clean_refugee_related_survey <- function(role, dataset_name, output_file) {
+  target_child_linkage_note <- ""
   source_rel <- file.path("4_data", "clean_final", "imported_raw", paste0("survey_refugee_", role, "_raw.rds"))
   data <- read_rds_required(source_rel)
   data <- data[data$community == "refugee", , drop = FALSE]
@@ -1690,6 +1726,130 @@ clean_refugee_related_survey <- function(role, dataset_name, output_file) {
     data$timepoint_source_col[parent_fill] <- "parent_household_collection_date"
   }
 
+  if (identical(role, "location")) {
+    required_location_linkage_fields <- c(
+      "PARENT_KEY", "location_name_roster", "location_number"
+    )
+    required_household_linkage_fields <- c(
+      "KEY", "target_child_current", "target_child_name"
+    )
+    missing_location_fields <- setdiff(required_location_linkage_fields, names(data))
+    missing_household_fields <- setdiff(required_household_linkage_fields, names(household_raw))
+    if (length(missing_location_fields) || length(missing_household_fields)) {
+      stop(
+        "Cannot identify the midline target child from roster names. Location fields missing: ",
+        paste(missing_location_fields, collapse = ", "),
+        "; household fields missing: ",
+        paste(missing_household_fields, collapse = ", "),
+        call. = FALSE
+      )
+    }
+
+    normalize_roster_name <- function(x) {
+      x <- enc2utf8(as.character(x))
+      x <- tolower(trimws(x))
+      x <- gsub("[^[:alnum:]]+", "", x)
+      x[x %in% c("", "na", "nan", "null")] <- NA_character_
+      x
+    }
+
+    parent_target_child_current <- household_raw$target_child_current[parent_idx]
+    parent_target_child_original <- household_raw$target_child_name[parent_idx]
+    current_name_normalized <- normalize_roster_name(parent_target_child_current)
+    original_name_normalized <- normalize_roster_name(parent_target_child_original)
+    target_child_name_normalized <- ifelse(
+      !is.na(current_name_normalized),
+      current_name_normalized,
+      original_name_normalized
+    )
+    data$target_child_match_source <- ifelse(
+      !is.na(current_name_normalized),
+      "target_child_current",
+      ifelse(!is.na(original_name_normalized), "target_child_name", NA_character_)
+    )
+    roster_name_normalized <- normalize_roster_name(data$location_name_roster)
+    target_child_candidate <-
+      !is.na(target_child_name_normalized) &
+      !is.na(roster_name_normalized) &
+      roster_name_normalized == target_child_name_normalized
+
+    data$target_child_match_count <- 0L
+    valid_parent <- !is.na(data$PARENT_KEY)
+    data$target_child_match_count[valid_parent] <- ave(
+      as.integer(target_child_candidate[valid_parent]),
+      as.character(data$PARENT_KEY[valid_parent]),
+      FUN = sum
+    )
+    data$is_target_child <-
+      target_child_candidate & data$target_child_match_count == 1L
+    data$target_child_match_method <- ifelse(
+      is.na(target_child_name_normalized),
+      "missing_target_child_name",
+      ifelse(
+        data$target_child_match_count == 1L,
+        "unique_normalized_name_match",
+        ifelse(
+          data$target_child_match_count > 1L,
+          "ambiguous_normalized_name_match",
+          "no_normalized_name_match"
+        )
+      )
+    )
+
+    cleaned_household <- readRDS(clean_final_path(
+      "4_data", "clean_final", "survey_refugee_household.rds"
+    ))
+    clean_parent_idx <- match(data$PARENT_KEY, cleaned_household$KEY)
+    final_study_arm <- as.character(cleaned_household$study_arm_overall[clean_parent_idx])
+    household_rows <- !duplicated(data$PARENT_KEY) & !is.na(data$PARENT_KEY)
+    household_linkage <- data.frame(
+      study_arm_overall = final_study_arm[household_rows],
+      target_child_match_method = data$target_child_match_method[household_rows],
+      target_child_match_count = data$target_child_match_count[household_rows],
+      stringsAsFactors = FALSE
+    )
+    linkage_arms <- sort(unique(as.character(household_linkage$study_arm_overall)))
+    linkage_arms <- linkage_arms[!is.na(linkage_arms)]
+    linkage_audit <- do.call(rbind, lapply(linkage_arms, function(arm) {
+      arm_data <- household_linkage[
+        as.character(household_linkage$study_arm_overall) == arm,
+        ,
+        drop = FALSE
+      ]
+      data.frame(
+        timepoint = "midline",
+        study_arm_overall = arm,
+        n_households_with_location_roster = nrow(arm_data),
+        n_unique_target_child_matches =
+          sum(arm_data$target_child_match_method == "unique_normalized_name_match"),
+        n_ambiguous_target_child_matches =
+          sum(arm_data$target_child_match_method == "ambiguous_normalized_name_match"),
+        n_unmatched_target_children =
+          sum(arm_data$target_child_match_method == "no_normalized_name_match"),
+        n_missing_target_child_names =
+          sum(arm_data$target_child_match_method == "missing_target_child_name"),
+        name_normalization =
+          "lowercase; trim; remove whitespace and punctuation; require one within-household match",
+        stringsAsFactors = FALSE
+      )
+    }))
+    linkage_audit_path <- clean_final_path(
+      "4_data",
+      "clean_final",
+      "survey_refugee_location_target_child_linkage_audit.csv"
+    )
+    ensure_parent_dir(linkage_audit_path)
+    write.csv(linkage_audit, linkage_audit_path, row.names = FALSE, na = "")
+    target_child_linkage_note <- paste0(
+      "For the midline location repeat, derived is_target_child by uniquely matching ",
+      "the normalized current target-child name to location_name_roster within household. ",
+      "Unique matches: ", sum(linkage_audit$n_unique_target_child_matches),
+      "; ambiguous matches: ", sum(linkage_audit$n_ambiguous_target_child_matches),
+      "; unmatched: ", sum(linkage_audit$n_unmatched_target_children),
+      ". Aggregate audit: ", linkage_audit_path, "."
+    )
+  }
+
   recoded <- recode_timepoint_by_timestamp(
     data,
     date_cols = c("collection_date", "start_date", "SubmissionDate", "starttime", "endtime", "date", "datetime"),
@@ -1726,7 +1886,8 @@ clean_refugee_related_survey <- function(role, dataset_name, output_file) {
         "Child rows removed because parent refugee household was excluded from final household data: ",
         removed_excluded_household_children,
         "."
-      )
+      ),
+      target_child_linkage_note
     )
   )
   update_inventory(entry)

@@ -131,6 +131,68 @@ stopifnot(isTRUE(all.equal(tables, geocene_tables(public_events, public_daily)))
 stopifnot(inherits(try(geocene_tables(clean, bind_rows(daily, daily[1, ])), silent = TRUE), "try-error"))
 stopifnot(is.na(geocene_timepoint(as.Date("2021-01-01"))), geocene_timepoint(as.Date("2022-01-02")) == "endline")
 stopifnot(geocene_timepoint(as.Date("2020-08-31")) == "baseline", geocene_timepoint(as.Date("2020-09-01")) == "midline")
+local({
+  root <- file.path(geocene_private, "tests", "canonical_public_household_id")
+  private_root <- file.path(root, "private")
+  public_root <- file.path(root, "public")
+  crosswalk_root <- file.path(root, "crosswalk")
+  fixture_events <- clean %>% mutate(hh_id = paste0("camp_block_", fcn_id))
+  fixture_daily <- geocene_collapse_days(fixture_events)
+  for (variant in geocene_variants) {
+    geocene_write(mutate(fixture_events, analysis_variant = variant), file.path(private_root, "geocene", variant, "events.rds"))
+    geocene_write(mutate(fixture_daily, analysis_variant = variant), file.path(private_root, "geocene", variant, "household_days.rds"))
+  }
+  geocene_export_public(private_root = private_root, public_root = public_root, crosswalk_dir = crosswalk_root)
+  exported_first <- readRDS(file.path(public_root, "geocene", geocene_variants[1], "events.rds"))
+  first_ids <- exported_first$fcn_id
+  geocene_export_public(private_root = private_root, public_root = public_root, crosswalk_dir = crosswalk_root)
+  exported_second <- readRDS(file.path(public_root, "geocene", geocene_variants[1], "events.rds"))
+  stopifnot(
+    identical(exported_first$fcn_id, exported_first$hh_id),
+    identical(first_ids, exported_second$fcn_id),
+    all(str_detect(exported_first$fcn_id, "^hh_[a-z0-9]{24}$")),
+    !any(exported_first$fcn_id %in% fixture_events$fcn_id),
+    !file.exists(file.path(public_root, "household_key_crosswalk.csv")),
+    file.exists(file.path(crosswalk_root, "household_key_crosswalk.csv"))
+  )
+})
+local({
+  stopifnot(identical(
+    normalizePath(geocene_public_crosswalk_dir, winslash = "/", mustWork = FALSE),
+    normalizePath(
+      raw_import_path("8_restricted", "public_clean_final"),
+      winslash = "/",
+      mustWork = FALSE
+    )
+  ))
+  private_survey_path <- raw_import_path(
+    "4_data", "clean_final", "survey_refugee_household.rds"
+  )
+  public_survey_path <- raw_import_path(
+    "4_data", "clean_final_public", "survey_refugee_household.rds"
+  )
+  private_geocene_path <- raw_import_path(
+    "4_data", "clean_final", "geocene", geocene_variants[1], "events.rds"
+  )
+  public_geocene_path <- raw_import_path(
+    "4_data", "clean_final_public", "geocene", geocene_variants[1], "events.rds"
+  )
+  if (all(file.exists(c(
+    private_survey_path, public_survey_path,
+    private_geocene_path, public_geocene_path
+  )))) {
+    private_survey_ids <- unique(as.character(readRDS(private_survey_path)$fcn_id))
+    public_survey_ids <- unique(as.character(readRDS(public_survey_path)$fcn_id))
+    private_geocene_ids <- unique(as.character(readRDS(private_geocene_path)$fcn_id))
+    public_geocene_ids <- unique(as.character(readRDS(public_geocene_path)$fcn_id))
+    private_linked_households <- length(intersect(private_survey_ids, private_geocene_ids))
+    public_linked_households <- length(intersect(public_survey_ids, public_geocene_ids))
+    stopifnot(
+      private_linked_households > 0L,
+      public_linked_households == private_linked_households
+    )
+  }
+})
 cat("Geocene parser, local-date, all-event, recoding, denominator, receipt-subset, and public-equivalence tests passed.\n")
 
 if ("--figures" %in% commandArgs(trailingOnly = TRUE)) local({

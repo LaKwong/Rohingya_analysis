@@ -6,7 +6,7 @@ write_reviewed_csv(stove_month_summary, "table_descriptive_stove_month_summary.c
 plot_month <- stove_month_summary %>% filter(n_households >= 3)
 if (nrow(plot_month)) {
   p <- ggplot(plot_month, aes(months_after_first_receiving_numeric, pct_exclusive_lpg_days, color = study_arm_overall)) +
-    geom_point() + scale_color_manual(values = c(comparison = "#4E79A7", intervention = "#F28E2B", all_arms = "#555555")) +
+    geom_point() + scale_color_manual(values = c(comparison = "#1a80bb", intervention = "#ea801c", all_arms = "#6F6F6F")) +
     scale_y_continuous(limits = c(0, 100)) + theme_bw() +
     labs(x = "Months after first receiving LPG", y = "Mean household percentage of days with exclusive LPG use", color = "Study arm")
   save_reviewed_plot(p, "fig_descriptive_stove_exclusive_lpg_month.png", width = 7, height = 4.5)

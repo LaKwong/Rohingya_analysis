@@ -36,6 +36,28 @@ for (script in scripts) invisible(parse(file = file.path(reviewed_dir, script)))
 
 canonical_file <- file.path(restricted_dir, "table_descriptive_pm25_household_timepoint_internal.csv")
 period_file <- file.path(restricted_dir, "table_descriptive_pm25_24h_period_internal.csv")
+infiltration_file <- file.path(
+  restricted_dir,
+  "table_descriptive_pm25_infiltration_sensitivity_internal.csv"
+)
+ambient_dedup_file <- file.path(
+  table_dir, "qa", "table_qa_pm25_ambient_deduplication.csv"
+)
+indoor_dedup_file <- file.path(
+  table_dir, "qa", "table_qa_pm25_indoor_timestamp_deduplication.csv"
+)
+indoor_weighting_qa_file <- file.path(
+  table_dir, "qa", "table_qa_pm25_indoor_time_weighting.csv"
+)
+hour_period_reconciliation_file <- file.path(
+  table_dir, "qa", "table_qa_pm25_hour_period_reconciliation.csv"
+)
+hour_period_reconciliation_internal_file <- file.path(
+  restricted_dir, "table_descriptive_pm25_hour_period_reconciliation_internal.csv"
+)
+ambient_coverage_file <- file.path(
+  table_dir, "qa", "table_qa_pm25_ambient_period_coverage.csv"
+)
 exposure_internal_file <- file.path(
   restricted_dir,
   "table_descriptive_pm25_time_weighted_exposure_internal.csv"
@@ -54,6 +76,52 @@ time_use_audit_file <- file.path(
 )
 hour_summary_file <- file.path(table_dir, "table_descriptive_pm25_time_of_day.csv")
 hour_figure_file <- file.path(figure_dir, "fig_descriptive_pm25_hourly_patterns.png")
+ambient_pm25_hour_figure_file <- file.path(
+  figure_dir,
+  "fig_pm25_hapin_hour_of_day_raw_indoor_pm25_with_concurrent_ambient_pm25.png"
+)
+ambient_pm25_hour_reference_figure_file <- file.path(
+  figure_dir,
+  paste0(
+    "fig_pm25_hapin_hour_of_day_raw_indoor_pm25_",
+    "with_concurrent_ambient_pm25_reference_limits.png"
+  )
+)
+raw_indoor_48h_baseline_midline_figure_file <- file.path(
+  figure_dir,
+  paste0(
+    "fig_pm25_hapin_48h_household_distribution_raw_indoor_pm25_",
+    "baseline_midline_no_title.png"
+  )
+)
+raw_indoor_hour_baseline_midline_reference_figure_file <- file.path(
+  figure_dir,
+  paste0(
+    "fig_pm25_hapin_hour_of_day_raw_indoor_pm25_",
+    "baseline_midline_reference_limits_no_title.png"
+  )
+)
+pm25_collection_timeline_figure_file <- file.path(
+  figure_dir,
+  "fig_descriptive_pm25_sampling_timeline.png"
+)
+pm25_collection_timeline_ambient_figure_file <- file.path(
+  figure_dir,
+  "fig_descriptive_pm25_sampling_timeline_with_ambient_pm25.png"
+)
+pm25_collection_timeline_internal_file <- file.path(
+  restricted_dir,
+  "table_descriptive_pm25_collection_timeline_daily_internal.csv"
+)
+pm25_ambient_daily_mean_internal_file <- file.path(
+  restricted_dir,
+  "table_descriptive_pm25_ambient_daily_mean_internal.csv"
+)
+rdid_results_file <- file.path(table_dir, "table_rDiD_xgboost_all_results.csv")
+drdid_results_file <- file.path(table_dir, "table_DRDID_all_results.csv")
+pm25_sampling_overlap_file <- file.path(
+  table_dir, "qa", "table_rDiD_pm25_sampling_date_overlap.csv"
+)
 mental_health_file <- file.path(table_dir, "table_descriptive_mental_health_outcomes.csv")
 lpg_runout_file <- file.path(table_dir, "table_descriptive_lpg_runout_before_refill.csv")
 public_files <- c(
@@ -66,10 +134,28 @@ public_files <- c(
 stopifnot(
   file.exists(canonical_file),
   file.exists(period_file),
+  file.exists(infiltration_file),
+  file.exists(ambient_dedup_file),
+  file.exists(indoor_dedup_file),
+  file.exists(indoor_weighting_qa_file),
+  file.exists(hour_period_reconciliation_file),
+  file.exists(hour_period_reconciliation_internal_file),
+  file.exists(ambient_coverage_file),
   file.exists(exposure_internal_file),
   file.exists(indoor_selected_file),
   file.exists(hour_summary_file),
   file.exists(hour_figure_file),
+  file.exists(ambient_pm25_hour_figure_file),
+  file.exists(ambient_pm25_hour_reference_figure_file),
+  file.exists(raw_indoor_48h_baseline_midline_figure_file),
+  file.exists(raw_indoor_hour_baseline_midline_reference_figure_file),
+  file.exists(pm25_collection_timeline_figure_file),
+  file.exists(pm25_collection_timeline_ambient_figure_file),
+  file.exists(pm25_collection_timeline_internal_file),
+  file.exists(pm25_ambient_daily_mean_internal_file),
+  file.exists(rdid_results_file),
+  file.exists(drdid_results_file),
+  file.exists(pm25_sampling_overlap_file),
   file.exists(mental_health_file),
   file.exists(lpg_runout_file),
   all(file.exists(public_files))
@@ -84,13 +170,17 @@ fraction_cols <- c(
 )
 required_cols <- c(
   "fcn_id", "timepoint", "study_arm_overall", "indoor_pm25_mean",
-  "ambient_pm25_mean", "valid_monitoring_hours", fraction_cols
+  "ambient_pm25_mean", "valid_monitoring_hours", "valid_ambient_hours",
+  "mean_ambient_coverage_prop", "ambient_fraction_default",
+  "pm25_infiltration_factor_estimated",
+  "pm25_indoor_excess_estimated_infiltration", fraction_cols
 )
 stopifnot(all(required_cols %in% names(canonical)))
 stopifnot(nrow(canonical) > 0)
 stopifnot(!anyDuplicated(canonical[c("fcn_id", "timepoint")]))
 stopifnot(all(stats::complete.cases(canonical[fraction_cols])))
 stopifnot(all(canonical$valid_monitoring_hours > 0))
+stopifnot(all(abs(canonical$ambient_fraction_default - 0.25) < 1e-10))
 
 tolerance <- 1e-8
 fractions <- c(0, 0.25, 0.50, 0.75, 1.00)
@@ -103,6 +193,88 @@ matched_periods <- periods %>% filter(analytic_period_common_support)
 stopifnot(nrow(matched_periods) > 0)
 stopifnot(all(matched_periods$has_valid_75pct_coverage))
 stopifnot(all(matched_periods$valid_monitoring_hours >= 18 - tolerance))
+stopifnot(all(matched_periods$has_valid_ambient_75pct_coverage))
+stopifnot(all(matched_periods$ambient_coverage_prop_24h >= 0.75 - tolerance))
+stopifnot(all(matched_periods$valid_ambient_hours_24h >= 18 - tolerance))
+stopifnot(all(!is.na(matched_periods$matched_ambient_site_id)))
+stopifnot(
+  all(matched_periods$indoor_mean_weighting == "represented_monitoring_seconds"),
+  max(abs(
+    matched_periods$represented_monitoring_hours_24h -
+      matched_periods$valid_monitoring_hours
+  )) < tolerance
+)
+
+indoor_dedup <- read_csv(indoor_dedup_file, show_col_types = FALSE)
+stopifnot(
+  nrow(indoor_dedup) == 1,
+  indoor_dedup$n_duplicate_rows_removed > 0,
+  indoor_dedup$n_timestamps_represented_by_multiple_rows > 0,
+  indoor_dedup$n_timestamps_with_conflicting_pm25 > 0,
+  indoor_dedup$max_within_timestamp_pm25_range > 0,
+  indoor_dedup$duplicate_resolution ==
+    "mean PM2.5 within monitoring-window timestamp"
+)
+
+indoor_weighting_qa <- read_csv(indoor_weighting_qa_file, show_col_types = FALSE)
+stopifnot(
+  nrow(indoor_weighting_qa) > 0,
+  all(indoor_weighting_qa$indoor_mean_weighting ==
+    "represented_monitoring_seconds"),
+  sum(indoor_weighting_qa$n_periods_changed_by_weighting) > 0,
+  max(indoor_weighting_qa$max_absolute_weighting_difference_ug_m3) > 0
+)
+
+hour_period_reconciliation <- read_csv(
+  hour_period_reconciliation_file,
+  show_col_types = FALSE
+)
+hour_period_reconciliation_internal <- read_csv(
+  hour_period_reconciliation_internal_file,
+  show_col_types = FALSE
+)
+stopifnot(
+  nrow(hour_period_reconciliation) == 1,
+  hour_period_reconciliation$n_valid_periods ==
+    nrow(hour_period_reconciliation_internal),
+  hour_period_reconciliation$n_monitoring_hour_discrepancies_gt_1e_8 == 0,
+  hour_period_reconciliation$n_indoor_mean_discrepancies_gt_1e_8 == 0,
+  hour_period_reconciliation$max_absolute_monitoring_hour_difference < tolerance,
+  hour_period_reconciliation$max_absolute_indoor_mean_difference_ug_m3 < tolerance
+)
+
+ambient_dedup <- read_csv(ambient_dedup_file, show_col_types = FALSE)
+stopifnot(
+  nrow(ambient_dedup) == 1,
+  ambient_dedup$n_duplicate_rows_removed > 0,
+  ambient_dedup$n_unique_site_monitor_timestamps < ambient_dedup$n_source_rows,
+  ambient_dedup$monitor_hour_coverage_threshold_percent == 75
+)
+
+ambient_coverage <- read_csv(ambient_coverage_file, show_col_types = FALSE)
+stopifnot(
+  nrow(ambient_coverage) > 0,
+  all(ambient_coverage$ambient_period_coverage_threshold_percent == 75),
+  all(
+    ambient_coverage$n_common_support_24h_periods <=
+      ambient_coverage$n_indoor_valid_24h_periods
+  )
+)
+
+infiltration <- read_csv(infiltration_file, show_col_types = FALSE)
+stopifnot(
+  nrow(infiltration) > 0,
+  all(infiltration$infiltration_factor_estimated >= 0),
+  all(infiltration$infiltration_factor_estimated <= 1),
+  all(infiltration$infiltration_intercept_estimated >= 0)
+)
+nonmissing_infiltration_excess <- canonical$pm25_indoor_excess_estimated_infiltration[
+  is.finite(canonical$pm25_indoor_excess_estimated_infiltration)
+]
+stopifnot(
+  length(nonmissing_infiltration_excess) > 0,
+  all(nonmissing_infiltration_excess >= 0)
+)
 
 weighted_mean_safe <- function(x, w) {
   keep <- is.finite(x) & is.finite(w) & w > 0
@@ -202,14 +374,11 @@ expected_exposure_summary <- exposure_summary_input %>%
       filter(is.finite(indoor_pm25_ug_m3), is.finite(outdoor_pm25_ug_m3))
     group_hours_inside <- mean(time_rows$hours_inside_est)
     group_hours_outside <- mean(time_rows$hours_outside_est)
-    group_weighted_exposure <-
-      (group_hours_inside / 24) * pm_rows$indoor_pm25_ug_m3 +
-      (group_hours_outside / 24) * pm_rows$outdoor_pm25_ug_m3
     tibble(
       expected_mean_hours_inside = group_hours_inside,
       expected_mean_hours_outside = group_hours_outside,
-      expected_mean_exposure = mean(group_weighted_exposure),
-      expected_sd_exposure = stats::sd(group_weighted_exposure)
+      expected_mean_exposure = mean(pm_rows$time_weighted_average_pm25_ug_m3),
+      expected_sd_exposure = stats::sd(pm_rows$time_weighted_average_pm25_ug_m3)
     )
   }) %>%
   ungroup()
@@ -296,7 +465,88 @@ stopifnot(
 
 hour_summary <- read_csv(hour_summary_file, show_col_types = FALSE)
 stopifnot("concurrent_outdoor_pm25" %in% hour_summary$metric_name)
+stopifnot(
+  "metric_plot_label" %in% names(hour_summary),
+  !any(is.na(hour_summary$metric_plot_label)),
+  setequal(
+    hour_summary$metric_plot_label,
+    c(
+      "Raw indoor PM2.5",
+      "Concurrent outdoor PM2.5",
+      "Indoor excess after 0.25 x outdoor PM2.5"
+    )
+  )
+)
 stopifnot(file.info(hour_figure_file)$size > 0)
+
+ambient_pm25_hour_summary <- hour_summary %>%
+  filter(metric_name == "concurrent_outdoor_pm25")
+ambient_pm25_hour_groups <- interaction(
+  ambient_pm25_hour_summary$timepoint,
+  ambient_pm25_hour_summary$study_arm_overall,
+  drop = TRUE
+)
+stopifnot(
+  nrow(ambient_pm25_hour_summary) == 144L,
+  length(levels(ambient_pm25_hour_groups)) == 6L,
+  all(table(ambient_pm25_hour_groups) == 24L),
+  setequal(
+    unique(ambient_pm25_hour_summary$study_arm_overall),
+    c("comparison", "intervention")
+  ),
+  all(is.finite(ambient_pm25_hour_summary$median_pm25)),
+  all(ambient_pm25_hour_summary$median_pm25 > 0),
+  file.info(ambient_pm25_hour_figure_file)$size > 0,
+  file.info(ambient_pm25_hour_reference_figure_file)$size > 0,
+  file.info(raw_indoor_48h_baseline_midline_figure_file)$size > 0,
+  file.info(raw_indoor_hour_baseline_midline_reference_figure_file)$size > 0
+)
+
+pm25_collection_timeline <- read_csv(
+  pm25_collection_timeline_internal_file,
+  show_col_types = FALSE
+)
+stopifnot(
+  setequal(
+    unique(pm25_collection_timeline$collection_group),
+    c("Comparison households", "Intervention households", "Ambient monitors")
+  ),
+  setequal(
+    unique(pm25_collection_timeline$timepoint),
+    c("baseline", "midline", "endline")
+  ),
+  all(!is.na(pm25_collection_timeline$collection_date)),
+  all(pm25_collection_timeline$n_active_monitoring_units >= 1),
+  all(pm25_collection_timeline$n_observations >= 1),
+  all(
+    c("comparison", "intervention") %in%
+      unique(stats::na.omit(pm25_collection_timeline$study_arm_overall))
+  ),
+  all(
+    c("baseline", "midline", "endline") %in%
+      pm25_collection_timeline$timepoint[
+        pm25_collection_timeline$collection_group == "Ambient monitors"
+      ]
+  ),
+  file.info(pm25_collection_timeline_figure_file)$size > 0
+)
+
+pm25_ambient_daily_mean <- read_csv(
+  pm25_ambient_daily_mean_internal_file,
+  show_col_types = FALSE
+)
+stopifnot(
+  nrow(pm25_ambient_daily_mean) ==
+    dplyr::n_distinct(pm25_ambient_daily_mean$collection_date),
+  setequal(
+    unique(pm25_ambient_daily_mean$timepoint),
+    c("baseline", "midline", "endline")
+  ),
+  all(is.finite(pm25_ambient_daily_mean$ambient_mean_pm25)),
+  all(pm25_ambient_daily_mean$ambient_mean_pm25 > 0),
+  all(pm25_ambient_daily_mean$n_valid_ambient_site_hours >= 1),
+  file.info(pm25_collection_timeline_ambient_figure_file)$size > 0
+)
 
 mental_health <- read_csv(mental_health_file, show_col_types = FALSE)
 cesd_at_risk <- mental_health %>% filter(source_variable == "CES_D_go16_score")
@@ -310,6 +560,105 @@ descriptive_text <- paste(
 )
 stopifnot(grepl("df$CES_D_score >= 16", descriptive_text, fixed = TRUE))
 stopifnot(!grepl("df$CES_D_score > 16", descriptive_text, fixed = TRUE))
+stopifnot(
+  grepl("default_material_infiltration_factor <- 0.25", descriptive_text, fixed = TRUE),
+  grepl('"pm25_ambient_excess_f025", "ambient_adjusted_f025", 0.25, TRUE', descriptive_text, fixed = TRUE),
+  grepl("pm25_ambient_excess_f025", descriptive_text, fixed = TRUE)
+)
+rdid_text <- paste(
+  readLines(file.path(reviewed_dir, "4_rdid_xgboost_20260805_2213.R"), warn = FALSE),
+  collapse = "\n"
+)
+stopifnot(grepl("df$CES_D_score >= 16", rdid_text, fixed = TRUE))
+stopifnot(!grepl("df$CES_D_score > 16", rdid_text, fixed = TRUE))
+stopifnot(
+  grepl('reviewed_pm_outcome_primary = "pm25_ambient_excess_default"', rdid_text, fixed = TRUE),
+  grepl("pm25_ambient_excess_default = as_number(pm25_ambient_excess_f025)", rdid_text, fixed = TRUE),
+  !grepl("ambient_pm25_baseline", rdid_text, fixed = TRUE),
+  !grepl("ambient_pm25_followup", rdid_text, fixed = TRUE)
+)
+drdid_text <- paste(
+  readLines(file.path(reviewed_dir, "5_drDiD_comparison_20260805_2213.R"), warn = FALSE),
+  collapse = "\n"
+)
+stopifnot(
+  grepl("reviewed_pm_default_infiltration_factor <- 0.25", drdid_text, fixed = TRUE),
+  grepl("pm25_ambient_excess_default = as_number(pm25_ambient_excess_f025)", drdid_text, fixed = TRUE),
+  !grepl("ambient_pm25_baseline", drdid_text, fixed = TRUE),
+  !grepl("ambient_pm25_followup", drdid_text, fixed = TRUE),
+  grepl('colnames(X)[[1]] <- "(Intercept)"', drdid_text, fixed = TRUE),
+  grepl("if (skip_pm25)", drdid_text, fixed = TRUE)
+)
+
+rdid_pm <- read_csv(rdid_results_file, show_col_types = FALSE) %>%
+  filter(domain == "PM2.5 exposure", estimator == "rDID_XGBoost")
+expected_pm_outcomes <- c(
+  "pm25_ambient_excess_default", "pm25_ambient_excess_f000",
+  "pm25_ambient_excess_f050", "pm25_ambient_excess_f075",
+  "pm25_ambient_excess_f100"
+)
+stopifnot(
+  nrow(rdid_pm) == 10,
+  setequal(unique(rdid_pm$outcome), expected_pm_outcomes),
+  all(rdid_pm$outcome_regression_covariates == "hh_size;hh_per_structure"),
+  all(rdid_pm$propensity_score_covariates == "hh_size;hh_per_structure")
+)
+rdid_pm_default <- rdid_pm %>% filter(outcome == "pm25_ambient_excess_default")
+stopifnot(
+  nrow(rdid_pm_default) == 2,
+  all(grepl("0.25", rdid_pm_default$outcome_label, fixed = TRUE)),
+  all(rdid_pm_default$outcome_source == "pm25_fixed_fraction_default")
+)
+
+pm25_sampling_overlap <- read_csv(
+  pm25_sampling_overlap_file,
+  show_col_types = FALSE
+)
+stopifnot(
+  nrow(pm25_sampling_overlap) == 3,
+  setequal(pm25_sampling_overlap$timepoint, c("baseline", "midline", "endline")),
+  all(pm25_sampling_overlap$n_calendar_days_overlap == 0),
+  all(!pm25_sampling_overlap$arm_monitoring_date_windows_overlap)
+)
+
+drdid_pm_default <- read_csv(drdid_results_file, show_col_types = FALSE) %>%
+  filter(domain == "PM2.5 exposure", outcome == "pm25_ambient_excess_default")
+stopifnot(
+  nrow(drdid_pm_default) == 4,
+  all(drdid_pm_default$drdid_covariates ==
+    "(Intercept);hh_size;hh_per_structure"),
+  all(!grepl("ambient_pm25", drdid_pm_default$drdid_covariates)),
+  all(grepl(
+    "default equals indoor minus 0.25 times concurrent outdoor",
+    drdid_pm_default$ambient_covariate_note,
+    fixed = TRUE
+  ))
+)
+
+drdid_benchmark <- read_csv(
+  file.path(table_dir, "table_DRDID_rDID_benchmark.csv"),
+  show_col_types = FALSE
+)
+benchmark_pm_default <- drdid_benchmark %>%
+  filter(outcome == "pm25_ambient_excess_default")
+stopifnot(
+  nrow(benchmark_pm_default) == 2,
+  all(benchmark_pm_default$drdid_covariates ==
+    "(Intercept);hh_size;hh_per_structure"),
+  all(benchmark_pm_default$rdid_outcome_regression_covariates ==
+    "hh_size;hh_per_structure"),
+  all(benchmark_pm_default$rdid_propensity_score_covariates ==
+    benchmark_pm_default$rdid_outcome_regression_covariates),
+  all(grepl(
+    "default PM2.5 outcome is indoor minus 0.25 times concurrent outdoor",
+    benchmark_pm_default$pm25_covariate_comparison_note,
+    fixed = TRUE
+  ))
+)
+stopifnot(
+  grepl("scales::pseudo_log_trans", descriptive_text, fixed = TRUE),
+  !grepl("Positive adjusted percentile summaries only", descriptive_text, fixed = TRUE)
+)
 
 restricted_name_pattern <- paste(
   c("(^|_)fcn_id($|_)", "(^|_)hh_id($|_)", "date(time)?", "raw_source", "file(name|s)?", "monitor(_id|_ids)", "note"),
@@ -337,6 +686,10 @@ for (script in c("4_rdid_xgboost_20260805_2213.R", "5_drDiD_comparison_20260805_
   stopifnot(!grepl("indoor_minus_ambient", text, fixed = TRUE))
   stopifnot(!grepl("weighted_mean_pm_rdid", text, fixed = TRUE))
   stopifnot(grepl("pm25_ambient_excess_f000", text, fixed = TRUE))
+  stopifnot(grepl("pm25_ambient_excess_default", text, fixed = TRUE))
+  stopifnot(grepl("pm25_ambient_excess_f075", text, fixed = TRUE))
+  stopifnot(!grepl("pm25_raw_indoor", text, fixed = TRUE))
+  stopifnot(!grepl("pm25_indoor_excess_estimated_infiltration", text, fixed = TRUE))
 }
 
 cat("Unified PM2.5 pipeline checks passed for RF105_reviewed_", date_stamp, ".\n", sep = "")

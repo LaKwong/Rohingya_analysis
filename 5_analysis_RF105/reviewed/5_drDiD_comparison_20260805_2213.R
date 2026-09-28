@@ -10,6 +10,7 @@
 #   4_data/clean_final/survey_refugee_household.rds
 #   4_data/clean_final/survey_refugee_hh_members.rds
 #   8_restricted/RF105_reviewed_YYYYMMDD/identified_tables/table_descriptive_pm25_household_timepoint_internal.csv
+#     (required only when RF105_SKIP_PM25 is not enabled)
 #   7_tables/RF105_reviewed_YYYYMMDD/table_rDiD_xgboost_all_results.csv
 #
 # Outputs:
@@ -160,6 +161,9 @@ safe_write_reviewed_csv <- write_benchmark_csv
 # Existing rDiD result table and outcome specifications
 ################################################################################
 
+skip_pm25 <- tolower(trimws(Sys.getenv("RF105_SKIP_PM25", unset = "false"))) %in%
+  c("1", "true", "yes", "y")
+
 find_latest_rdid_results <- function() {
   explicit_file <- Sys.getenv("RF105_RDID_RESULTS_FILE", unset = "")
   if (nzchar(explicit_file)) {
@@ -203,6 +207,11 @@ rdid_xgboost_reference <- readr::read_csv(rdid_results_file, show_col_types = FA
     )
   )
 
+if (skip_pm25) {
+  rdid_xgboost_reference <- rdid_xgboost_reference %>%
+    filter(!str_detect(outcome_source, "^pm25_"))
+}
+
 outcome_specs <- rdid_xgboost_reference %>%
   distinct(
     contrast, population, followup_timepoint, outcome, outcome_label, domain,
@@ -214,66 +223,99 @@ outcome_specs <- rdid_xgboost_reference %>%
 # PM2.5 canonical household-timepoint outcomes
 ################################################################################
 
-pm_adjusted_file <- file.path(
-  project_root,
-  "8_restricted",
-  paste0("RF105_reviewed_", date_stamp),
-  "identified_tables",
-  "table_descriptive_pm25_household_timepoint_internal.csv"
-)
-if (!file.exists(pm_adjusted_file)) {
-  stop(
-    "Same-run canonical PM2.5 file not found: ", pm_adjusted_file, ". Run ",
-    "3_descriptive_outcomes_20260805_2213.R before 5_drDiD_comparison_20260805_2213.R.",
-    call. = FALSE
+reviewed_pm_default_infiltration_factor <- 0.25
+
+if (skip_pm25) {
+  message("Skipping PM2.5 DRDID benchmark because RF105_SKIP_PM25 is enabled.")
+  pm_adjusted_file <- NA_character_
+  pm_household <- tibble(
+    fcn_id = character(),
+    timepoint = character(),
+    study_arm_overall = character(),
+    pm25_ambient_excess_default = numeric(),
+    pm25_ambient_excess_f000 = numeric(),
+    pm25_ambient_excess_f050 = numeric(),
+    pm25_ambient_excess_f075 = numeric(),
+    pm25_ambient_excess_f100 = numeric()
   )
-}
-
-pm_required_cols <- c(
-  "fcn_id", "timepoint", "study_arm_overall",
-  "pm25_ambient_excess_f000", "pm25_ambient_excess_f025",
-  "pm25_ambient_excess_f050", "pm25_ambient_excess_f075",
-  "pm25_ambient_excess_f100"
-)
-pm_adjusted_raw <- readr::read_csv(pm_adjusted_file, show_col_types = FALSE)
-pm_missing_cols <- setdiff(pm_required_cols, names(pm_adjusted_raw))
-if (length(pm_missing_cols) > 0) {
-  stop("Canonical PM2.5 file is missing: ", paste(pm_missing_cols, collapse = ", "), call. = FALSE)
-}
-
-pm_duplicate_keys <- pm_adjusted_raw %>%
-  transmute(fcn_id = as.character(fcn_id), timepoint = as.character(timepoint)) %>%
-  count(fcn_id, timepoint) %>%
-  filter(is.na(fcn_id) | fcn_id == "" | is.na(timepoint) | n != 1)
-if (nrow(pm_duplicate_keys) > 0) {
-  stop("Canonical PM2.5 file must contain exactly one row per nonmissing fcn_id-timepoint.", call. = FALSE)
-}
-
-pm_household <- pm_adjusted_raw %>%
-  clean_timepoint_arm() %>%
-  transmute(
-    fcn_id = as.character(fcn_id),
-    timepoint,
-    study_arm_overall = as.character(study_arm_overall),
-    pm25_ambient_excess_default = as_number(pm25_ambient_excess_f075),
-    pm25_ambient_excess_f000 = as_number(pm25_ambient_excess_f000),
-    pm25_ambient_excess_f025 = as_number(pm25_ambient_excess_f025),
-    pm25_ambient_excess_f050 = as_number(pm25_ambient_excess_f050),
-    pm25_ambient_excess_f100 = as_number(pm25_ambient_excess_f100)
+} else {
+  pm_adjusted_file <- file.path(
+    project_root,
+    "8_restricted",
+    paste0("RF105_reviewed_", date_stamp),
+    "identified_tables",
+    "table_descriptive_pm25_household_timepoint_internal.csv"
   )
+  if (!file.exists(pm_adjusted_file)) {
+    stop(
+      "Same-run canonical PM2.5 file not found: ", pm_adjusted_file, ". Run ",
+      "3_descriptive_outcomes_20260805_2213.R before 5_drDiD_comparison_20260805_2213.R, ",
+      "or set RF105_SKIP_PM25=true for a survey-only benchmark.",
+      call. = FALSE
+    )
+  }
 
-if (any(is.na(pm_household$timepoint)) || any(!pm_household$study_arm_overall %in% arm_levels)) {
-  stop("Canonical PM2.5 file contains an invalid timepoint or study arm.", call. = FALSE)
-}
+  pm_required_cols <- c(
+    "fcn_id", "timepoint", "study_arm_overall",
+    "ambient_fraction_default",
+    "pm25_ambient_excess_f000", "pm25_ambient_excess_f025",
+    "pm25_ambient_excess_f050", "pm25_ambient_excess_f075",
+    "pm25_ambient_excess_f100"
+  )
+  pm_adjusted_raw <- readr::read_csv(pm_adjusted_file, show_col_types = FALSE)
+  pm_missing_cols <- setdiff(pm_required_cols, names(pm_adjusted_raw))
+  if (length(pm_missing_cols) > 0) {
+    stop("Canonical PM2.5 file is missing: ", paste(pm_missing_cols, collapse = ", "), call. = FALSE)
+  }
 
-pm_outcome_cols <- c(
-  "pm25_ambient_excess_default", "pm25_ambient_excess_f000",
-  "pm25_ambient_excess_f025", "pm25_ambient_excess_f050",
-  "pm25_ambient_excess_f100"
-)
-pm_complete_patterns <- pm_household %>% transmute(across(all_of(pm_outcome_cols), is.na)) %>% distinct()
-if (nrow(pm_complete_patterns) != 1 || any(unlist(pm_complete_patterns[1, ]))) {
-  stop("Canonical PM2.5 outcomes do not share one complete analytic population.", call. = FALSE)
+  pm_default_values <- unique(as_number(pm_adjusted_raw$ambient_fraction_default))
+  pm_default_values <- pm_default_values[is.finite(pm_default_values)]
+  if (length(pm_default_values) != 1 ||
+      abs(pm_default_values[[1]] - reviewed_pm_default_infiltration_factor) > 1e-10) {
+    stop(
+      "Canonical PM2.5 default infiltration factor must equal ",
+      reviewed_pm_default_infiltration_factor,
+      ". Rerun 3_descriptive_outcomes_20260805_2213.R.",
+      call. = FALSE
+    )
+  }
+
+  pm_duplicate_keys <- pm_adjusted_raw %>%
+    transmute(fcn_id = as.character(fcn_id), timepoint = as.character(timepoint)) %>%
+    count(fcn_id, timepoint) %>%
+    filter(is.na(fcn_id) | fcn_id == "" | is.na(timepoint) | n != 1)
+  if (nrow(pm_duplicate_keys) > 0) {
+    stop("Canonical PM2.5 file must contain exactly one row per nonmissing fcn_id-timepoint.", call. = FALSE)
+  }
+
+  pm_household <- pm_adjusted_raw %>%
+    clean_timepoint_arm() %>%
+    transmute(
+      fcn_id = as.character(fcn_id),
+      timepoint,
+      study_arm_overall = as.character(study_arm_overall),
+      pm25_ambient_excess_default = as_number(pm25_ambient_excess_f025),
+      pm25_ambient_excess_f000 = as_number(pm25_ambient_excess_f000),
+      pm25_ambient_excess_f050 = as_number(pm25_ambient_excess_f050),
+      pm25_ambient_excess_f075 = as_number(pm25_ambient_excess_f075),
+      pm25_ambient_excess_f100 = as_number(pm25_ambient_excess_f100)
+    )
+
+  if (any(is.na(pm_household$timepoint)) || any(!pm_household$study_arm_overall %in% arm_levels)) {
+    stop("Canonical PM2.5 file contains an invalid timepoint or study arm.", call. = FALSE)
+  }
+
+  pm_outcome_cols <- c(
+    "pm25_ambient_excess_default", "pm25_ambient_excess_f000",
+    "pm25_ambient_excess_f050", "pm25_ambient_excess_f075",
+    "pm25_ambient_excess_f100"
+  )
+  pm_complete_patterns <- pm_household %>%
+    transmute(across(all_of(pm_outcome_cols), is.na)) %>%
+    distinct()
+  if (nrow(pm_complete_patterns) != 1 || any(unlist(pm_complete_patterns[1, ]))) {
+    stop("Canonical PM2.5 outcomes do not share one complete analytic population.", call. = FALSE)
+  }
 }
 ################################################################################
 # Panel construction and DRDID wrappers
@@ -319,6 +361,12 @@ make_outcome_panel <- function(outcome_data, outcome_name, followup_timepoint) {
     inner_join(baseline_y, by = "fcn_id") %>%
     inner_join(followup_y, by = "fcn_id") %>%
     filter(!is.na(A), !is.na(Z), !is.na(Y))
+}
+
+model_xvars_for_outcome <- function(outcome_name) {
+  # PM2.5 exposure construction is completed in the descriptive script.
+  # DRDID uses only the prespecified baseline household covariates.
+  xvars
 }
 
 impute_drdid_covariates <- function(dat, x_vars) {
@@ -397,7 +445,9 @@ run_drdid_orientation <- function(panel, x_vars, orientation) {
     ))
   }
 
-  X <- data.matrix(panel[, x_vars, drop = FALSE])
+  # DRDID does not add an intercept to a supplied covariate matrix.
+  X <- cbind(1, data.matrix(panel[, x_vars, drop = FALSE]))
+  colnames(X)[[1]] <- "(Intercept)"
 
   if (orientation == "original_ATT") {
     D <- as_number(panel$A)
@@ -509,7 +559,7 @@ format_drdid_row <- function(res, outcome_info, estimator, orientation, panel) {
 run_drdid_for_spec <- function(outcome_info) {
   outcome_data <- if (outcome_info$outcome_source == "survey_clean_final") {
     survey_model_data
-  } else if (str_detect(outcome_info$outcome_source, "pm25_ambient_adjusted")) {
+  } else if (str_detect(outcome_info$outcome_source, "^pm25_")) {
     pm_household
   } else {
     stop("Unsupported outcome_source for DRDID benchmark: ", outcome_info$outcome_source)
@@ -521,14 +571,27 @@ run_drdid_for_spec <- function(outcome_info) {
     outcome_name = outcome_info$outcome,
     followup_timepoint = outcome_info$followup_timepoint
   )
+  model_xvars <- model_xvars_for_outcome(outcome_info$outcome)
 
-  att_res <- run_drdid_orientation(panel, xvars, "original_ATT")
-  atc_res <- run_drdid_orientation(panel, xvars, "original_ATC_aligned")
+  att_res <- run_drdid_orientation(panel, model_xvars, "original_ATT")
+  atc_res <- run_drdid_orientation(panel, model_xvars, "original_ATC_aligned")
 
   bind_rows(
     format_drdid_row(att_res, outcome_info, "DRDID_panel", "original_ATT", panel),
     format_drdid_row(atc_res, outcome_info, "DRDID_panel", "original_ATC_aligned", panel)
-  )
+  ) %>%
+    mutate(
+      drdid_covariates = paste(c("(Intercept)", model_xvars), collapse = ";"),
+      ambient_covariate_note = if_else(
+        str_detect(outcome_info$outcome_source, "^pm25_"),
+        paste(
+          "The PM2.5 outcome is read from the canonical descriptive file.",
+          "The default equals indoor minus 0.25 times concurrent outdoor",
+          "PM2.5; outdoor PM2.5 is not separately entered in either nuisance model."
+        ),
+        NA_character_
+      )
+    )
 }
 
 ################################################################################
@@ -564,7 +627,9 @@ drdid_atc_aligned <- drdid_results_all %>%
     drdid_sample_size = sample_size,
     drdid_n_intervention = n_intervention,
     drdid_n_comparison = n_comparison,
-    drdid_note = note
+    drdid_note = note,
+    drdid_covariates,
+    drdid_ambient_covariate_note = ambient_covariate_note
   )
 
 rdid_drdid_benchmark <- rdid_xgboost_reference %>%
@@ -584,6 +649,8 @@ rdid_drdid_benchmark <- rdid_xgboost_reference %>%
     rdid_n_intervention = n_intervention,
     rdid_n_comparison = n_comparison,
     rdid_note = note,
+    rdid_outcome_regression_covariates = outcome_regression_covariates,
+    rdid_propensity_score_covariates = propensity_score_covariates,
     rdid_target_note
   ) %>%
   left_join(drdid_atc_aligned, by = c("contrast", "followup_timepoint", "outcome")) %>%
@@ -623,6 +690,15 @@ rdid_drdid_benchmark <- rdid_xgboost_reference %>%
       "with sign flip, so both estimators target original intervention minus",
       "comparison among original comparison-arm households. DRDID native ATT",
       "rows are available in table_DRDID_all_results.csv. No ATE is estimated."
+    ),
+    pm25_covariate_comparison_note = if_else(
+      str_detect(outcome_source, "^pm25_"),
+      paste(
+        "Both estimators use the same canonical fixed-factor PM2.5 outcome",
+        "and the same baseline household covariates. The default PM2.5 outcome",
+        "is indoor minus 0.25 times concurrent outdoor PM2.5."
+      ),
+      NA_character_
     )
   ) %>%
   arrange(contrast, domain, outcome_type, outcome_label)
@@ -670,6 +746,22 @@ safe_write_lines(
       "reviewed rDiD/XGBoost results."
     ),
     "",
+    "## Covariate matrix",
+    "",
+    paste(
+      "DRDID::drdid_panel() does not add an intercept to a supplied covariate",
+      "matrix. The benchmark explicitly prepends a constant column before",
+      "the baseline household covariates hh_size and hh_per_structure."
+    ),
+    "",
+    "## PM2.5 default outcome",
+    "",
+    paste(
+      "The default PM2.5 outcome is calculated in the descriptive script as",
+      "indoor PM2.5 minus 0.25 times concurrent outdoor PM2.5. Neither this",
+      "benchmark nor the rDiD script re-estimates an infiltration factor."
+    ),
+    "",
     "## ATT and ATE status",
     "",
     paste(
@@ -679,7 +771,11 @@ safe_write_lines(
     ),
     "",
     paste0("Reviewed rDiD input table: ", rdid_results_file),
-    paste0("Ambient-adjusted PM2.5 input table: ", pm_adjusted_file)
+    if (skip_pm25) {
+      "PM2.5 benchmark status: skipped because RF105_SKIP_PM25 is enabled."
+    } else {
+      paste0("Ambient-adjusted PM2.5 input table: ", pm_adjusted_file)
+    }
   ),
   estimand_note_file
 )

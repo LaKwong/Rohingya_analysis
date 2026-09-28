@@ -94,6 +94,7 @@ reviewed_scripts <- c(
   "6_participant_flow_20260812.R",
   "1_geocene_stove_use_20260805_2213.R",
   "3_descriptive_outcomes_20260805_2213.R",
+  "3.1_fuel_time_burden_estimate_scaled_20260928.R",
   "4_rdid_xgboost_20260805_2213.R",
   "5_drDiD_comparison_20260805_2213.R"
 )

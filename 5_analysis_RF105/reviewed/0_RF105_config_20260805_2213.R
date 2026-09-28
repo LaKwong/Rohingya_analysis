@@ -126,6 +126,16 @@ file_geocene_events <- file.path(dir_clean_final, "geocene", "100_80_5_20", "eve
 file_geocene_household_days <- file.path(dir_clean_final, "geocene", "100_80_5_20", "household_days.rds")
 timepoint_levels <- c("baseline", "midline", "endline")
 arm_levels <- c("comparison", "intervention")
+rf105_arm_colors <- c(
+  comparison = "#1a80bb",
+  intervention = "#ea801c"
+)
+rf105_complementary_colors <- c(
+  green = "#009E73",
+  pink = "#CC79A7",
+  yellow = "#F0E442",
+  grey = "#6F6F6F"
+)
 
 as_ordered_timepoint <- function(x, extra_levels = character()) {
   x_clean <- str_squish(str_to_lower(as.character(x)))

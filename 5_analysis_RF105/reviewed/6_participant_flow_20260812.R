@@ -63,7 +63,7 @@ if (is.na(config_file)) {
 
 source(config_file)
 
-participant_arm_colors <- c(comparison = "#430154", intervention = "#138B87")
+participant_arm_colors <- rf105_arm_colors
 
 pct_label <- function(numerator, denominator, digits = 1) {
   ifelse(

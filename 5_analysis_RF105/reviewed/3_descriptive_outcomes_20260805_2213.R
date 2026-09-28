@@ -431,8 +431,8 @@ write_plot_if_data <- function(plot_data, plot, filename, width = 10, height = 6
   }
 }
 
-arm_colors <- c(comparison = "#3B6EA8", intervention = "#C94C4C", all_arms = "#6F6F6F")
-change_colors <- c(more = "#2F8F5B", same = "#9AA0A6", less = "#B6463A")
+arm_colors <- c(rf105_arm_colors, all_arms = rf105_complementary_colors[["grey"]])
+change_colors <- c(more = "#009E73", same = "#6F6F6F", less = "#D55E00")
 
 survey_raw <- readr::read_rds(file_survey_refugee_household) %>%
   add_rf105_aliases()
@@ -470,6 +470,12 @@ generic_choice_form_files <- tibble(
   ),
   form_priority = c(1L, 2L, 3L)
 )
+generic_skip_private_questionnaires <- tolower(str_squish(
+  Sys.getenv("RF105_SKIP_PRIVATE_QUESTIONNAIRES", unset = "false")
+)) %in% c("1", "true", "yes")
+if (generic_skip_private_questionnaires) {
+  generic_choice_form_files$form_file <- NA_character_
+}
 
 generic_clean_choice_code <- function(x) {
   out <- str_squish(as.character(x))
@@ -479,21 +485,31 @@ generic_clean_choice_code <- function(x) {
           as.character(as.integer(out_num)), out)
 }
 
+generic_empty_choice_labels <- function() {
+  tibble(
+    source_variable = character(),
+    response_value = character(),
+    response_label = character(),
+    form_file = character(),
+    form_priority = integer()
+  )
+}
+
 generic_read_choice_labels <- function(form_file, form_priority) {
-  if (!file.exists(form_file)) {
-    return(tibble())
+  if (is.na(form_file) || !file.exists(form_file)) {
+    return(generic_empty_choice_labels())
   }
 
   form_sheets <- readxl::excel_sheets(form_file)
   if (!"choices" %in% form_sheets) {
-    return(tibble())
+    return(generic_empty_choice_labels())
   }
 
   survey_sheets <- intersect(
     c("survey", "survey_single_lang", "survey_combined"), form_sheets
   )
   if (length(survey_sheets) == 0) {
-    return(tibble())
+    return(generic_empty_choice_labels())
   }
 
   survey_choice_lists <- purrr::map_dfr(survey_sheets, function(sheet_name) {
@@ -522,7 +538,7 @@ generic_read_choice_labels <- function(form_file, form_priority) {
     c("label_english_en", "label_english", "label"), names(choice_sheet)
   )
   if (length(label_cols) == 0) {
-    return(tibble())
+    return(generic_empty_choice_labels())
   }
   label_col <- label_cols[[1]]
 
@@ -1107,7 +1123,7 @@ generic_write_plot_if_data <- function(plot_data, plot, filename, width = 10, he
   save_reviewed_plot(plot, filename, width = width, height = height)
 }
 
-arm_colors_requested <- c(comparison = "#3B6EA8", intervention = "#C94C4C")
+arm_colors_requested <- rf105_arm_colors
 
 generic_save_binary_figures <- function(binary_summary) {
   groups <- binary_summary %>%
@@ -1971,38 +1987,6 @@ write_rf105b_characteristics_workbook <- function(survey_dedup,
       rename(!!column_name := value)
   }
 
-  baseline_phone_lookup <- tibble(
-    fcn_id = character(),
-    baseline_mobile_phone = character(),
-    baseline_smartphone = character()
-  )
-  raw_baseline_file <- file.path(
-    project_root,
-    "2_data_raw",
-    "survey_baseline",
-    "RohingyaFuelMaster_Corrected_20200419_refugee.csv"
-  )
-  if (file.exists(raw_baseline_file)) {
-    baseline_phone_lookup <- suppressWarnings(
-      readr::read_csv(raw_baseline_file, show_col_types = FALSE)
-    ) %>%
-      ensure_workbook_cols(c("fcn_id", "mobile_phone", "smartphone")) %>%
-      transmute(
-        fcn_id = as.character(fcn_id),
-        baseline_mobile_phone = as.character(mobile_phone),
-        baseline_smartphone = as.character(smartphone),
-        raw_row = row_number()
-      ) %>%
-      filter(!is.na(fcn_id), str_squish(fcn_id) != "") %>%
-      arrange(fcn_id, raw_row) %>%
-      group_by(fcn_id) %>%
-      summarise(
-        baseline_mobile_phone = rf105b_first_nonmissing_chr(baseline_mobile_phone),
-        baseline_smartphone = rf105b_first_nonmissing_chr(baseline_smartphone),
-        .groups = "drop"
-      )
-  }
-
   survey_for_workbook <- survey_dedup %>%
     ensure_workbook_cols(c(
       "fcn_id", "timepoint", "study_arm_overall", "collection_date",
@@ -2012,26 +1996,14 @@ write_rf105b_characteristics_workbook <- function(survey_dedup,
       "total_expenditures_180", "clothing", "shelter", "celebrations",
       "medical", "education", "other_expenditures", "debt", "debt_total",
       "electricity", "mattress", "chair_bench", "portable_lamp",
-      "solar_lamp", "mobile_phone", "smartphone", "electric_fan",
+      "solar_lamp", "mobile_phone", "smartphone",
+      "mobile_phone_yn", "smartphone_yn", "electric_fan",
       "shovel", "sickle", "weaving_tool", "chicken_duck_pigeon"
     )) %>%
     mutate(fcn_id = as.character(fcn_id)) %>%
-    left_join(baseline_phone_lookup, by = "fcn_id") %>%
     mutate(
       timepoint = as_ordered_timepoint(timepoint),
       study_arm_overall = as.character(study_arm_overall),
-      mobile_phone = case_when(
-        !is.na(mobile_phone) & str_squish(as.character(mobile_phone)) != "" ~
-          as.character(mobile_phone),
-        !is.na(baseline_mobile_phone) ~ baseline_mobile_phone,
-        TRUE ~ NA_character_
-      ),
-      smartphone = case_when(
-        !is.na(smartphone) & str_squish(as.character(smartphone)) != "" ~
-          as.character(smartphone),
-        !is.na(baseline_smartphone) ~ baseline_smartphone,
-        TRUE ~ NA_character_
-      ),
       exchange_rate = exchange_bdt_per_usd[as.character(timepoint)],
       electricity = case_when(
         as.character(electricity) == "2" ~ 1L,
@@ -2071,8 +2043,14 @@ write_rf105b_characteristics_workbook <- function(survey_dedup,
       chair_bench_yn = rf105b_make_binary(chair_bench),
       portable_lamp_yn = rf105b_make_binary(portable_lamp),
       solar_lamp_yn = rf105b_make_binary(solar_lamp),
-      mobile_phone_yn = rf105b_make_binary(mobile_phone),
-      smartphone_yn = rf105b_make_binary(smartphone),
+      mobile_phone_yn = coalesce(
+        rf105b_make_binary(mobile_phone_yn),
+        rf105b_make_binary(mobile_phone)
+      ),
+      smartphone_yn = coalesce(
+        rf105b_make_binary(smartphone_yn),
+        rf105b_make_binary(smartphone)
+      ),
       electric_fan_yn = rf105b_make_binary(electric_fan),
       shovel_yn = rf105b_make_binary(shovel),
       sickle_yn = rf105b_make_binary(sickle),
@@ -2099,7 +2077,7 @@ write_rf105b_characteristics_workbook <- function(survey_dedup,
       midline = coalesce(midline, FALSE),
       endline = coalesce(endline, FALSE),
       group_g1 = baseline,
-      group_g1a = baseline & !midline & !endline,
+      group_g1a = baseline & !midline,
       group_g2 = baseline & midline,
       group_g2a = baseline & midline & !endline,
       group_g3a = baseline & !endline,
@@ -2133,13 +2111,13 @@ write_rf105b_characteristics_workbook <- function(survey_dedup,
   group_defs <- tibble::tribble(
     ~arm, ~group, ~flag_var, ~column_label,
     "comparison", "comparison_g1", "group_g1", "Comparison Group 1: all baseline households",
-    "comparison", "comparison_g1a", "group_g1a", "Comparison Group 1A: lost after baseline",
+    "comparison", "comparison_g1a", "group_g1a", "Comparison Group 1A: not observed at midline",
     "comparison", "comparison_g2", "group_g2", "Comparison Group 2: baseline and midline",
     "comparison", "comparison_g2a", "group_g2a", "Comparison Group 2A: lost after midline",
     "comparison", "comparison_g3a", "group_g3a", "Comparison Group 3A: lost before endline",
     "comparison", "comparison_g4", "group_g4", "Comparison Group 4: baseline, midline, and endline",
     "intervention", "intervention_g1", "group_g1", "Intervention Group 1: all baseline households",
-    "intervention", "intervention_g1a", "group_g1a", "Intervention Group 1A: lost after baseline",
+    "intervention", "intervention_g1a", "group_g1a", "Intervention Group 1A: not observed at midline",
     "intervention", "intervention_g2", "group_g2", "Intervention Group 2: baseline and midline",
     "intervention", "intervention_g2a", "group_g2a", "Intervention Group 2A: lost after midline",
     "intervention", "intervention_g3a", "group_g3a", "Intervention Group 3A: lost before endline",
@@ -2228,8 +2206,9 @@ write_rf105b_characteristics_workbook <- function(survey_dedup,
   note <- paste(
     "Values are n (%) for binary variables and mean (SD) for continuous variables.",
     "All columns summarize baseline household characteristics. Midline and endline survey records are used only to identify, by fcn_id, which baseline households participated at each timepoint and therefore which baseline households belong in each column.",
+    "Group 1A includes every baseline household not observed at midline, including three households that were observed again at endline (1 comparison and 2 intervention). Thus Group 1 equals Group 2 plus Group 1A within each study arm.",
     "Monthly income uses total_income_30; monthly expenditure uses total_expenditures_30 + total_expenditures_180 / 6, with spent_total_month and the six-month expenditure component sum used where the aggregate fields are absent in baseline clean_final.",
-    "Mobile phone and smartphone ownership are filled from the raw baseline survey by fcn_id when unavailable in the clean baseline dataset.",
+    "Mobile phone and smartphone ownership use binary indicators derived in the cleaned household dataset before public pseudonymization.",
     "Participation-pattern columns use baseline household characteristics and the same group definitions as the prior RF105B Table 1 workbook.",
     "P-values compare the named column pairs using Welch t-tests for continuous variables and chi-square or Fisher exact tests for binary variables."
   )
@@ -4584,8 +4563,8 @@ if (nrow(plot_data) != expected_plot_rows ||
 }
 
 arm_colors <- c(
-  "Comparison group" = "#3B6EA8",
-  "Intervention group" = "#C94C4C"
+  "Comparison group" = rf105_arm_colors[["comparison"]],
+  "Intervention group" = rf105_arm_colors[["intervention"]]
 )
 arm_shapes <- c("Comparison group" = 16, "Intervention group" = 17)
 arm_linetypes <- c("Comparison group" = "solid", "Intervention group" = "22")
@@ -5192,47 +5171,10 @@ write_plot_if_data(
 # 7 and 18. Asthma, severe asthma, and physical health outcomes
 ################################################################################
 
-add_health_descriptive_vars <- function(df) {
-  health_vars <- c(
-    "target_child_eye_red", "target_child_eye_itch", "target_child_cough",
-    "target_child_resp_rate", "target_child_fever", "target_child_weight_loss",
-    "target_child_lethargy", "target_child_clinic_resp", "target_child_wheezing",
-    "target_child_disturbed_sleep", "target_child_distrubed_speech",
-    "respondent_cough", "respondent_wheezing", "respondent_disturbed_sleep",
-    "respondent_disturbed_speech", "respondent_eye_red", "respondent_eye_itch",
-    "respondent_eye_sore", "respondent_headache", "respondent_backache",
-    "resp_rate_reported_respondent", "weight_loss_reported_respondent"
-  )
-
-  for (var in intersect(health_vars, names(df))) {
-    yn_name <- paste0(var, "_yn")
-    if (!yn_name %in% names(df)) {
-      df[[yn_name]] <- make_yn(df[[var]])
-    }
-  }
-
-  if ("target_child_distrubed_speech_yn" %in% names(df) &&
-      "target_child_disturbed_speech_yn" %notin% names(df)) {
-    df$target_child_disturbed_speech_yn <- df$target_child_distrubed_speech_yn
-  }
-
-  if ("target_child_wheezing_yn" %in% names(df)) {
-    df <- df %>%
-      mutate(
-        target_child_asthma = case_when(
-          target_child_wheezing_yn == 1 ~ 1L,
-          target_child_wheezing_yn == 0 ~ 0L,
-          TRUE ~ NA_integer_
-        )
-      )
-  }
-
-  df <- derive_child_severe_asthma_vars(df)
-
-  df
-}
-
-survey_health <- add_health_descriptive_vars(survey)
+source(
+  file.path(script_dir, "physical_health_figures.R"),
+  local = FALSE
+)
 
 severe_asthma_descriptive_coding_audit <- survey_health %>%
   add_all_arms_rows() %>%
@@ -5299,149 +5241,6 @@ write_plot_if_data(
   height = 5
 )
 
-physical_health_labels <- tibble(
-  source_variable = c(
-    "target_child_cough_yn",
-    "target_child_resp_rate_yn",
-    "target_child_wheezing_yn",
-    "target_child_disturbed_sleep_yn",
-    "target_child_distrubed_speech_yn",
-    "target_child_eye_red_yn",
-    "target_child_eye_itch_yn",
-    "target_child_lethargy_yn",
-    "target_child_weight_loss_yn",
-    "target_child_fever_yn",
-    "target_child_clinic_resp_yn",
-    "lpg_child_burn",
-    "respondent_cough_yn",
-    "resp_rate_reported_respondent_yn",
-    "respondent_wheezing_yn",
-    "respondent_disturbed_sleep_yn",
-    "respondent_disturbed_speech_yn",
-    "respondent_eye_red_yn",
-    "respondent_eye_itch_yn",
-    "respondent_eye_sore_yn",
-    "weight_loss_reported_respondent_yn",
-    "respondent_headache_yn",
-    "respondent_backache_yn"
-  ),
-  outcome_name = source_variable,
-  outcome_label = c(
-    "Cough",
-    "Increased respiratory rate today",
-    "Current wheeze",
-    "Disturbed sleep during wheeze",
-    "Disturbed speech during wheeze",
-    "Red eyes",
-    "Itchy eyes",
-    "Lethargy",
-    "Unexplained weight loss in 3 mo.",
-    "Fever",
-    "Clinic visit for respiratory complaint",
-    "Burned by LPG",
-    "Cough",
-    "Increased respiratory rate today",
-    "Current wheeze",
-    "Disturbed sleep during wheeze",
-    "Disturbed speech during wheeze",
-    "Red eyes",
-    "Itchy eyes",
-    "Sore eyes",
-    "Unexplained weight loss in 3 mo.",
-    "Headache",
-    "Backache"
-  ),
-  respondent_group = c(rep("Child", 12), rep("Caregiver", 11)),
-  display_order = seq_len(23)
-) %>%
-  filter(source_variable %in% names(survey_health))
-
-physical_health_summary <- summarise_binary_vars(
-  survey_health,
-  physical_health_labels %>% select(source_variable, outcome_name, outcome_label),
-  "physical_health_outcomes"
-) %>%
-  left_join(
-    physical_health_labels %>% select(source_variable, respondent_group, display_order),
-    by = "source_variable"
-  ) %>%
-  arrange(display_order, timepoint, study_arm_overall)
-write_reviewed_csv(
-  physical_health_summary,
-  "table_descriptive_physical_health_symptoms.csv"
-)
-
-physical_health_figure_exclusions <- c(
-  "lpg_child_burn",
-  "resp_rate_reported_respondent_yn",
-  "weight_loss_reported_respondent_yn"
-)
-physical_health_figure_labels <- physical_health_labels %>%
-  filter(source_variable %notin% physical_health_figure_exclusions)
-
-physical_health_plot_data <- physical_health_summary %>%
-  filter(
-    n_nonmissing > 0,
-    !is.na(percent),
-    study_arm_overall %in% arm_levels,
-    source_variable %notin% physical_health_figure_exclusions
-  ) %>%
-  mutate(
-    timepoint = factor(as.character(timepoint), levels = timepoint_levels),
-    study_arm_overall = factor(
-      as.character(study_arm_overall),
-      levels = arm_levels
-    ),
-    facet_label = factor(
-      str_wrap(paste(respondent_group, outcome_label, sep = ": "), width = 24),
-      levels = str_wrap(
-        paste(
-          physical_health_figure_labels$respondent_group,
-          physical_health_figure_labels$outcome_label,
-          sep = ": "
-        ),
-        width = 24
-      )
-    )
-  )
-
-fig_physical_health <- ggplot(
-  physical_health_plot_data,
-  aes(
-    x = timepoint,
-    y = percent,
-    color = study_arm_overall,
-    group = study_arm_overall
-  )
-) +
-  geom_line(linewidth = 0.7, na.rm = TRUE) +
-  geom_point(size = 1.8, na.rm = TRUE) +
-  geom_errorbar(
-    aes(ymin = ci_lower, ymax = ci_upper),
-    width = 0.08,
-    linewidth = 0.4,
-    na.rm = TRUE
-  ) +
-  facet_wrap(
-    ~ facet_label,
-    ncol = sum(physical_health_figure_labels$respondent_group == "Child")
-  ) +
-  scale_color_manual(values = arm_colors[arm_levels], drop = FALSE) +
-  scale_y_continuous(labels = function(x) paste0(round(x), "%"), limits = c(0, 100)) +
-  theme_classic() +
-  theme(
-    axis.text.x = element_text(angle = 35, hjust = 1),
-    strip.text = element_text(size = 8)
-  ) +
-  labs(x = "Timepoint", y = "Percent reporting outcome", color = "Study arm")
-write_plot_if_data(
-  physical_health_plot_data,
-  fig_physical_health,
-  "fig_descriptive_physical_health_symptoms.png",
-  width = 16,
-  height = 8
-)
-
 ################################################################################
 # Mental health item scores and CES-D score
 ################################################################################
@@ -5489,7 +5288,7 @@ clean_mental_health_source_value <- function(x) {
 mental_health_frequency_score <- function(x, var) {
   out <- clean_mental_health_source_value(x)
   if (var %in% mental_health_positive_affect_vars) {
-    out <- 4 - out
+    return(3 - pmin(out, 3))
   }
   pmin(out, 3)
 }
@@ -5497,10 +5296,21 @@ mental_health_frequency_score <- function(x, var) {
 mental_health_cesd_item_score <- function(x, var) {
   out <- clean_mental_health_source_value(x)
   if (var %in% mental_health_positive_affect_vars) {
-    return(pmax(out - 1, 0))
+    return(3 - pmin(out, 3))
   }
   pmin(out, 3)
 }
+
+stopifnot(
+  identical(
+    mental_health_cesd_item_score(0:4, "happy"),
+    c(3, 2, 1, 0, 0)
+  ),
+  identical(
+    mental_health_cesd_item_score(0:4, "depressed"),
+    c(0, 1, 2, 3, 3)
+  )
+)
 
 add_mental_health_descriptive_vars <- function(df) {
   cesd_present_vars <- mental_health_cesd_vars[mental_health_cesd_vars %in% names(df)]
@@ -6571,7 +6381,7 @@ coverage <- tribble(
   15, "Money spent on items other than firewood and food", "table_descriptive_household_expenditures.csv", "fig_descriptive_household_expenditures.png", "complete", "Uses sum of spent_hh_items, spent_hygiene, spent_tobacco_pan, spent_transport, and other_expenditures when available.",
   16, "Dietary diversity", "table_descriptive_dietary_diversity_scores.csv", "fig_descriptive_dietary_diversity_scores.png", "complete", "Uses clean_final baseline-compatible HDDS variables derived from weekly food-frequency items, with the draft past-24-hour mapping retained as a fallback.",
   17, "Harassment", "table_descriptive_harassment_household_categories.csv; table_descriptive_harassment_fuel_collectors.csv; table_descriptive_harassment_summary.csv", "fig_descriptive_harassment_household_categories.png; fig_descriptive_harassment_fuel_collectors.png", "complete_descriptive_only", "Household-level category summaries are shown by arm/timepoint. Detailed fuel/person harassment is midline-only in clean_final and uses an arm-stratified midline person-collector denominator reconstructed from clean_final fuel-procurement variables; rDiD estimability is audited separately.",
-  18, "Physical health outcomes with child outcomes on top and caregiver outcomes on bottom", "table_descriptive_physical_health_symptoms.csv", "fig_descriptive_physical_health_symptoms.png", "complete", "The full table contains 12 child and 11 caregiver outcomes. The figure displays the 11 requested child outcomes in the first row and 9 requested caregiver outcomes in the second row; it excludes child burned by LPG, caregiver increased respiratory rate, caregiver unexplained weight loss, and the pooled all-arms series.",
+  18, "Physical health outcomes with child outcomes on top and caregiver outcomes on bottom", "table_descriptive_physical_health_symptoms.csv", "fig_descriptive_physical_health_symptoms.png", "complete", "The full table contains 12 child and 11 caregiver outcomes. The figure displays 10 child outcomes in the first row and 10 caregiver outcomes in the second row; it excludes child burned by LPG, child unexplained weight loss, caregiver unexplained weight loss, and the pooled all-arms series. Caregiver respiratory rate harmonizes the baseline/midline respondant spelling with the endline respondent spelling. Wheeze follow-up panels use all-household indicators that code structural skips among participants reporting no current wheeze as no while preserving true missing responses.",
   19, "Mental health item scores and CES-D", "table_descriptive_mental_health_outcomes.csv", "fig_descriptive_mental_health_outcomes.png", "complete", "Summarizes the requested 21 mental-health items on the standard 0-3 response-frequency scale plus aggregate CES-D by arm/timepoint. The two highest observed frequency categories (5-6 days/week and every day) are combined as 3 = most or all of the time. The figure has three rows with a common 0-3 y-axis and excludes the pooled all-arms series. CES-D is the complete-case sum of 20 standard 0-3 item scores, reverse-scores the four positive-affect items, and excludes suicidal_thoughts_30."
 )
 write_reviewed_csv(
@@ -6911,7 +6721,9 @@ write_reviewed_csv(
 # Consolidated PM2.5 descriptive and canonical analysis section
 ################################################################################
 
-local({
+if (tolower(trimws(Sys.getenv("RF105_SKIP_PM25", unset = "false"))) %in% c("1", "true", "yes", "y")) {
+  message("Skipping consolidated PM2.5 analysis because RF105_SKIP_PM25 is enabled.")
+} else local({
 timepoint_levels <- c("baseline", "midline", "endline")
 arm_levels <- c("comparison", "intervention")
 
@@ -6921,17 +6733,34 @@ as_ordered_timepoint <- function(x, extra_levels = character()) {
 }
 
 primary_model_label <- "retired_model_not_run_in_descriptive_script"
-default_material_infiltration_factor <- 0.75
-sensitivity_infiltration_factors <- c(0, 0.25, 0.50, 1.00)
+default_material_infiltration_factor <- 0.25
+sensitivity_infiltration_factors <- c(0, 0.50, 0.75, 1.00)
 valid_monitoring_coverage_threshold <- 0.75
+valid_ambient_hour_coverage_threshold <- 0.75
+valid_ambient_period_coverage_threshold <- 0.75
 monitoring_period_hours <- 24
 monitoring_period_count <- 2
 monitoring_total_hours <- monitoring_period_hours * monitoring_period_count
 expected_monitoring_interval_seconds <- 60
 long_monitoring_interval_threshold_seconds <- expected_monitoring_interval_seconds
+infiltration_peak_exclusion_quantile <- 0.75
+infiltration_prior_equivalent_hours <- 24
+infiltration_min_candidate_hours <- 12
+hapin_pseudo_log_sigma <- 10
 hapin_hour_time_zone <- "Asia/Dhaka"
 hapin_pm25_reference_lines <- c(15, 25, 35, 37.5, 50, 75)
 hapin_pm25_exceedance_thresholds <- c(0, 15, 25, 35, 37.5, 50, 75, 150, 400, 1000)
+pm25_hour_annual_reference_label <- paste(
+  "35 ug/m3: WHO annual interim target 1",
+  "and Bangladesh annual exposure limit",
+  sep = "\n"
+)
+pm25_hour_daily_reference_label <-
+  "65 ug/m3: Bangladesh 24-hour exposure limit"
+pm25_hour_reference_breaks <- c(
+  pm25_hour_annual_reference_label,
+  pm25_hour_daily_reference_label
+)
 
 input_indoor_path <- file_pm25_indoor
 input_indoor_anomaly_retained_path <- NA_character_
@@ -7276,9 +7105,51 @@ monitoring_window_lookup <- monitoring_window_index %>%
     deployment_start_datetime = start_datetime
   )
 
-indoor_monitoring_timestamps <- indoor_monitoring_valid %>%
+indoor_timestamp_deduplicated <- indoor_monitoring_valid %>%
   inner_join(monitoring_window_lookup, by = monitoring_window_keys) %>%
-  distinct(monitoring_coverage_window_id, dateTime, .keep_all = TRUE) %>%
+  group_by(
+    across(all_of(monitoring_window_keys)),
+    monitoring_coverage_window_id,
+    deployment_start_datetime,
+    dateTime
+  ) %>%
+  summarise(
+    n_source_rows_timestamp = n(),
+    n_distinct_pm25_timestamp = n_distinct(pm25_ug_m3),
+    min_pm25_timestamp = min(pm25_ug_m3, na.rm = TRUE),
+    max_pm25_timestamp = max(pm25_ug_m3, na.rm = TRUE),
+    pm25_ug_m3_deduplicated = mean(pm25_ug_m3, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  rename(pm25_ug_m3 = pm25_ug_m3_deduplicated)
+
+indoor_timestamp_deduplication_qa <- tibble(
+  n_source_rows = nrow(indoor_monitoring_valid),
+  n_unique_window_timestamps = nrow(indoor_timestamp_deduplicated),
+  n_duplicate_rows_removed =
+    nrow(indoor_monitoring_valid) - nrow(indoor_timestamp_deduplicated),
+  n_timestamps_represented_by_multiple_rows = sum(
+    indoor_timestamp_deduplicated$n_source_rows_timestamp > 1,
+    na.rm = TRUE
+  ),
+  n_timestamps_with_conflicting_pm25 = sum(
+    indoor_timestamp_deduplicated$n_distinct_pm25_timestamp > 1,
+    na.rm = TRUE
+  ),
+  max_within_timestamp_pm25_range = max(
+    indoor_timestamp_deduplicated$max_pm25_timestamp -
+      indoor_timestamp_deduplicated$min_pm25_timestamp,
+    na.rm = TRUE
+  ),
+  duplicate_resolution = "mean PM2.5 within monitoring-window timestamp"
+)
+readr::write_csv(
+  indoor_timestamp_deduplication_qa,
+  file.path(dir_tables_qa, "table_qa_pm25_indoor_timestamp_deduplication.csv"),
+  na = ""
+)
+
+indoor_monitoring_timestamps <- indoor_timestamp_deduplicated %>%
   arrange(monitoring_coverage_window_id, dateTime) %>%
   group_by(monitoring_coverage_window_id) %>%
   mutate(
@@ -7323,6 +7194,22 @@ monitoring_window_interval_diagnostics <- indoor_monitoring_timestamps %>%
 
 monitoring_window_index <- monitoring_window_index %>%
   left_join(monitoring_window_interval_diagnostics, by = "monitoring_coverage_window_id")
+
+indoor_monitoring_timestamps <- indoor_monitoring_timestamps %>%
+  left_join(
+    monitoring_window_interval_diagnostics %>%
+      select(monitoring_coverage_window_id, usual_interval_seconds),
+    by = "monitoring_coverage_window_id"
+  ) %>%
+  mutate(
+    represented_seconds = if_else(
+      !is.na(positive_interval_seconds) &
+        is.finite(positive_interval_seconds) &
+        positive_interval_seconds > 0,
+      pmin(positive_interval_seconds, usual_interval_seconds),
+      usual_interval_seconds
+    )
+  )
 
 long_interval_within_window_details <- indoor_monitoring_timestamps %>%
   filter(
@@ -7973,6 +7860,93 @@ ambient_clean <- ambient %>%
     ambient_hour = lubridate::floor_date(dateTime, unit = "hour")
   )
 
+ambient_site_for_household <- function(hh_id) {
+  hh_id_upper <- stringr::str_to_upper(stringr::str_squish(as.character(hh_id)))
+  dplyr::case_when(
+    stringr::str_detect(hh_id_upper, "^4") ~ "4EPP11",
+    stringr::str_detect(hh_id_upper, "^8") ~ "8WI18",
+    stringr::str_detect(hh_id_upper, "^(9|10)") ~ "10GG9",
+    TRUE ~ NA_character_
+  )
+}
+
+# Ambient records can be repeated in overlapping source files. Collapse exact
+# monitor-timestamp duplicates before creating monitor-hour and site-hour means
+# so neither duplicate files nor denser monitor sampling receive extra weight.
+ambient_timestamp_deduplicated <- ambient_clean %>%
+  group_by(ambient_site_id, PM_monitor, dateTime, ambient_hour) %>%
+  summarise(
+    pm25_ug_m3 = mean(pm25_ug_m3, na.rm = TRUE),
+    n_source_rows_timestamp = n(),
+    n_source_files_timestamp = n_distinct(raw_source_file),
+    raw_source_files_timestamp = paste(sort(unique(na.omit(raw_source_file))), collapse = ";"),
+    .groups = "drop"
+  )
+
+ambient_monitor_hour <- ambient_timestamp_deduplicated %>%
+  group_by(ambient_site_id, PM_monitor, ambient_hour) %>%
+  summarise(
+    ambient_monitor_hour_mean_pm25 = mean(pm25_ug_m3, na.rm = TRUE),
+    n_unique_timestamps_hour = n_distinct(dateTime),
+    n_source_rows_hour = sum(n_source_rows_timestamp, na.rm = TRUE),
+    n_source_files_hour = n_distinct(unlist(strsplit(raw_source_files_timestamp, ";", fixed = TRUE))),
+    raw_source_files_hour = paste(
+      sort(unique(unlist(strsplit(raw_source_files_timestamp, ";", fixed = TRUE)))),
+      collapse = ";"
+    ),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    ambient_monitor_hour_coverage_prop = pmin(
+      1,
+      n_unique_timestamps_hour * expected_monitoring_interval_seconds / 3600
+    ),
+    has_valid_ambient_monitor_hour =
+      ambient_monitor_hour_coverage_prop >= valid_ambient_hour_coverage_threshold
+  )
+
+ambient_site_hourly <- ambient_monitor_hour %>%
+  filter(has_valid_ambient_monitor_hour) %>%
+  group_by(ambient_site_id, ambient_hour) %>%
+  summarise(
+    ambient_mean_pm25_hour = mean(ambient_monitor_hour_mean_pm25, na.rm = TRUE),
+    n_ambient_monitors_hour = n_distinct(PM_monitor),
+    n_ambient_monitor_hours = n(),
+    n_ambient_unique_timestamps_hour = sum(n_unique_timestamps_hour, na.rm = TRUE),
+    n_ambient_source_rows_hour = sum(n_source_rows_hour, na.rm = TRUE),
+    ambient_monitor_ids_hour = paste(sort(unique(na.omit(PM_monitor))), collapse = ";"),
+    ambient_monitor_files_hour = paste(
+      sort(unique(unlist(strsplit(raw_source_files_hour, ";", fixed = TRUE)))),
+      collapse = ";"
+    ),
+    .groups = "drop"
+  )
+
+ambient_deduplication_qa <- tibble(
+  n_source_rows = nrow(ambient_clean),
+  n_unique_site_monitor_timestamps = nrow(ambient_timestamp_deduplicated),
+  n_duplicate_rows_removed = nrow(ambient_clean) - nrow(ambient_timestamp_deduplicated),
+  n_timestamps_represented_by_multiple_files = sum(
+    ambient_timestamp_deduplicated$n_source_files_timestamp > 1,
+    na.rm = TRUE
+  ),
+  n_monitor_hours = nrow(ambient_monitor_hour),
+  n_valid_monitor_hours_75pct = sum(ambient_monitor_hour$has_valid_ambient_monitor_hour),
+  n_site_hours = nrow(ambient_site_hourly),
+  monitor_hour_coverage_threshold_percent = 100 * valid_ambient_hour_coverage_threshold
+)
+
+readr::write_csv(
+  ambient_deduplication_qa,
+  file.path(dir_tables_qa, "table_qa_pm25_ambient_deduplication.csv"),
+  na = ""
+)
+readr::write_csv(
+  ambient_monitor_hour,
+  file.path(restricted_table_dir, "table_descriptive_pm25_ambient_monitor_hour_internal.csv"),
+  na = ""
+)
+
 message("Creating HAPIN-style PM2.5 exposure graphics and tables")
 
 hapin_metric_metadata <- data.frame(
@@ -7984,12 +7958,13 @@ hapin_metric_metadata <- data.frame(
       default_material_infiltration_factor
     )
   ),
-  metric_scale = c("log_positive", "linear_zero"),
+  metric_scale = c("log_positive", "symmetric_pseudo_log"),
   stringsAsFactors = FALSE
 )
 
 hapin_identifier_cols <- c(
   "hh_id", "fcn_id", "hh_id_note", "raw_source_file", "PM_monitor",
+  "matched_ambient_site_id", "ambient_site_id",
   "monitoring_coverage_window_id", "start_datetime", "end_datetime",
   "period_start_datetime", "period_end_datetime"
 )
@@ -8037,6 +8012,7 @@ hapin_period_index <- monitoring_period_coverage %>%
   mutate(
     timepoint = as_ordered_timepoint(timepoint),
     study_arm_overall = factor(study_arm_overall, levels = arm_levels),
+    matched_ambient_site_id = ambient_site_for_household(hh_id),
     period_label = factor(
       paste0("Day ", period_number),
       levels = paste0("Day ", seq_len(monitoring_period_count))
@@ -8044,7 +8020,10 @@ hapin_period_index <- monitoring_period_coverage %>%
   )
 
 hapin_period_pm_raw <- indoor_monitoring_timestamps %>%
-  select(monitoring_coverage_window_id, dateTime, pm25_ug_m3) %>%
+  select(
+    monitoring_coverage_window_id, dateTime, pm25_ug_m3,
+    represented_seconds
+  ) %>%
   inner_join(
     hapin_period_index %>%
       select(
@@ -8056,12 +8035,33 @@ hapin_period_pm_raw <- indoor_monitoring_timestamps %>%
     by = "monitoring_coverage_window_id",
     relationship = "many-to-many"
   ) %>%
-  filter(dateTime >= period_start_datetime, dateTime < period_end_datetime) %>%
+  mutate(
+    observation_start_numeric = as.numeric(dateTime),
+    observation_end_numeric = observation_start_numeric + represented_seconds,
+    period_start_numeric = as.numeric(period_start_datetime),
+    period_end_numeric = as.numeric(period_end_datetime),
+    represented_seconds_24h = pmax(
+      0,
+      pmin(observation_end_numeric, period_end_numeric) -
+        pmax(observation_start_numeric, period_start_numeric)
+    )
+  ) %>%
+  filter(represented_seconds_24h > 0) %>%
   group_by(monitoring_coverage_window_id, period_number) %>%
   summarise(
     n_pm_rows_24h = n(),
-    indoor_mean_pm25_24h = mean(pm25_ug_m3, na.rm = TRUE),
-    indoor_gmean_pm25_24h = geo_mean(pm25_ug_m3),
+    represented_monitoring_hours_24h = sum(represented_seconds_24h) / 3600,
+    indoor_mean_pm25_24h_unweighted = mean(pm25_ug_m3, na.rm = TRUE),
+    indoor_mean_pm25_24h = stats::weighted.mean(
+      pm25_ug_m3,
+      represented_seconds_24h,
+      na.rm = TRUE
+    ),
+    indoor_gmean_pm25_24h = exp(stats::weighted.mean(
+      log(pm25_ug_m3),
+      represented_seconds_24h,
+      na.rm = TRUE
+    )),
     indoor_median_pm25_24h = median(pm25_ug_m3, na.rm = TRUE),
     indoor_p10_pm25_24h = safe_quantile(pm25_ug_m3, 0.10),
     indoor_p25_pm25_24h = safe_quantile(pm25_ug_m3, 0.25),
@@ -8069,30 +8069,62 @@ hapin_period_pm_raw <- indoor_monitoring_timestamps %>%
     indoor_p90_pm25_24h = safe_quantile(pm25_ug_m3, 0.90),
     indoor_p95_pm25_24h = safe_quantile(pm25_ug_m3, 0.95),
     indoor_max_pm25_24h = max(pm25_ug_m3, na.rm = TRUE),
-    pct_minute_rows_gt_15 = mean(pm25_ug_m3 > 15, na.rm = TRUE) * 100,
-    pct_minute_rows_gt_35 = mean(pm25_ug_m3 > 35, na.rm = TRUE) * 100,
-    pct_minute_rows_gt_75 = mean(pm25_ug_m3 > 75, na.rm = TRUE) * 100,
-    pct_minute_rows_gt_150 = mean(pm25_ug_m3 > 150, na.rm = TRUE) * 100,
-    pct_minute_rows_gt_400 = mean(pm25_ug_m3 > 400, na.rm = TRUE) * 100,
-    pct_minute_rows_gt_1000 = mean(pm25_ug_m3 > 1000, na.rm = TRUE) * 100,
+    pct_minute_rows_gt_15 = stats::weighted.mean(pm25_ug_m3 > 15, represented_seconds_24h) * 100,
+    pct_minute_rows_gt_35 = stats::weighted.mean(pm25_ug_m3 > 35, represented_seconds_24h) * 100,
+    pct_minute_rows_gt_75 = stats::weighted.mean(pm25_ug_m3 > 75, represented_seconds_24h) * 100,
+    pct_minute_rows_gt_150 = stats::weighted.mean(pm25_ug_m3 > 150, represented_seconds_24h) * 100,
+    pct_minute_rows_gt_400 = stats::weighted.mean(pm25_ug_m3 > 400, represented_seconds_24h) * 100,
+    pct_minute_rows_gt_1000 = stats::weighted.mean(pm25_ug_m3 > 1000, represented_seconds_24h) * 100,
+    indoor_mean_weighting = "represented_monitoring_seconds",
     .groups = "drop"
   )
 
 hapin_summarize_period_ambient <- function(i) {
-  period_rows <- ambient_clean %>%
+  period_start_i <- hapin_period_index$period_start_datetime[[i]]
+  period_end_i <- hapin_period_index$period_end_datetime[[i]]
+  ambient_site_i <- hapin_period_index$matched_ambient_site_id[[i]]
+  period_rows <- ambient_site_hourly %>%
     filter(
-      dateTime >= hapin_period_index$period_start_datetime[[i]],
-      dateTime < hapin_period_index$period_end_datetime[[i]]
-    )
+      ambient_site_id == ambient_site_i,
+      ambient_hour < period_end_i,
+      ambient_hour + lubridate::hours(1) > period_start_i
+    ) %>%
+    mutate(
+      overlap_hours = pmax(
+        0,
+        as.numeric(
+          pmin(ambient_hour + lubridate::hours(1), period_end_i) -
+            pmax(ambient_hour, period_start_i),
+          units = "hours"
+        )
+      )
+    ) %>%
+    filter(overlap_hours > 0)
+
+  valid_ambient_hours <- sum(period_rows$overlap_hours, na.rm = TRUE)
+  ambient_coverage_prop <- pmin(1, valid_ambient_hours / monitoring_period_hours)
 
   data.frame(
     monitoring_coverage_window_id = hapin_period_index$monitoring_coverage_window_id[[i]],
     period_number = hapin_period_index$period_number[[i]],
-    n_ambient_rows_24h = nrow(period_rows),
+    n_ambient_rows_24h = if (nrow(period_rows) == 0) 0L else sum(period_rows$n_ambient_source_rows_hour, na.rm = TRUE),
+    n_ambient_unique_timestamps_24h = if (nrow(period_rows) == 0) 0L else sum(period_rows$n_ambient_unique_timestamps_hour, na.rm = TRUE),
+    n_ambient_monitor_hours_24h = if (nrow(period_rows) == 0) 0L else sum(period_rows$n_ambient_monitor_hours, na.rm = TRUE),
     n_ambient_hours_24h = if (nrow(period_rows) == 0) 0L else n_distinct(period_rows$ambient_hour),
-    ambient_mean_pm25_24h = if (nrow(period_rows) == 0) NA_real_ else mean(period_rows$pm25_ug_m3, na.rm = TRUE),
-    ambient_gmean_pm25_24h = if (nrow(period_rows) == 0) NA_real_ else geo_mean(period_rows$pm25_ug_m3),
-    ambient_median_pm25_24h = if (nrow(period_rows) == 0) NA_real_ else median(period_rows$pm25_ug_m3, na.rm = TRUE),
+    valid_ambient_hours_24h = valid_ambient_hours,
+    ambient_coverage_prop_24h = ambient_coverage_prop,
+    has_valid_ambient_75pct_coverage =
+      ambient_coverage_prop >= valid_ambient_period_coverage_threshold,
+    ambient_mean_pm25_24h = if (nrow(period_rows) == 0) NA_real_ else
+      stats::weighted.mean(period_rows$ambient_mean_pm25_hour, period_rows$overlap_hours),
+    ambient_gmean_pm25_24h = if (nrow(period_rows) == 0) NA_real_ else
+      exp(stats::weighted.mean(log(period_rows$ambient_mean_pm25_hour), period_rows$overlap_hours)),
+    ambient_median_pm25_24h = if (nrow(period_rows) == 0) NA_real_ else
+      median(period_rows$ambient_mean_pm25_hour, na.rm = TRUE),
+    ambient_monitor_files = if (nrow(period_rows) == 0) NA_character_ else
+      paste(sort(unique(unlist(strsplit(period_rows$ambient_monitor_files_hour, ";", fixed = TRUE)))), collapse = ";"),
+    ambient_monitor_ids = if (nrow(period_rows) == 0) NA_character_ else
+      paste(sort(unique(unlist(strsplit(period_rows$ambient_monitor_ids_hour, ";", fixed = TRUE)))), collapse = ";"),
     stringsAsFactors = FALSE
   )
 }
@@ -8106,15 +8138,49 @@ hapin_24h_period_wide <- hapin_period_index %>%
     n_pm_rows_24h = dplyr::coalesce(n_pm_rows_24h, 0L),
     n_ambient_rows_24h = dplyr::coalesce(n_ambient_rows_24h, 0L),
     n_ambient_hours_24h = dplyr::coalesce(n_ambient_hours_24h, 0L),
+    valid_ambient_hours_24h = dplyr::coalesce(valid_ambient_hours_24h, 0),
+    ambient_coverage_prop_24h = dplyr::coalesce(ambient_coverage_prop_24h, 0),
+    has_valid_ambient_75pct_coverage = dplyr::coalesce(has_valid_ambient_75pct_coverage, FALSE),
     ambient_adjusted_mean_pm25_24h = indoor_mean_pm25_24h -
       default_material_infiltration_factor * ambient_mean_pm25_24h,
     has_valid_raw_24h = has_valid_75pct_coverage &
       !is.na(indoor_mean_pm25_24h) & is.finite(indoor_mean_pm25_24h),
     has_valid_ambient_adjusted_24h = has_valid_75pct_coverage &
-      n_ambient_rows_24h > 0 &
+      has_valid_ambient_75pct_coverage &
       !is.na(ambient_adjusted_mean_pm25_24h) &
       is.finite(ambient_adjusted_mean_pm25_24h)
   )
+
+pm25_indoor_time_weighting_qa <- hapin_24h_period_wide %>%
+  filter(has_valid_raw_24h) %>%
+  mutate(
+    absolute_weighting_difference = abs(
+      indoor_mean_pm25_24h - indoor_mean_pm25_24h_unweighted
+    )
+  ) %>%
+  group_by(timepoint, study_arm_overall) %>%
+  summarise(
+    n_valid_24h_periods = n(),
+    n_periods_changed_by_weighting = sum(
+      absolute_weighting_difference > 1e-10,
+      na.rm = TRUE
+    ),
+    mean_absolute_weighting_difference_ug_m3 = mean(
+      absolute_weighting_difference,
+      na.rm = TRUE
+    ),
+    max_absolute_weighting_difference_ug_m3 = max(
+      absolute_weighting_difference,
+      na.rm = TRUE
+    ),
+    indoor_mean_weighting = "represented_monitoring_seconds",
+    .groups = "drop"
+  )
+readr::write_csv(
+  pm25_indoor_time_weighting_qa,
+  file.path(dir_tables_qa, "table_qa_pm25_indoor_time_weighting.csv"),
+  na = ""
+)
 
 hapin_24h_period_summary_internal <- bind_rows(
   hapin_24h_period_wide %>%
@@ -8146,6 +8212,9 @@ hapin_24h_period_summary_internal <- bind_rows(
       n_pm_rows_24h,
       n_ambient_rows_24h,
       n_ambient_hours_24h,
+      valid_ambient_hours_24h,
+      ambient_coverage_prop_24h,
+      has_valid_ambient_75pct_coverage,
       indoor_mean_pm25_24h,
       indoor_gmean_pm25_24h,
       indoor_median_pm25_24h,
@@ -8190,12 +8259,15 @@ hapin_24h_period_summary_internal <- bind_rows(
       has_valid_75pct_coverage,
       metric_name = "ambient_adjusted_indoor_excess_pm25",
       metric_label = hapin_metric_metadata$metric_label[hapin_metric_metadata$metric_name == "ambient_adjusted_indoor_excess_pm25"],
-      metric_scale = "linear_zero",
+      metric_scale = "symmetric_pseudo_log",
       metric_valid_24h = has_valid_ambient_adjusted_24h,
       metric_value_24h = ambient_adjusted_mean_pm25_24h,
       n_pm_rows_24h,
       n_ambient_rows_24h,
       n_ambient_hours_24h,
+      valid_ambient_hours_24h,
+      ambient_coverage_prop_24h,
+      has_valid_ambient_75pct_coverage,
       indoor_mean_pm25_24h,
       indoor_gmean_pm25_24h,
       indoor_median_pm25_24h,
@@ -8411,30 +8483,64 @@ hapin_valid_period_index <- hapin_period_index %>%
     all_of(monitoring_window_keys),
     period_number,
     period_label,
+    matched_ambient_site_id,
     period_start_datetime,
     period_end_datetime
   )
 
-hapin_ambient_hourly <- ambient_clean %>%
-  group_by(ambient_hour) %>%
-  summarise(
-    n_ambient_rows_hour = n(),
-    ambient_mean_pm25_hour = mean(pm25_ug_m3, na.rm = TRUE),
-    .groups = "drop"
-  )
+hapin_ambient_hourly <- ambient_site_hourly
 
 hapin_household_period_hour_wide <- indoor_monitoring_timestamps %>%
-  select(monitoring_coverage_window_id, dateTime, pm25_ug_m3) %>%
+  select(
+    monitoring_coverage_window_id, dateTime, pm25_ug_m3,
+    represented_seconds
+  ) %>%
   inner_join(
     hapin_valid_period_index,
     by = "monitoring_coverage_window_id",
     relationship = "many-to-many"
   ) %>%
-  filter(dateTime >= period_start_datetime, dateTime < period_end_datetime) %>%
   mutate(
-    monitor_hour = lubridate::floor_date(dateTime, unit = "hour"),
-    hour_of_day = lubridate::hour(lubridate::with_tz(monitor_hour, tzone = hapin_hour_time_zone))
+    observation_start_numeric = as.numeric(dateTime),
+    observation_end_numeric = observation_start_numeric + represented_seconds,
+    period_start_numeric = as.numeric(period_start_datetime),
+    period_end_numeric = as.numeric(period_end_datetime),
+    interval_start_numeric = pmax(observation_start_numeric, period_start_numeric),
+    interval_end_numeric = pmin(observation_end_numeric, period_end_numeric)
   ) %>%
+  filter(interval_end_numeric > interval_start_numeric) %>%
+  mutate(
+    interval_start_datetime = lubridate::as_datetime(
+      interval_start_numeric,
+      tz = hapin_hour_time_zone
+    ),
+    last_included_datetime = lubridate::as_datetime(
+      interval_end_numeric - 1e-6,
+      tz = hapin_hour_time_zone
+    ),
+    first_monitor_hour = lubridate::floor_date(interval_start_datetime, unit = "hour"),
+    last_monitor_hour = lubridate::floor_date(last_included_datetime, unit = "hour"),
+    n_hour_segments = as.integer(difftime(
+      last_monitor_hour,
+      first_monitor_hour,
+      units = "hours"
+    )) + 1L
+  ) %>%
+  tidyr::uncount(n_hour_segments, .id = "hour_segment_number") %>%
+  mutate(
+    monitor_hour = first_monitor_hour + lubridate::hours(hour_segment_number - 1L),
+    hour_start_numeric = as.numeric(monitor_hour),
+    hour_end_numeric = hour_start_numeric + 3600,
+    represented_seconds_hour = pmax(
+      0,
+      pmin(interval_end_numeric, hour_end_numeric) -
+        pmax(interval_start_numeric, hour_start_numeric)
+    ),
+    hour_of_day = lubridate::hour(
+      lubridate::with_tz(monitor_hour, tzone = hapin_hour_time_zone)
+    )
+  ) %>%
+  filter(represented_seconds_hour > 0) %>%
   group_by(
     timepoint,
     study_arm_overall,
@@ -8446,19 +8552,359 @@ hapin_household_period_hour_wide <- indoor_monitoring_timestamps %>%
     hapin_window_id,
     period_number,
     period_label,
+    matched_ambient_site_id,
     monitor_hour,
     hour_of_day
   ) %>%
   summarise(
     n_pm_rows_hour = n(),
-    indoor_mean_pm25_hour = mean(pm25_ug_m3, na.rm = TRUE),
+    valid_indoor_seconds_hour = sum(represented_seconds_hour, na.rm = TRUE),
+    valid_indoor_hours_hour = valid_indoor_seconds_hour / 3600,
+    indoor_mean_pm25_hour = stats::weighted.mean(
+      pm25_ug_m3,
+      represented_seconds_hour,
+      na.rm = TRUE
+    ),
     .groups = "drop"
   ) %>%
-  left_join(hapin_ambient_hourly, by = c("monitor_hour" = "ambient_hour")) %>%
+  left_join(
+    hapin_ambient_hourly,
+    by = c(
+      "matched_ambient_site_id" = "ambient_site_id",
+      "monitor_hour" = "ambient_hour"
+    )
+  ) %>%
   mutate(
-    n_ambient_rows_hour = dplyr::coalesce(n_ambient_rows_hour, 0L),
+    n_ambient_rows_hour = dplyr::coalesce(n_ambient_source_rows_hour, 0L),
     ambient_adjusted_mean_pm25_hour = indoor_mean_pm25_hour -
       default_material_infiltration_factor * ambient_mean_pm25_hour
+  )
+
+hapin_hour_period_reconciliation_internal <- hapin_household_period_hour_wide %>%
+  group_by(monitoring_coverage_window_id, period_number) %>%
+  summarise(
+    hourly_reconstructed_monitoring_hours =
+      sum(valid_indoor_seconds_hour, na.rm = TRUE) / 3600,
+    hourly_reconstructed_indoor_mean_pm25_24h = stats::weighted.mean(
+      indoor_mean_pm25_hour,
+      valid_indoor_seconds_hour,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) %>%
+  inner_join(
+    hapin_period_pm_raw %>%
+      select(
+        monitoring_coverage_window_id,
+        period_number,
+        represented_monitoring_hours_24h,
+        indoor_mean_pm25_24h
+      ),
+    by = c("monitoring_coverage_window_id", "period_number")
+  ) %>%
+  mutate(
+    monitoring_hours_difference = hourly_reconstructed_monitoring_hours -
+      represented_monitoring_hours_24h,
+    indoor_mean_pm25_difference = hourly_reconstructed_indoor_mean_pm25_24h -
+      indoor_mean_pm25_24h
+  )
+
+readr::write_csv(
+  hapin_hour_period_reconciliation_internal,
+  file.path(
+    restricted_table_dir,
+    "table_descriptive_pm25_hour_period_reconciliation_internal.csv"
+  ),
+  na = ""
+)
+
+hapin_hour_period_reconciliation_qa <- hapin_hour_period_reconciliation_internal %>%
+  summarise(
+    n_valid_periods = n(),
+    n_monitoring_hour_discrepancies_gt_1e_8 = sum(
+      abs(monitoring_hours_difference) > 1e-8,
+      na.rm = TRUE
+    ),
+    max_absolute_monitoring_hour_difference = max_or_na(
+      abs(monitoring_hours_difference)
+    ),
+    n_indoor_mean_discrepancies_gt_1e_8 = sum(
+      abs(indoor_mean_pm25_difference) > 1e-8,
+      na.rm = TRUE
+    ),
+    max_absolute_indoor_mean_difference_ug_m3 = max_or_na(
+      abs(indoor_mean_pm25_difference)
+    ),
+    interval_allocation_rule = paste(
+      "Represented intervals are clipped to each 24-hour period and split",
+      "at every clock-hour boundary before hourly aggregation."
+    )
+  )
+
+readr::write_csv(
+  hapin_hour_period_reconciliation_qa,
+  file.path(dir_tables_qa, "table_qa_pm25_hour_period_reconciliation.csv"),
+  na = ""
+)
+
+# Study-estimated infiltration sensitivity. Candidate hours exclude the upper
+# quartile of each household-period indoor distribution to reduce influence
+# from large cooking/source peaks. Household slopes are constrained to [0, 1]
+# and shrunk toward the corresponding ambient-site/calendar-quarter slope.
+infiltration_hour_candidates <- hapin_household_period_hour_wide %>%
+  inner_join(
+    hapin_24h_period_wide %>%
+      select(
+        monitoring_coverage_window_id,
+        period_number,
+        has_valid_ambient_75pct_coverage
+      ),
+    by = c("monitoring_coverage_window_id", "period_number")
+  ) %>%
+  filter(
+    has_valid_ambient_75pct_coverage,
+    is.finite(indoor_mean_pm25_hour),
+    is.finite(ambient_mean_pm25_hour)
+  ) %>%
+  mutate(
+    infiltration_season = paste0(
+      lubridate::year(monitor_hour),
+      "_Q",
+      lubridate::quarter(monitor_hour)
+    )
+  ) %>%
+  group_by(monitoring_coverage_window_id, period_number) %>%
+  mutate(
+    indoor_peak_exclusion_threshold = safe_quantile(
+      indoor_mean_pm25_hour,
+      infiltration_peak_exclusion_quantile
+    )
+  ) %>%
+  ungroup() %>%
+  filter(indoor_mean_pm25_hour <= indoor_peak_exclusion_threshold) %>%
+  group_by(fcn_id, matched_ambient_site_id, infiltration_season) %>%
+  mutate(
+    ambient_centered = ambient_mean_pm25_hour - mean(ambient_mean_pm25_hour),
+    indoor_centered = indoor_mean_pm25_hour - mean(indoor_mean_pm25_hour)
+  ) %>%
+  ungroup()
+
+global_infiltration_denominator <- sum(
+  infiltration_hour_candidates$ambient_centered^2,
+  na.rm = TRUE
+)
+if (!is.finite(global_infiltration_denominator) || global_infiltration_denominator <= 0) {
+  stop("Ambient variation is insufficient to estimate the infiltration sensitivity.", call. = FALSE)
+}
+global_infiltration_factor <- pmin(
+  1,
+  pmax(
+    0,
+    sum(
+      infiltration_hour_candidates$ambient_centered *
+        infiltration_hour_candidates$indoor_centered,
+      na.rm = TRUE
+    ) / global_infiltration_denominator
+  )
+)
+
+infiltration_site_season_prior <- infiltration_hour_candidates %>%
+  group_by(matched_ambient_site_id, infiltration_season) %>%
+  summarise(
+    n_site_season_candidate_hours = n(),
+    n_site_season_households = n_distinct(fcn_id),
+    ambient_ss_site_season = sum(ambient_centered^2, na.rm = TRUE),
+    infiltration_factor_site_season = if_else(
+      ambient_ss_site_season > 0,
+      pmin(
+        1,
+        pmax(
+          0,
+          sum(ambient_centered * indoor_centered, na.rm = TRUE) /
+            ambient_ss_site_season
+        )
+      ),
+      global_infiltration_factor
+    ),
+    .groups = "drop"
+  )
+
+infiltration_household_unshrunk <- infiltration_hour_candidates %>%
+  group_by(fcn_id, matched_ambient_site_id, infiltration_season) %>%
+  summarise(
+    n_candidate_hours = n(),
+    n_monitoring_windows = n_distinct(monitoring_coverage_window_id),
+    ambient_ss_household = sum(ambient_centered^2, na.rm = TRUE),
+    infiltration_factor_household_unshrunk = if_else(
+      n_candidate_hours >= infiltration_min_candidate_hours &
+        ambient_ss_household > 0,
+      pmin(
+        1,
+        pmax(
+          0,
+          sum(ambient_centered * indoor_centered, na.rm = TRUE) /
+            ambient_ss_household
+        )
+      ),
+      NA_real_
+    ),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    infiltration_site_season_prior,
+    by = c("matched_ambient_site_id", "infiltration_season")
+  ) %>%
+  mutate(
+    household_shrinkage_weight = if_else(
+      is.finite(infiltration_factor_household_unshrunk),
+      n_candidate_hours / (n_candidate_hours + infiltration_prior_equivalent_hours),
+      0
+    ),
+    infiltration_factor_estimated =
+      household_shrinkage_weight * coalesce(
+        infiltration_factor_household_unshrunk,
+        infiltration_factor_site_season
+      ) +
+      (1 - household_shrinkage_weight) * infiltration_factor_site_season,
+    infiltration_factor_estimated = pmin(
+      1,
+      pmax(0, infiltration_factor_estimated)
+    )
+  )
+
+infiltration_slope_estimates <- infiltration_household_unshrunk %>%
+  select(
+    fcn_id,
+    matched_ambient_site_id,
+    infiltration_season,
+    n_candidate_hours,
+    n_monitoring_windows,
+    n_site_season_candidate_hours,
+    n_site_season_households,
+    household_shrinkage_weight,
+    infiltration_factor_household_unshrunk,
+    infiltration_factor_site_season,
+    infiltration_factor_estimated
+  )
+
+infiltration_household_intercepts <- infiltration_hour_candidates %>%
+  inner_join(
+    infiltration_slope_estimates %>%
+      select(
+        fcn_id,
+        matched_ambient_site_id,
+        infiltration_season,
+        infiltration_factor_estimated
+      ),
+    by = c("fcn_id", "matched_ambient_site_id", "infiltration_season")
+  ) %>%
+  group_by(fcn_id) %>%
+  summarise(
+    infiltration_intercept_estimated = pmax(
+      0,
+      mean(
+        indoor_mean_pm25_hour -
+          infiltration_factor_estimated * ambient_mean_pm25_hour,
+        na.rm = TRUE
+      )
+    ),
+    .groups = "drop"
+  )
+
+infiltration_estimates <- infiltration_slope_estimates %>%
+  left_join(infiltration_household_intercepts, by = "fcn_id")
+
+readr::write_csv(
+  infiltration_estimates,
+  file.path(
+    restricted_table_dir,
+    "table_descriptive_pm25_infiltration_sensitivity_internal.csv"
+  ),
+  na = ""
+)
+readr::write_csv(
+  tibble(
+    model = "constrained_hierarchical_empirical_bayes",
+    candidate_hour_rule = paste0(
+      "Indoor household-period-hour PM2.5 at or below the within-period ",
+      infiltration_peak_exclusion_quantile * 100,
+      "th percentile"
+    ),
+    n_candidate_hours = nrow(infiltration_hour_candidates),
+    n_household_site_season_estimates = nrow(infiltration_estimates),
+    global_infiltration_factor = global_infiltration_factor,
+    minimum_candidate_hours_for_household_slope = infiltration_min_candidate_hours,
+    prior_equivalent_hours = infiltration_prior_equivalent_hours,
+    intercept_constraint = "alpha_h >= 0",
+    infiltration_constraint = "0 <= f_hs <= 1"
+  ),
+  file.path(dir_tables_qa, "table_qa_pm25_infiltration_sensitivity.csv"),
+  na = ""
+)
+
+hapin_household_period_hour_wide <- hapin_household_period_hour_wide %>%
+  mutate(
+    infiltration_season = paste0(
+      lubridate::year(monitor_hour),
+      "_Q",
+      lubridate::quarter(monitor_hour)
+    )
+  ) %>%
+  left_join(
+    infiltration_estimates %>%
+      select(
+        fcn_id,
+        matched_ambient_site_id,
+        infiltration_season,
+        infiltration_factor_estimated,
+        infiltration_intercept_estimated
+      ),
+    by = c("fcn_id", "matched_ambient_site_id", "infiltration_season")
+  ) %>%
+  mutate(
+    pm25_indoor_excess_estimated_infiltration_hour = if_else(
+      is.finite(indoor_mean_pm25_hour) &
+        is.finite(ambient_mean_pm25_hour) &
+        is.finite(infiltration_factor_estimated),
+      pmax(
+        0,
+        indoor_mean_pm25_hour -
+          infiltration_factor_estimated * ambient_mean_pm25_hour
+      ),
+      NA_real_
+    )
+  )
+
+pm25_infiltration_period_sensitivity <- hapin_household_period_hour_wide %>%
+  filter(is.finite(pm25_indoor_excess_estimated_infiltration_hour)) %>%
+  group_by(monitoring_coverage_window_id, period_number) %>%
+  summarise(
+    n_concurrent_hours_infiltration_sensitivity = n(),
+    valid_concurrent_monitoring_hours_infiltration_sensitivity = sum(
+      valid_indoor_hours_hour,
+      na.rm = TRUE
+    ),
+    pm25_infiltration_factor_estimated = stats::weighted.mean(
+      infiltration_factor_estimated,
+      valid_indoor_seconds_hour,
+      na.rm = TRUE
+    ),
+    pm25_infiltration_intercept_estimated = stats::weighted.mean(
+      infiltration_intercept_estimated,
+      valid_indoor_seconds_hour,
+      na.rm = TRUE
+    ),
+    pm25_indoor_excess_estimated_infiltration = stats::weighted.mean(
+      pm25_indoor_excess_estimated_infiltration_hour,
+      valid_indoor_seconds_hour,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    has_valid_infiltration_sensitivity =
+      valid_concurrent_monitoring_hours_infiltration_sensitivity >=
+        monitoring_period_hours * valid_ambient_period_coverage_threshold
   )
 
 hapin_household_period_hour_long <- bind_rows(
@@ -8519,6 +8965,24 @@ hapin_hour_of_day_summary <- hapin_household_period_hour_long %>%
   filter(n_households >= 3) %>%
   arrange(metric_name, timepoint, study_arm_overall, hour_of_day)
 
+hapin_hour_raw_y_limits <- range(
+  unlist(
+    hapin_hour_of_day_summary %>%
+      filter(metric_name == "raw_indoor_pm25") %>%
+      select(p10_pm25, p25_pm25, median_pm25, p75_pm25, p90_pm25),
+    use.names = FALSE
+  ),
+  hapin_pm25_reference_lines,
+  na.rm = TRUE
+)
+if (
+  length(hapin_hour_raw_y_limits) != 2L ||
+    any(!is.finite(hapin_hour_raw_y_limits)) ||
+    any(hapin_hour_raw_y_limits <= 0)
+) {
+  stop("Unable to determine positive raw indoor PM2.5 limits for the shared hour-of-day y-axis.", call. = FALSE)
+}
+
 readr::write_csv(
   hapin_hour_of_day_summary,
   file.path(table_dir, "table_pm25_hapin_hour_of_day_summary.csv"),
@@ -8565,7 +9029,11 @@ hapin_save_plot <- function(plot, filename, width = 10, height = 6) {
   invisible(filename)
 }
 
-hapin_arm_colors <- c(comparison = "#4E79A7", intervention = "#D55E00")
+hapin_arm_colors <- rf105_arm_colors
+hapin_pseudo_log_trans <- scales::pseudo_log_trans(
+  base = 10,
+  sigma = hapin_pseudo_log_sigma
+)
 
 hapin_add_y_scale <- function(plot, metric_name) {
   if (identical(metric_name, "raw_indoor_pm25")) {
@@ -8578,7 +9046,9 @@ hapin_add_y_scale <- function(plot, metric_name) {
       ) +
       scale_y_log10()
   } else {
-    plot + geom_hline(yintercept = 0, color = "grey35", linewidth = 0.35)
+    plot +
+      geom_hline(yintercept = 0, color = "grey35", linewidth = 0.35) +
+      scale_y_continuous(trans = hapin_pseudo_log_trans)
   }
 }
 
@@ -8688,8 +9158,8 @@ for (metric_i in hapin_metric_metadata$metric_name) {
         ) +
         scale_color_manual(
           values = c(
-            "Comparison indoor" = "#4E79A7",
-            "Intervention indoor" = "#D55E00",
+            "Comparison indoor" = rf105_arm_colors[["comparison"]],
+            "Intervention indoor" = rf105_arm_colors[["intervention"]],
             "Outdoor PM2.5" = "#3A3A3A"
           ),
           drop = FALSE
@@ -8754,6 +9224,26 @@ for (metric_i in hapin_metric_metadata$metric_name) {
       width = 10,
       height = 5.6
     )
+
+    if (identical(metric_i, "raw_indoor_pm25")) {
+      fig_48h_baseline_midline_no_title <-
+        fig_48h +
+        filter(
+          plot_48h_display_data,
+          timepoint %in% c("baseline", "midline")
+        ) +
+        labs(title = NULL, subtitle = NULL)
+
+      hapin_save_plot(
+        fig_48h_baseline_midline_no_title,
+        paste0(
+          "fig_pm25_hapin_48h_household_distribution_raw_indoor_pm25_",
+          "baseline_midline_no_title.png"
+        ),
+        width = 8,
+        height = 5.2
+      )
+    }
   }
 
   plot_period_data <- hapin_24h_period_summary_internal %>%
@@ -8852,7 +9342,9 @@ for (metric_i in hapin_metric_metadata$metric_name) {
     } else {
       fig_agreement <- fig_agreement +
         geom_hline(yintercept = 0, color = "grey60", linewidth = 0.30) +
-        geom_vline(xintercept = 0, color = "grey60", linewidth = 0.30)
+        geom_vline(xintercept = 0, color = "grey60", linewidth = 0.30) +
+        scale_x_continuous(trans = hapin_pseudo_log_trans) +
+        scale_y_continuous(trans = hapin_pseudo_log_trans)
     }
     hapin_save_plot(
       fig_agreement,
@@ -8863,11 +9355,36 @@ for (metric_i in hapin_metric_metadata$metric_name) {
   }
 
   plot_hour_data <- hapin_hour_of_day_summary %>% filter(metric_name == metric_i)
-  if (log_positive_i) {
-    plot_hour_data <- plot_hour_data %>% filter(p10_pm25 > 0, p90_pm25 > 0, median_pm25 > 0)
+  hour_uses_raw_y_axis <- identical(metric_i, "raw_indoor_pm25")
+  if (hour_uses_raw_y_axis) {
+    plot_hour_data <- plot_hour_data %>%
+      filter(
+        p10_pm25 > 0,
+        p25_pm25 > 0,
+        median_pm25 > 0,
+        p75_pm25 > 0,
+        p90_pm25 > 0
+      )
+  } else {
+    plot_hour_data <- plot_hour_data %>%
+      filter(is.finite(mean_pm25), mean_pm25 > 0) %>%
+      mutate(median_pm25 = mean_pm25)
   }
 
   if (nrow(plot_hour_data) > 0) {
+    hour_y_label_i <- if (identical(metric_i, "ambient_adjusted_indoor_excess_pm25")) {
+      "Household-period-hour PM2.5 (ug/m3, symmetric pseudo-log scale)"
+    } else {
+      "Household-period-hour PM2.5 (ug/m3, log scale)"
+    }
+    hour_subtitle_i <- if (identical(metric_i, "ambient_adjusted_indoor_excess_pm25")) {
+      paste(
+        "Line is the positive arithmetic mean; percentile bands retain zero and negative values;",
+        "darker band is IQR; lighter band is 10th to 90th percentile"
+      )
+    } else {
+      "Line is median; darker band is IQR; lighter band is 10th to 90th percentile"
+    }
     fig_hour <- ggplot(
       plot_hour_data,
       aes(
@@ -8886,11 +9403,11 @@ for (metric_i in hapin_metric_metadata$metric_name) {
       scale_fill_manual(values = hapin_arm_colors, drop = FALSE) +
       labs(
         x = paste0("Hour of day (", hapin_hour_time_zone, ")"),
-        y = "Household-period-hour PM2.5 (ug/m3)",
+        y = hour_y_label_i,
         color = "Study arm",
         fill = "Study arm",
         title = paste0(metric_label_i, " by hour of day"),
-        subtitle = "Line is median; darker band is IQR; lighter band is 10th to 90th percentile"
+        subtitle = hour_subtitle_i
       ) +
       theme_bw(base_size = 11) +
       theme(
@@ -8898,13 +9415,84 @@ for (metric_i in hapin_metric_metadata$metric_name) {
         panel.grid.minor = element_blank(),
         strip.background = element_rect(fill = "grey92", color = "grey75")
       )
-    fig_hour <- hapin_add_y_scale(fig_hour, metric_i)
+    if (hour_uses_raw_y_axis) {
+      fig_hour <- fig_hour +
+        geom_hline(
+          yintercept = hapin_pm25_reference_lines,
+          color = "grey55",
+          linetype = "dashed",
+          linewidth = 0.25
+        ) +
+        scale_y_log10() +
+        coord_cartesian(ylim = hapin_hour_raw_y_limits)
+    } else {
+      fig_hour <- hapin_add_y_scale(fig_hour, metric_i)
+    }
     hapin_save_plot(
       fig_hour,
       paste0("fig_pm25_hapin_hour_of_day_", metric_token_i, ".png"),
       width = 10,
       height = 5.6
     )
+
+    if (hour_uses_raw_y_axis) {
+      fig_hour_baseline_midline_reference_limits <-
+        fig_hour +
+        filter(
+          plot_hour_data,
+          timepoint %in% c("baseline", "midline")
+        ) +
+        geom_hline(
+          data = tibble(
+            reference_line = pm25_hour_reference_breaks,
+            reference_value = c(35, 65)
+          ),
+          aes(
+            yintercept = reference_value,
+            linetype = reference_line
+          ),
+          color = "#B2182B",
+          linewidth = 0.45,
+          inherit.aes = FALSE
+        ) +
+        scale_linetype_manual(
+          name = "Reference lines",
+          breaks = pm25_hour_reference_breaks,
+          values = stats::setNames(
+            c("solid", "dotted"),
+            pm25_hour_reference_breaks
+          )
+        ) +
+        labs(title = NULL, subtitle = NULL) +
+        guides(
+          color = guide_legend(order = 1),
+          fill = "none",
+          linetype = guide_legend(
+            order = 2,
+            nrow = 2,
+            byrow = TRUE,
+            override.aes = list(
+              color = c("#B2182B", "#B2182B"),
+              linewidth = c(0.45, 0.45)
+            )
+          )
+        ) +
+        theme(
+          legend.box = "vertical",
+          legend.box.just = "center",
+          legend.text = element_text(size = 9)
+        )
+
+      hapin_save_plot(
+        fig_hour_baseline_midline_reference_limits,
+        paste0(
+          "fig_pm25_hapin_hour_of_day_raw_indoor_pm25_",
+          "baseline_midline_reference_limits_no_title.png"
+        ),
+        width = 8,
+        height = 6.8
+      )
+    }
   }
 
   plot_tail_data <- hapin_48h_household_summary_internal %>%
@@ -8949,7 +9537,9 @@ for (metric_i in hapin_metric_metadata$metric_name) {
         ) +
         scale_x_log10()
     } else {
-      fig_tail <- fig_tail + geom_vline(xintercept = 0, color = "grey35", linewidth = 0.35)
+      fig_tail <- fig_tail +
+        geom_vline(xintercept = 0, color = "grey35", linewidth = 0.35) +
+        scale_x_continuous(trans = hapin_pseudo_log_trans)
     }
     hapin_save_plot(
       fig_tail,
@@ -8960,288 +9550,9 @@ for (metric_i in hapin_metric_metadata$metric_name) {
   }
 }
 
-hapin_adjusted_metric_name <- "ambient_adjusted_indoor_excess_pm25"
-hapin_adjusted_metric_label <- hapin_metric_metadata$metric_label[
-  hapin_metric_metadata$metric_name == hapin_adjusted_metric_name
-]
-hapin_adjusted_metric_token <- hapin_metric_file_token(hapin_adjusted_metric_name)
-hapin_adjusted_log_note <- paste(
-  "Positive adjusted values only are shown because log scales cannot display",
-  "zero or negative ambient-adjusted indoor-excess PM2.5 values."
-)
-
-plot_48h_adjusted_log <- hapin_48h_household_summary_internal %>%
-  filter(
-    metric_name == hapin_adjusted_metric_name,
-    !is.na(metric_value_48h_time_weighted),
-    is.finite(metric_value_48h_time_weighted),
-    metric_value_48h_time_weighted > 0
-  )
-
-if (nrow(plot_48h_adjusted_log) > 0) {
-  fig_48h_adjusted_log <- ggplot(
-    plot_48h_adjusted_log,
-    aes(
-      x = study_arm_overall,
-      y = metric_value_48h_time_weighted,
-      color = study_arm_overall
-    )
-  ) +
-    geom_boxplot(width = 0.46, outlier.shape = NA, alpha = 0.12) +
-    geom_jitter(width = 0.08, height = 0, alpha = 0.45, size = 1.6) +
-    stat_summary(
-      fun = mean,
-      geom = "point",
-      shape = 23,
-      fill = "white",
-      color = "black",
-      size = 2.8
-    ) +
-    facet_wrap(~ timepoint, nrow = 1) +
-    scale_y_log10() +
-    scale_color_manual(values = hapin_arm_colors, drop = FALSE) +
-    labs(
-      x = NULL,
-      y = "Positive 48-hour time-weighted PM2.5 (ug/m3, log scale)",
-      color = "Study arm",
-      title = paste0(hapin_adjusted_metric_label, " by study arm and timepoint"),
-      subtitle = paste(
-        "Positive adjusted household windows only; boxplots show median and IQR;",
-        "diamonds show arithmetic means"
-      )
-    ) +
-    theme_bw(base_size = 11) +
-    theme(
-      legend.position = "bottom",
-      panel.grid.minor = element_blank(),
-      strip.background = element_rect(fill = "grey92", color = "grey75")
-    )
-
-  hapin_save_plot(
-    fig_48h_adjusted_log,
-    paste0(
-      "fig_pm25_hapin_48h_household_distribution_",
-      hapin_adjusted_metric_token,
-      "_positive_log_y.png"
-    ),
-    width = 10,
-    height = 5.6
-  )
-}
-
-plot_period_adjusted_log <- hapin_24h_period_summary_internal %>%
-  filter(
-    metric_name == hapin_adjusted_metric_name,
-    metric_valid_24h,
-    !is.na(metric_value_24h),
-    is.finite(metric_value_24h),
-    metric_value_24h > 0
-  )
-
-if (nrow(plot_period_adjusted_log) > 0) {
-  fig_period_adjusted_log <- ggplot(
-    plot_period_adjusted_log,
-    aes(
-      x = period_label,
-      y = metric_value_24h,
-      color = study_arm_overall
-    )
-  ) +
-    geom_boxplot(
-      aes(group = interaction(period_label, study_arm_overall)),
-      position = position_dodge(width = 0.72),
-      width = 0.52,
-      outlier.shape = NA,
-      alpha = 0.12
-    ) +
-    geom_jitter(
-      position = position_jitterdodge(jitter.width = 0.10, dodge.width = 0.72),
-      alpha = 0.35,
-      size = 1.35
-    ) +
-    facet_wrap(~ timepoint, nrow = 1) +
-    scale_y_log10() +
-    scale_color_manual(values = hapin_arm_colors, drop = FALSE) +
-    labs(
-      x = NULL,
-      y = "Positive valid 24-hour PM2.5 (ug/m3, log scale)",
-      color = "Study arm",
-      title = paste0(hapin_adjusted_metric_label, " in each valid 24-hour monitoring period"),
-      subtitle = "Positive adjusted 24-hour periods only; boxplots show median and IQR"
-    ) +
-    theme_bw(base_size = 11) +
-    theme(
-      legend.position = "bottom",
-      panel.grid.minor = element_blank(),
-      strip.background = element_rect(fill = "grey92", color = "grey75")
-    )
-
-  hapin_save_plot(
-    fig_period_adjusted_log,
-    paste0(
-      "fig_pm25_hapin_24h_period_distribution_",
-      hapin_adjusted_metric_token,
-      "_positive_log_y.png"
-    ),
-    width = 10,
-    height = 5.6
-  )
-}
-
-plot_agreement_adjusted_log <- hapin_day1_day2_agreement_internal %>%
-  filter(
-    metric_name == hapin_adjusted_metric_name,
-    has_both_valid_24h_periods,
-    !is.na(metric_value_24h_day1),
-    !is.na(metric_value_24h_day2),
-    is.finite(metric_value_24h_day1),
-    is.finite(metric_value_24h_day2),
-    metric_value_24h_day1 > 0,
-    metric_value_24h_day2 > 0
-  )
-
-if (nrow(plot_agreement_adjusted_log) > 0) {
-  fig_agreement_adjusted_log <- ggplot(
-    plot_agreement_adjusted_log,
-    aes(
-      x = metric_value_24h_day1,
-      y = metric_value_24h_day2,
-      color = study_arm_overall
-    )
-  ) +
-    geom_abline(slope = 1, intercept = 0, color = "grey35", linetype = "dashed", linewidth = 0.45) +
-    geom_point(alpha = 0.58, size = 1.8) +
-    facet_wrap(~ timepoint, nrow = 1) +
-    scale_x_log10() +
-    scale_y_log10() +
-    scale_color_manual(values = hapin_arm_colors, drop = FALSE) +
-    labs(
-      x = "Positive Day 1 valid 24-hour PM2.5 (ug/m3, log scale)",
-      y = "Positive Day 2 valid 24-hour PM2.5 (ug/m3, log scale)",
-      color = "Study arm",
-      title = paste0(hapin_adjusted_metric_label, ": Day 1 versus Day 2 agreement"),
-      subtitle = "Positive adjusted paired 24-hour periods only; dashed line is equality"
-    ) +
-    theme_bw(base_size = 11) +
-    theme(
-      legend.position = "bottom",
-      panel.grid.minor = element_blank(),
-      strip.background = element_rect(fill = "grey92", color = "grey75")
-    )
-
-  hapin_save_plot(
-    fig_agreement_adjusted_log,
-    paste0(
-      "fig_pm25_hapin_day1_day2_agreement_",
-      hapin_adjusted_metric_token,
-      "_positive_log_xy.png"
-    ),
-    width = 10,
-    height = 5.6
-  )
-}
-
-plot_hour_adjusted_log <- hapin_hour_of_day_summary %>%
-  filter(
-    metric_name == hapin_adjusted_metric_name,
-    p10_pm25 > 0,
-    p25_pm25 > 0,
-    median_pm25 > 0,
-    p75_pm25 > 0,
-    p90_pm25 > 0
-  )
-
-if (nrow(plot_hour_adjusted_log) > 0) {
-  fig_hour_adjusted_log <- ggplot(
-    plot_hour_adjusted_log,
-    aes(
-      x = hour_of_day,
-      y = median_pm25,
-      color = study_arm_overall,
-      fill = study_arm_overall
-    )
-  ) +
-    geom_ribbon(aes(ymin = p10_pm25, ymax = p90_pm25), alpha = 0.10, color = NA) +
-    geom_ribbon(aes(ymin = p25_pm25, ymax = p75_pm25), alpha = 0.22, color = NA) +
-    geom_line(linewidth = 0.85) +
-    facet_wrap(~ timepoint, nrow = 1) +
-    scale_x_continuous(breaks = seq(0, 23, by = 3)) +
-    scale_y_log10() +
-    scale_color_manual(values = hapin_arm_colors, drop = FALSE) +
-    scale_fill_manual(values = hapin_arm_colors, drop = FALSE) +
-    labs(
-      x = paste0("Hour of day (", hapin_hour_time_zone, ")"),
-      y = "Positive household-period-hour PM2.5 (ug/m3, log scale)",
-      color = "Study arm",
-      fill = "Study arm",
-      title = paste0(hapin_adjusted_metric_label, " by hour of day"),
-      subtitle = paste(
-        "Positive adjusted percentile bands only; line is median;",
-        "darker band is IQR; lighter band is 10th to 90th percentile"
-      )
-    ) +
-    theme_bw(base_size = 11) +
-    theme(
-      legend.position = "bottom",
-      panel.grid.minor = element_blank(),
-      strip.background = element_rect(fill = "grey92", color = "grey75")
-    )
-
-  hapin_save_plot(
-    fig_hour_adjusted_log,
-    paste0(
-      "fig_pm25_hapin_hour_of_day_",
-      hapin_adjusted_metric_token,
-      "_positive_log_y.png"
-    ),
-    width = 10,
-    height = 5.6
-  )
-}
-
-plot_tail_adjusted_log <- hapin_48h_household_summary_internal %>%
-  filter(
-    metric_name == hapin_adjusted_metric_name,
-    !is.na(metric_value_48h_time_weighted),
-    is.finite(metric_value_48h_time_weighted),
-    metric_value_48h_time_weighted > 0
-  )
-
-if (nrow(plot_tail_adjusted_log) > 0) {
-  fig_tail_adjusted_log <- ggplot(
-    plot_tail_adjusted_log,
-    aes(x = metric_value_48h_time_weighted, color = study_arm_overall)
-  ) +
-    stat_ecdf(aes(y = after_stat((1 - y) * 100)), linewidth = 0.85) +
-    facet_wrap(~ timepoint, nrow = 1) +
-    scale_x_log10() +
-    scale_color_manual(values = hapin_arm_colors, drop = FALSE) +
-    scale_y_continuous(limits = c(0, 100)) +
-    labs(
-      x = "Positive 48-hour time-weighted PM2.5 (ug/m3, log scale)",
-      y = "Household windows at or above concentration (%)",
-      color = "Study arm",
-      title = paste0(hapin_adjusted_metric_label, " upper-tail distribution"),
-      subtitle = "Positive adjusted household windows only; PM2.5 axis is log scaled"
-    ) +
-    theme_bw(base_size = 11) +
-    theme(
-      legend.position = "bottom",
-      panel.grid.minor = element_blank(),
-      strip.background = element_rect(fill = "grey92", color = "grey75")
-    )
-
-  hapin_save_plot(
-    fig_tail_adjusted_log,
-    paste0(
-      "fig_pm25_hapin_tail_exceedance_",
-      hapin_adjusted_metric_token,
-      "_positive_log_x.png"
-    ),
-    width = 10,
-    height = 5.6
-  )
-}
+# The former positive-only log-scale duplicates were retired. The figure
+# families above now retain zero and negative adjusted values with one
+# symmetric pseudo-log implementation.
 
 hapin_graphic_source_audit <- bind_rows(
   data.frame(
@@ -9255,7 +9566,9 @@ hapin_graphic_source_audit <- bind_rows(
       "hour_of_day_time_zone",
       "public_row_level_deidentification",
       "uncertainty_display",
-      "ambient_adjusted_log_scale_display"
+      "ambient_adjusted_scale_display",
+      "ambient_matching_rule",
+      "ambient_coverage_rule"
     ),
     audit_value = c(
       normalizePath(script_path, winslash = "/", mustWork = FALSE),
@@ -9270,7 +9583,19 @@ hapin_graphic_source_audit <- bind_rows(
       hapin_hour_time_zone,
       "Public HAPIN PM2.5 row-level outputs remove household IDs, FCN IDs, household notes, raw filenames, monitor IDs, internal coverage-window IDs, and exact timestamps.",
       "Shaded hour-of-day bands are descriptive percentiles across household-period-hour summaries, not 95% confidence intervals.",
-      hapin_adjusted_log_note
+      paste(
+        "Ambient-adjusted values use a symmetric base-10 pseudo-log transformation",
+        "with sigma =", hapin_pseudo_log_sigma,
+        "so zero and negative percentiles remain visible."
+      ),
+      "Ambient rows are deduplicated by site-monitor-timestamp, summarized by monitor-hour, averaged equally to site-hours, and matched using the household camp crosswalk.",
+      paste0(
+        "Ambient monitor-hours and 24-hour periods must each have at least ",
+        100 * valid_ambient_hour_coverage_threshold,
+        "% and ",
+        100 * valid_ambient_period_coverage_threshold,
+        "% coverage, respectively."
+      )
     ),
     output_file = NA_character_,
     stringsAsFactors = FALSE
@@ -9322,44 +9647,41 @@ pm25_mean_ci <- function(x, cluster = NULL, conf_level = 0.95) {
   tibble(mean = estimate, conf_low = estimate - critical * se, conf_high = estimate + critical * se)
 }
 
-ambient_period_sources <- bind_rows(lapply(seq_len(nrow(hapin_period_index)), function(i) {
-  rows <- ambient_clean %>%
-    filter(
-      dateTime >= hapin_period_index$period_start_datetime[[i]],
-      dateTime < hapin_period_index$period_end_datetime[[i]]
-    )
-  tibble(
-    monitoring_coverage_window_id = hapin_period_index$monitoring_coverage_window_id[[i]],
-    period_number = hapin_period_index$period_number[[i]],
-    ambient_monitor_files = if (nrow(rows) == 0) NA_character_ else
-      paste(sort(unique(na.omit(rows$raw_source_file))), collapse = ";"),
-    ambient_monitor_ids = if (nrow(rows) == 0) NA_character_ else
-      paste(sort(unique(na.omit(rows$PM_monitor))), collapse = ";")
-  )
-}))
-
 pm25_period_internal <- hapin_24h_period_wide %>%
   left_join(
-    ambient_period_sources,
+    pm25_infiltration_period_sensitivity,
     by = c("monitoring_coverage_window_id", "period_number")
   ) %>%
   mutate(
     collection_date = as.Date(period_start_datetime),
-    ambient_coverage_prop_24h = pmin(1, n_ambient_hours_24h / monitoring_period_hours),
-    has_concurrent_ambient = n_ambient_rows_24h > 0 &
+    has_valid_infiltration_sensitivity = coalesce(
+      has_valid_infiltration_sensitivity,
+      FALSE
+    ),
+    has_concurrent_ambient = has_valid_ambient_75pct_coverage &
       is.finite(ambient_mean_pm25_24h) & !is.na(ambient_mean_pm25_24h),
     analytic_period_common_support = has_valid_raw_24h & has_concurrent_ambient,
     pm25_ambient_excess_f000 = if_else(analytic_period_common_support, indoor_mean_pm25_24h, NA_real_),
     pm25_ambient_excess_f025 = if_else(analytic_period_common_support, indoor_mean_pm25_24h - 0.25 * ambient_mean_pm25_24h, NA_real_),
     pm25_ambient_excess_f050 = if_else(analytic_period_common_support, indoor_mean_pm25_24h - 0.50 * ambient_mean_pm25_24h, NA_real_),
     pm25_ambient_excess_f075 = if_else(analytic_period_common_support, indoor_mean_pm25_24h - 0.75 * ambient_mean_pm25_24h, NA_real_),
-    pm25_ambient_excess_f100 = if_else(analytic_period_common_support, indoor_mean_pm25_24h - 1.00 * ambient_mean_pm25_24h, NA_real_)
+    pm25_ambient_excess_f100 = if_else(analytic_period_common_support, indoor_mean_pm25_24h - 1.00 * ambient_mean_pm25_24h, NA_real_),
+    pm25_indoor_excess_estimated_infiltration = if_else(
+      analytic_period_common_support & has_valid_infiltration_sensitivity,
+      pm25_indoor_excess_estimated_infiltration,
+      NA_real_
+    )
   )
 
 pm25_adjusted_cols <- c(
   "pm25_ambient_excess_f000", "pm25_ambient_excess_f025",
   "pm25_ambient_excess_f050", "pm25_ambient_excess_f075",
   "pm25_ambient_excess_f100"
+)
+pm25_infiltration_cols <- c(
+  "pm25_infiltration_factor_estimated",
+  "pm25_infiltration_intercept_estimated",
+  "pm25_indoor_excess_estimated_infiltration"
 )
 
 common_periods <- pm25_period_internal %>% filter(analytic_period_common_support)
@@ -9374,7 +9696,8 @@ stopifnot(
 pm25_window_internal <- common_periods %>%
   group_by(
     timepoint, study_arm_overall, hh_id, fcn_id, hh_id_note,
-    raw_source_file, PM_monitor, monitoring_coverage_window_id, hapin_window_id
+    raw_source_file, PM_monitor, matched_ambient_site_id,
+    monitoring_coverage_window_id, hapin_window_id
   ) %>%
   summarise(
     collection_date_min = min(collection_date, na.rm = TRUE),
@@ -9382,9 +9705,11 @@ pm25_window_internal <- common_periods %>%
     n_valid_24h_periods = n_distinct(period_number),
     valid_24h_periods = paste(sort(unique(period_number)), collapse = ";"),
     mean_ambient_coverage_prop = pm25_weighted_mean(ambient_coverage_prop_24h, valid_monitoring_hours),
+    valid_ambient_hours = sum(valid_ambient_hours_24h, na.rm = TRUE),
     indoor_pm25_mean = pm25_weighted_mean(indoor_mean_pm25_24h, valid_monitoring_hours),
     ambient_pm25_mean = pm25_weighted_mean(ambient_mean_pm25_24h, valid_monitoring_hours),
     across(all_of(pm25_adjusted_cols), ~ pm25_weighted_mean(.x, valid_monitoring_hours)),
+    across(all_of(pm25_infiltration_cols), ~ pm25_weighted_mean(.x, valid_monitoring_hours)),
     valid_monitoring_hours = sum(valid_monitoring_hours, na.rm = TRUE),
     n_pm_observations = sum(n_pm_rows_24h, na.rm = TRUE),
     n_ambient_observations = sum(n_ambient_rows_24h, na.rm = TRUE),
@@ -9405,9 +9730,11 @@ pm25_household_timepoint_internal <- pm25_window_internal %>%
     n_monitor_files = n_distinct(raw_source_file),
     n_valid_24h_periods = sum(n_valid_24h_periods, na.rm = TRUE),
     mean_ambient_coverage_prop = pm25_weighted_mean(mean_ambient_coverage_prop, valid_monitoring_hours),
+    valid_ambient_hours = sum(valid_ambient_hours, na.rm = TRUE),
     indoor_pm25_mean = pm25_weighted_mean(indoor_pm25_mean, valid_monitoring_hours),
     ambient_pm25_mean = pm25_weighted_mean(ambient_pm25_mean, valid_monitoring_hours),
     across(all_of(pm25_adjusted_cols), ~ pm25_weighted_mean(.x, valid_monitoring_hours)),
+    across(all_of(pm25_infiltration_cols), ~ pm25_weighted_mean(.x, valid_monitoring_hours)),
     valid_monitoring_hours = sum(valid_monitoring_hours, na.rm = TRUE),
     coverage_percent_of_48h = pmin(100, 100 * valid_monitoring_hours / monitoring_total_hours),
     n_pm_observations = sum(n_pm_observations, na.rm = TRUE),
@@ -9416,6 +9743,7 @@ pm25_household_timepoint_internal <- pm25_window_internal %>%
     indoor_monitor_ids = paste(sort(unique(na.omit(PM_monitor))), collapse = ";"),
     ambient_monitor_files = paste(sort(unique(na.omit(ambient_monitor_files))), collapse = ";"),
     ambient_monitor_ids = paste(sort(unique(na.omit(ambient_monitor_ids))), collapse = ";"),
+    matched_ambient_site_ids = paste(sort(unique(na.omit(matched_ambient_site_id))), collapse = ";"),
     source_script = "3_descriptive_outcomes_20260805_2213.R",
     ambient_fraction_default = default_material_infiltration_factor,
     .groups = "drop"
@@ -9444,9 +9772,35 @@ pm25_household_timepoint_public <- pm25_household_timepoint_internal %>%
   select(
     timepoint, study_arm_overall, n_monitoring_windows, n_valid_24h_periods,
     valid_monitoring_hours, coverage_percent_of_48h, n_pm_observations,
-    n_ambient_observations, mean_ambient_coverage_prop, indoor_pm25_mean,
-    ambient_pm25_mean, all_of(pm25_adjusted_cols), ambient_fraction_default
+    n_ambient_observations, valid_ambient_hours, mean_ambient_coverage_prop,
+    indoor_pm25_mean, ambient_pm25_mean, all_of(pm25_adjusted_cols),
+    all_of(pm25_infiltration_cols), ambient_fraction_default
   )
+
+pm25_ambient_coverage_summary <- pm25_period_internal %>%
+  group_by(timepoint, study_arm_overall) %>%
+  summarise(
+    n_indoor_valid_24h_periods = sum(has_valid_raw_24h, na.rm = TRUE),
+    n_site_matched_ambient_periods = sum(
+      has_valid_raw_24h & !is.na(matched_ambient_site_id),
+      na.rm = TRUE
+    ),
+    n_ambient_valid_24h_periods = sum(
+      has_valid_raw_24h & has_valid_ambient_75pct_coverage,
+      na.rm = TRUE
+    ),
+    n_common_support_24h_periods = sum(analytic_period_common_support, na.rm = TRUE),
+    min_ambient_coverage_percent = 100 * min(ambient_coverage_prop_24h, na.rm = TRUE),
+    median_ambient_coverage_percent = 100 * median(ambient_coverage_prop_24h, na.rm = TRUE),
+    ambient_period_coverage_threshold_percent =
+      100 * valid_ambient_period_coverage_threshold,
+    .groups = "drop"
+  )
+readr::write_csv(
+  pm25_ambient_coverage_summary,
+  file.path(dir_tables_qa, "table_qa_pm25_ambient_period_coverage.csv"),
+  na = ""
+)
 
 readr::write_csv(
   pm25_period_internal,
@@ -9751,19 +10105,8 @@ pm25_exposure_summary <- pm25_exposure_for_summary %>%
     outside_ci <- pm25_mean_ci(time_analytic$hours_outside_est)
     indoor_ci <- pm25_mean_ci(analytic$indoor_pm25_ug_m3)
     outdoor_ci <- pm25_mean_ci(analytic$outdoor_pm25_ug_m3)
-    group_hours_inside <- inside_ci$mean
-    group_hours_outside <- outside_ci$mean
-    group_weighted_exposure <- if (
-      nrow(analytic) > 0 &&
-        is.finite(group_hours_inside) &&
-        is.finite(group_hours_outside)
-    ) {
-      (group_hours_inside / 24) * analytic$indoor_pm25_ug_m3 +
-        (group_hours_outside / 24) * analytic$outdoor_pm25_ug_m3
-    } else {
-      numeric()
-    }
-    exposure_ci <- pm25_mean_ci(group_weighted_exposure)
+    household_weighted_exposure <- analytic$time_weighted_average_pm25_ug_m3
+    exposure_ci <- pm25_mean_ci(household_weighted_exposure)
 
     tibble(
       n_households_with_time_data = sum(has_time),
@@ -9790,21 +10133,21 @@ pm25_exposure_summary <- pm25_exposure_for_summary %>%
       mean_outdoor_pm25_ci_upper = outdoor_ci$conf_high,
       mean_time_weighted_average_pm25_ug_m3 = exposure_ci$mean,
       sd_time_weighted_average_pm25_ug_m3 =
-        if (length(group_weighted_exposure) > 1) stats::sd(group_weighted_exposure) else NA_real_,
+        if (length(household_weighted_exposure) > 1) stats::sd(household_weighted_exposure) else NA_real_,
       mean_time_weighted_average_pm25_ci_lower = exposure_ci$conf_low,
       mean_time_weighted_average_pm25_ci_upper = exposure_ci$conf_high,
       median_time_weighted_average_pm25_ug_m3 =
-        median(group_weighted_exposure, na.rm = TRUE),
+        median(household_weighted_exposure, na.rm = TRUE),
       p25_time_weighted_average_pm25_ug_m3 =
-        safe_quantile(group_weighted_exposure, 0.25),
+        safe_quantile(household_weighted_exposure, 0.25),
       p75_time_weighted_average_pm25_ug_m3 =
-        safe_quantile(group_weighted_exposure, 0.75),
+        safe_quantile(household_weighted_exposure, 0.75),
       time_use_estimation_rule =
         "If both reports were valid: (inside + 24 - outside)/2; if only one was valid, use it or its 24-hour complement.",
       exposure_formula =
-        "(arm-timepoint-population mean hours_inside_est/24)*household indoor_pm25 + (arm-timepoint-population mean hours_outside_est/24)*household outdoor_pm25",
+        "For each household: (hours_inside_est/24)*indoor_pm25 + (hours_outside_est/24)*outdoor_pm25; summaries are across household-specific estimates.",
       analysis_population =
-        "Time weights use all households with valid time-use data in the study-arm/timepoint/population stratum; PM2.5 and exposure summaries use households in that stratum with canonical matched indoor and outdoor PM2.5. all_arms rows pool both study arms before calculating the time weights."
+        "Time-use summaries use all households with valid time-use data in the study-arm/timepoint/population stratum; PM2.5 and exposure summaries use households with both valid household-specific time use and canonical matched indoor and outdoor PM2.5. all_arms rows pool both study arms before summarizing."
     )
   }) %>%
   ungroup()
@@ -9832,6 +10175,69 @@ pm25_exposure_summary_public <- tidyr::expand_grid(
 readr::write_csv(
   pm25_exposure_summary_public,
   file.path(table_dir, "table_descriptive_pm25_time_weighted_exposure.csv"),
+  na = ""
+)
+
+time_indoors_by_arm_timepoint <- pm25_exposure_summary_public %>%
+  filter(study_arm_overall %in% arm_levels) %>%
+  transmute(
+    timepoint = as.character(timepoint),
+    study_arm_overall = as.character(study_arm_overall),
+    population = as.character(population),
+    population_label = case_when(
+      population == "caregiver" ~ "Women caregivers",
+      population == "target_child" ~ "Children younger than 5 years",
+      TRUE ~ population
+    ),
+    population_definition = case_when(
+      population == "caregiver" ~ "survey respondent",
+      population == "target_child" & timepoint == "baseline" ~
+        "designated target child",
+      population == "target_child" ~
+        "mean across household members younger than 5 years because a target-child serial was not available",
+      TRUE ~ NA_character_
+    ),
+    n_households = n_households_with_time_data,
+    mean_hours_inside_per_day = mean_hours_inside_est,
+    sd_hours_inside_per_day = sd_hours_inside_est,
+    mean_hours_inside_ci_lower = mean_hours_inside_est_ci_lower,
+    mean_hours_inside_ci_upper = mean_hours_inside_est_ci_upper
+  )
+
+time_indoors_baseline_means <- time_indoors_by_arm_timepoint %>%
+  filter(timepoint == "baseline") %>%
+  select(
+    study_arm_overall,
+    population,
+    baseline_mean_hours_inside_per_day = mean_hours_inside_per_day
+  )
+
+time_indoors_by_arm_timepoint <- time_indoors_by_arm_timepoint %>%
+  left_join(
+    time_indoors_baseline_means,
+    by = c("study_arm_overall", "population")
+  ) %>%
+  mutate(
+    change_from_baseline_hours_per_day =
+      mean_hours_inside_per_day - baseline_mean_hours_inside_per_day
+  ) %>%
+  arrange(
+    factor(population, levels = c("caregiver", "target_child")),
+    factor(timepoint, levels = timepoint_levels),
+    factor(study_arm_overall, levels = arm_levels)
+  )
+
+if (nrow(time_indoors_by_arm_timepoint) !=
+    length(timepoint_levels) * length(arm_levels) * 2L) {
+  stop(
+    "Time-indoors table does not contain one row per timepoint, arm, and population.",
+    call. = FALSE
+  )
+}
+
+readr::write_csv(
+  time_indoors_by_arm_timepoint,
+  file.path(table_dir, "table_descriptive_time_indoors_by_arm_timepoint.csv"),
   na = ""
 )
 
@@ -9869,14 +10275,16 @@ readr::write_csv(
 )
 
 pm25_measure_lookup <- tribble(
-  ~source_column, ~measure, ~ambient_fraction, ~is_default,
-  "indoor_pm25_mean", "raw_indoor_pm25", NA_real_, FALSE,
-  "ambient_pm25_mean", "matched_outdoor_pm25", NA_real_, FALSE,
-  "pm25_ambient_excess_f000", "ambient_adjusted_f000", 0.00, FALSE,
-  "pm25_ambient_excess_f025", "ambient_adjusted_f025", 0.25, FALSE,
-  "pm25_ambient_excess_f050", "ambient_adjusted_f050", 0.50, FALSE,
-  "pm25_ambient_excess_f075", "ambient_adjusted_f075", 0.75, TRUE,
-  "pm25_ambient_excess_f100", "ambient_adjusted_f100", 1.00, FALSE
+  ~source_column, ~measure, ~ambient_fraction, ~is_default, ~is_primary,
+  "indoor_pm25_mean", "raw_indoor_pm25", NA_real_, FALSE, TRUE,
+  "ambient_pm25_mean", "matched_outdoor_pm25", NA_real_, FALSE, FALSE,
+  "pm25_ambient_excess_f000", "ambient_adjusted_f000", 0.00, FALSE, FALSE,
+  "pm25_ambient_excess_f025", "ambient_adjusted_f025", 0.25, TRUE, FALSE,
+  "pm25_ambient_excess_f050", "ambient_adjusted_f050", 0.50, FALSE, FALSE,
+  "pm25_ambient_excess_f075", "ambient_adjusted_f075", 0.75, FALSE, FALSE,
+  "pm25_ambient_excess_f100", "ambient_adjusted_f100", 1.00, FALSE, FALSE,
+  "pm25_indoor_excess_estimated_infiltration",
+  "ambient_adjusted_estimated_infiltration", NA_real_, FALSE, FALSE
 )
 
 pm25_household_long_arm <- pm25_household_timepoint_internal %>%
@@ -9889,7 +10297,10 @@ pm25_household_long <- bind_rows(
 )
 
 pm25_arm_timepoint_summary <- pm25_household_long %>%
-  group_by(timepoint, study_arm_overall, source_column, measure, ambient_fraction, is_default) %>%
+  group_by(
+    timepoint, study_arm_overall, source_column, measure,
+    ambient_fraction, is_default, is_primary
+  ) %>%
   group_modify(~ {
     cluster <- if (.y$measure[[1]] == "matched_outdoor_pm25") .x$ambient_monitor_files else NULL
     ci <- pm25_mean_ci(.x$pm25_ug_m3, cluster)
@@ -9978,6 +10389,11 @@ pm25_hour_primary <- bind_rows(
     )
 )
 
+default_indoor_excess_plot_label <- sprintf(
+  "Indoor excess after %.2f x outdoor PM2.5",
+  default_material_infiltration_factor
+)
+
 pm25_hour_primary_summary <- pm25_hour_primary %>%
   group_by(metric_name, metric_label, metric_scale, timepoint, study_arm_overall, hour_of_day) %>%
   summarise(
@@ -9992,28 +10408,263 @@ pm25_hour_primary_summary <- pm25_hour_primary %>%
     p90_pm25 = safe_quantile(metric_value_hour, 0.90),
     .groups = "drop"
   ) %>%
-  filter(n_households >= 3)
+  filter(n_households >= 3) %>%
+  mutate(
+    metric_plot_label = case_when(
+      metric_name == "raw_indoor_pm25" ~ "Raw indoor PM2.5",
+      metric_name == "concurrent_outdoor_pm25" ~ "Concurrent outdoor PM2.5",
+      metric_name == "ambient_adjusted_indoor_excess_pm25" ~
+        default_indoor_excess_plot_label,
+      TRUE ~ NA_character_
+    )
+  )
+
+if (any(is.na(pm25_hour_primary_summary$metric_plot_label))) {
+  stop("A primary PM2.5 hour-of-day metric is missing its plot label.", call. = FALSE)
+}
 
 readr::write_csv(pm25_hour_primary_summary, file.path(table_dir, "table_descriptive_pm25_time_of_day.csv"), na = "")
 readr::write_csv(pm25_hour_primary_summary, file.path(table_dir, "table_pm25_hapin_hour_of_day_summary.csv"), na = "")
 
+# New version of the raw indoor hour-of-day figure with simultaneous ambient
+# PM2.5. Ambient site-hours were matched above to each valid household-period-
+# hour by household location and clock hour. Indoor medians are solid with
+# descriptive percentile bands; matched ambient medians are dotted.
+pm25_hour_raw_overlay <- pm25_hour_primary_summary %>%
+  filter(
+    metric_name == "raw_indoor_pm25",
+    p10_pm25 > 0,
+    p25_pm25 > 0,
+    median_pm25 > 0,
+    p75_pm25 > 0,
+    p90_pm25 > 0
+  ) %>%
+  mutate(
+    timepoint = factor(timepoint, levels = timepoint_levels),
+    study_arm_overall = factor(study_arm_overall, levels = arm_levels)
+  )
+
+pm25_hour_ambient_overlay <- pm25_hour_primary_summary %>%
+  filter(
+    metric_name == "concurrent_outdoor_pm25",
+    is.finite(median_pm25),
+    median_pm25 > 0
+  ) %>%
+  mutate(
+    timepoint = factor(timepoint, levels = timepoint_levels),
+    study_arm_overall = factor(study_arm_overall, levels = arm_levels)
+  )
+
+if (nrow(pm25_hour_raw_overlay) == 0 || nrow(pm25_hour_ambient_overlay) == 0) {
+  stop(
+    "Raw indoor and simultaneous ambient PM2.5 summaries are required for the combined hour-of-day figure.",
+    call. = FALSE
+  )
+}
+
+pm25_hour_raw_ambient_y_limits <- range(
+  c(
+    pm25_hour_raw_overlay$p10_pm25,
+    pm25_hour_raw_overlay$p25_pm25,
+    pm25_hour_raw_overlay$median_pm25,
+    pm25_hour_raw_overlay$p75_pm25,
+    pm25_hour_raw_overlay$p90_pm25,
+    pm25_hour_ambient_overlay$median_pm25,
+    hapin_pm25_reference_lines
+  ),
+  na.rm = TRUE
+)
+if (
+  length(pm25_hour_raw_ambient_y_limits) != 2L ||
+    any(!is.finite(pm25_hour_raw_ambient_y_limits)) ||
+    any(pm25_hour_raw_ambient_y_limits <= 0)
+) {
+  stop(
+    "Unable to determine positive PM2.5 limits for the combined indoor and ambient figure.",
+    call. = FALSE
+  )
+}
+
+pm25_hour_overlay_linetypes <- c(
+  "Median raw indoor PM2.5" = "solid",
+  "Median simultaneous ambient PM2.5" = "dotted"
+)
+
+fig_hour_raw_with_ambient_pm25 <- ggplot(
+  pm25_hour_raw_overlay,
+  aes(
+    x = hour_of_day,
+    color = study_arm_overall,
+    fill = study_arm_overall
+  )
+) +
+  geom_ribbon(
+    aes(ymin = p10_pm25, ymax = p90_pm25),
+    alpha = 0.10,
+    color = NA
+  ) +
+  geom_ribbon(
+    aes(ymin = p25_pm25, ymax = p75_pm25),
+    alpha = 0.22,
+    color = NA
+  ) +
+  geom_line(
+    aes(y = median_pm25, linetype = "Median raw indoor PM2.5"),
+    linewidth = 0.85
+  ) +
+  geom_line(
+    data = pm25_hour_ambient_overlay,
+    aes(
+      x = hour_of_day,
+      y = median_pm25,
+      color = study_arm_overall,
+      linetype = "Median simultaneous ambient PM2.5",
+      group = study_arm_overall
+    ),
+    inherit.aes = FALSE,
+    linewidth = 0.90
+  ) +
+  geom_hline(
+    yintercept = hapin_pm25_reference_lines,
+    color = "grey55",
+    linetype = "dashed",
+    linewidth = 0.25
+  ) +
+  facet_wrap(~timepoint, nrow = 1) +
+  scale_x_continuous(breaks = seq(0, 23, by = 3)) +
+  scale_color_manual(values = hapin_arm_colors, drop = FALSE) +
+  scale_fill_manual(values = hapin_arm_colors, drop = FALSE) +
+  scale_linetype_manual(values = pm25_hour_overlay_linetypes) +
+  scale_y_log10() +
+  coord_cartesian(ylim = pm25_hour_raw_ambient_y_limits) +
+  labs(
+    x = paste0("Hour of day (", hapin_hour_time_zone, ")"),
+    y = "Household-period-hour PM2.5 (ug/m3, log scale)",
+    color = "Study arm",
+    fill = "Study arm",
+    linetype = "Measure",
+    title = "Raw indoor and simultaneous ambient PM2.5 by hour of day",
+    subtitle = paste(
+      "Solid lines are median indoor PM2.5; dotted lines are median ambient PM2.5",
+      "measured during the same household monitoring hours",
+      sep = "\n"
+    ),
+    caption = paste(
+      paste(
+        "Indoor PM2.5 bands are the 25th-75th and 10th-90th percentiles",
+        "across household-period-hour summaries."
+      ),
+      paste(
+        "Ambient PM2.5 uses matched site-hours; comparison is blue and",
+        "intervention is orange."
+      ),
+      sep = "\n"
+    )
+  ) +
+  guides(
+    color = guide_legend(order = 1),
+    fill = "none",
+    linetype = guide_legend(order = 2)
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey92", color = "grey75")
+  )
+
+hapin_save_plot(
+  fig_hour_raw_with_ambient_pm25,
+  "fig_pm25_hapin_hour_of_day_raw_indoor_pm25_with_concurrent_ambient_pm25.png",
+  width = 10,
+  height = 5.9
+)
+
+fig_hour_raw_with_ambient_pm25_reference_limits <-
+  fig_hour_raw_with_ambient_pm25 +
+    geom_hline(
+      data = tibble(
+        reference_line = pm25_hour_annual_reference_label,
+        reference_value = 35
+      ),
+      aes(yintercept = reference_value, linewidth = reference_line),
+      color = "#B2182B",
+      linetype = "solid",
+      inherit.aes = FALSE
+    ) +
+    geom_hline(
+      data = tibble(
+        reference_line = pm25_hour_daily_reference_label,
+        reference_value = 65
+      ),
+      aes(yintercept = reference_value, linewidth = reference_line),
+      color = "#B2182B",
+      linetype = "dashed",
+      inherit.aes = FALSE
+    ) +
+    scale_linewidth_manual(
+      name = "Reference lines",
+      breaks = pm25_hour_reference_breaks,
+      values = stats::setNames(c(0.45, 0.45), pm25_hour_reference_breaks),
+      guide = guide_legend(
+        order = 3,
+        nrow = 2,
+        byrow = TRUE,
+        override.aes = list(
+          color = c("#B2182B", "#B2182B"),
+          linetype = c("solid", "dashed"),
+          linewidth = c(0.45, 0.45)
+        )
+      )
+    ) +
+    theme(
+      legend.box = "vertical",
+      legend.box.just = "center",
+      legend.text = element_text(size = 9)
+    )
+
+hapin_save_plot(
+  fig_hour_raw_with_ambient_pm25_reference_limits,
+  paste0(
+    "fig_pm25_hapin_hour_of_day_raw_indoor_pm25_",
+    "with_concurrent_ambient_pm25_reference_limits.png"
+  ),
+  width = 11.2,
+  height = 7.8
+)
+
 p_hour_primary <- pm25_hour_primary_summary %>%
   mutate(
     study_arm_overall = factor(study_arm_overall, levels = arm_levels),
-    metric_label = factor(
-      metric_label,
-      levels = c("Raw indoor PM2.5", "Concurrent outdoor PM2.5", "Ambient-adjusted indoor-excess PM2.5")
+    metric_plot_label = factor(
+      metric_plot_label,
+      levels = c(
+        "Raw indoor PM2.5",
+        "Concurrent outdoor PM2.5",
+        default_indoor_excess_plot_label
+      )
+    ),
+    central_pm25 = if_else(
+      metric_name == "ambient_adjusted_indoor_excess_pm25",
+      mean_pm25,
+      median_pm25
     )
   ) %>%
   ggplot(aes(x = hour_of_day, color = study_arm_overall, fill = study_arm_overall)) +
   geom_ribbon(aes(ymin = p10_pm25, ymax = p90_pm25), alpha = 0.10, color = NA) +
   geom_ribbon(aes(ymin = p25_pm25, ymax = p75_pm25), alpha = 0.20, color = NA) +
-  geom_line(aes(y = median_pm25), linewidth = 0.65) +
-  facet_grid(metric_label ~ timepoint, scales = "free_y") +
+  geom_line(aes(y = central_pm25), linewidth = 0.65) +
+  facet_grid(metric_plot_label ~ timepoint, scales = "free_y") +
   scale_x_continuous(breaks = seq(0, 23, 4)) +
+  scale_color_manual(values = hapin_arm_colors, drop = FALSE) +
+  scale_fill_manual(values = hapin_arm_colors, drop = FALSE) +
+  scale_y_continuous(trans = hapin_pseudo_log_trans) +
   labs(
     x = "Hour of day", y = "PM2.5 (ug/m3)", color = "Study arm", fill = "Study arm",
-    caption = "Lines are medians; dark and light bands are the 25th-75th and 10th-90th percentiles of household-period-hour means."
+    caption = paste(
+      "Raw indoor and outdoor lines are medians; the adjusted line is the arithmetic mean.",
+      "Bands are the 25th-75th and 10th-90th percentiles; the y-axis uses a symmetric pseudo-log transformation."
+    )
   ) +
   theme_bw(base_size = 10) +
   theme(legend.position = "bottom", panel.grid.minor = element_blank())
@@ -10021,11 +10672,12 @@ ggsave(file.path(figure_dir, "fig_descriptive_pm25_time_of_day_primary.png"), p_
 ggsave(file.path(figure_dir, "fig_descriptive_pm25_hourly_patterns.png"), p_hour_primary, width = 12, height = 9, dpi = 300)
 
 pm25_paired_change <- pm25_household_timepoint_internal %>%
-  select(fcn_id, study_arm_overall, timepoint, pm25_ambient_excess_f075) %>%
-  pivot_wider(names_from = timepoint, values_from = pm25_ambient_excess_f075) %>%
+  select(fcn_id, study_arm_overall, timepoint, pm25_ambient_excess_f025) %>%
+  pivot_wider(names_from = timepoint, values_from = pm25_ambient_excess_f025) %>%
   mutate(
     change_midline_minus_baseline = midline - baseline,
-    change_endline_minus_baseline = endline - baseline
+    change_endline_minus_baseline = endline - baseline,
+    ambient_fraction_default = default_material_infiltration_factor
   )
 readr::write_csv(
   pm25_paired_change %>% select(-fcn_id),
@@ -10033,33 +10685,384 @@ readr::write_csv(
   na = ""
 )
 
-p_sampling <- pm25_household_timepoint_internal %>%
-  ggplot(aes(x = collection_date_min, y = study_arm_overall, color = study_arm_overall)) +
-  geom_point(position = position_jitter(height = 0.12, width = 0), alpha = 0.70, size = 1.6) +
-  facet_wrap(~timepoint, scales = "free_x") +
-  labs(x = "Monitoring start date", y = NULL, color = "Study arm") +
-  theme_bw(base_size = 10) + theme(legend.position = "bottom")
-ggsave(file.path(figure_dir, "fig_descriptive_pm25_sampling_timeline.png"), p_sampling, width = 10, height = 5, dpi = 300)
+pm25_collection_daily_indoor <- indoor %>%
+  filter(
+    timepoint %in% timepoint_levels,
+    study_arm_overall %in% arm_levels,
+    !is.na(hh_id),
+    !is.na(dateTime),
+    !is.na(pm25_ug_m3),
+    is.finite(pm25_ug_m3),
+    pm25_ug_m3 > 0
+  ) %>%
+  mutate(
+    collection_date = as.Date(
+      lubridate::with_tz(dateTime, tzone = hapin_hour_time_zone)
+    ),
+    monitoring_unit = paste(hh_id, raw_source_file, PM_monitor, sep = "|")
+  ) %>%
+  group_by(collection_date, timepoint, study_arm_overall) %>%
+  summarise(
+    n_active_monitoring_units = n_distinct(monitoring_unit),
+    n_households = n_distinct(hh_id),
+    n_observations = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    collection_group = dplyr::recode(
+      as.character(study_arm_overall),
+      comparison = "Comparison households",
+      intervention = "Intervention households"
+    ),
+    monitoring_unit_definition = "Distinct household-source-file-monitor combinations"
+  )
+
+pm25_collection_campaign_windows <- pm25_collection_daily_indoor %>%
+  mutate(timepoint = as.character(timepoint)) %>%
+  group_by(timepoint) %>%
+  summarise(
+    campaign_start_date = min(collection_date),
+    campaign_end_date = max(collection_date),
+    .groups = "drop"
+  )
+
+# Assign each ambient monitoring day to the contemporaneous indoor campaign.
+# If an ambient day falls just outside a campaign, retain it with the nearest
+# campaign so the collection timeline does not silently omit ambient data.
+pm25_collection_daily_ambient <- ambient_timestamp_deduplicated %>%
+  mutate(
+    collection_date = as.Date(
+      lubridate::with_tz(dateTime, tzone = hapin_hour_time_zone)
+    ),
+    monitoring_unit = paste(ambient_site_id, PM_monitor, sep = "|")
+  ) %>%
+  group_by(collection_date) %>%
+  summarise(
+    n_active_monitoring_units = n_distinct(monitoring_unit),
+    n_ambient_sites = n_distinct(ambient_site_id),
+    n_observations = n(),
+    .groups = "drop"
+  ) %>%
+  tidyr::crossing(pm25_collection_campaign_windows) %>%
+  mutate(
+    campaign_distance_days = case_when(
+      collection_date < campaign_start_date ~ as.numeric(campaign_start_date - collection_date),
+      collection_date > campaign_end_date ~ as.numeric(collection_date - campaign_end_date),
+      TRUE ~ 0
+    ),
+    campaign_assignment = if_else(
+      campaign_distance_days == 0,
+      "Within indoor campaign date range",
+      "Nearest indoor campaign date range"
+    ),
+    timepoint_order = match(timepoint, timepoint_levels)
+  ) %>%
+  group_by(collection_date) %>%
+  arrange(campaign_distance_days, timepoint_order, .by_group = TRUE) %>%
+  slice_head(n = 1) %>%
+  ungroup() %>%
+  transmute(
+    collection_date,
+    timepoint,
+    study_arm_overall = NA_character_,
+    n_active_monitoring_units,
+    n_households = NA_integer_,
+    n_ambient_sites,
+    n_observations,
+    collection_group = "Ambient monitors",
+    monitoring_unit_definition = "Distinct ambient site-monitor combinations",
+    campaign_assignment,
+    campaign_distance_days
+  )
+
+pm25_collection_timeline_daily <- bind_rows(
+  pm25_collection_daily_indoor %>%
+    mutate(
+      n_ambient_sites = NA_integer_,
+      campaign_assignment = "Observed indoor campaign",
+      campaign_distance_days = 0
+    ),
+  pm25_collection_daily_ambient
+) %>%
+  mutate(
+    timepoint = factor(as.character(timepoint), levels = timepoint_levels),
+    collection_group = factor(
+      collection_group,
+      levels = c(
+        "Ambient monitors",
+        "Comparison households",
+        "Intervention households"
+      )
+    )
+  ) %>%
+  arrange(timepoint, collection_date, collection_group)
+
+readr::write_csv(
+  pm25_collection_timeline_daily %>%
+    mutate(across(where(is.factor), as.character)),
+  file.path(
+    restricted_table_dir,
+    "table_descriptive_pm25_collection_timeline_daily_internal.csv"
+  ),
+  na = ""
+)
+
+pm25_ambient_daily_mean <- ambient_site_hourly %>%
+  mutate(
+    collection_date = as.Date(
+      lubridate::with_tz(ambient_hour, tzone = hapin_hour_time_zone)
+    )
+  ) %>%
+  group_by(collection_date) %>%
+  summarise(
+    ambient_mean_pm25 = mean(ambient_mean_pm25_hour, na.rm = TRUE),
+    n_valid_ambient_site_hours = n(),
+    n_ambient_sites = n_distinct(ambient_site_id),
+    .groups = "drop"
+  ) %>%
+  inner_join(
+    pm25_collection_daily_ambient %>%
+      select(
+        collection_date,
+        timepoint,
+        campaign_assignment,
+        campaign_distance_days
+      ),
+    by = "collection_date"
+  ) %>%
+  mutate(
+    timepoint = factor(as.character(timepoint), levels = timepoint_levels)
+  ) %>%
+  group_by(timepoint) %>%
+  arrange(collection_date, .by_group = TRUE) %>%
+  mutate(
+    ambient_collection_run = cumsum(
+      is.na(lag(collection_date)) |
+        as.integer(collection_date - lag(collection_date)) > 1L
+    )
+  ) %>%
+  ungroup()
+
+readr::write_csv(
+  pm25_ambient_daily_mean %>%
+    mutate(across(where(is.factor), as.character)),
+  file.path(
+    restricted_table_dir,
+    "table_descriptive_pm25_ambient_daily_mean_internal.csv"
+  ),
+  na = ""
+)
+
+pm25_collection_colors <- c(
+  "Comparison households" = unname(hapin_arm_colors[["comparison"]]),
+  "Intervention households" = unname(hapin_arm_colors[["intervention"]]),
+  "Ambient monitors" = "#3A7D44"
+)
+
+p_sampling <- pm25_collection_timeline_daily %>%
+  ggplot(
+    aes(
+      x = collection_date,
+      y = collection_group,
+      color = collection_group,
+      size = n_active_monitoring_units
+    )
+  ) +
+  geom_point(alpha = 0.82) +
+  facet_grid(. ~ timepoint, scales = "free_x", space = "free_x") +
+  scale_x_date(
+    date_breaks = "2 weeks",
+    date_labels = "%b %d\n%Y",
+    expand = expansion(mult = c(0.025, 0.025)),
+    guide = guide_axis(check.overlap = TRUE)
+  ) +
+  scale_y_discrete(drop = FALSE) +
+  scale_color_manual(values = pm25_collection_colors, drop = FALSE) +
+  scale_size_continuous(
+    range = c(2.4, 7.2),
+    breaks = c(1, 5, 10, 15)
+  ) +
+  guides(color = "none") +
+  labs(
+    title = "PM2.5 data collection timeline",
+    subtitle = paste(
+      "Each point marks a calendar day with PM2.5 measurements;",
+      "point size shows active monitoring units."
+    ),
+    x = "Collection date",
+    y = NULL,
+    size = "Active monitoring units",
+    caption = paste(
+      "Indoor units are distinct household monitoring windows, classified by study arm;",
+      "ambient units are distinct site-monitor pairs after timestamp deduplication."
+    )
+  ) +
+  theme_bw(base_size = 10) +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "grey88", linewidth = 0.35),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(size = 8),
+    strip.background = element_rect(fill = "grey94", color = "grey70")
+  )
+ggsave(
+  file.path(figure_dir, "fig_descriptive_pm25_sampling_timeline.png"),
+  p_sampling,
+  width = 12.5,
+  height = 5.5,
+  dpi = 300
+)
+
+pm25_collection_axis_anchors <- pm25_collection_timeline_daily %>%
+  group_by(timepoint) %>%
+  summarise(
+    first_collection_date = min(collection_date),
+    last_collection_date = max(collection_date),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = c(first_collection_date, last_collection_date),
+    names_to = "date_boundary",
+    values_to = "collection_date"
+  )
+
+p_sampling_combined_top <- p_sampling +
+  geom_blank(
+    data = pm25_collection_axis_anchors,
+    aes(x = collection_date),
+    inherit.aes = FALSE
+  ) +
+  labs(x = NULL, caption = NULL) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title.x = element_blank(),
+    legend.position = "top",
+    plot.margin = margin(t = 5.5, r = 5.5, b = 1.5, l = 5.5)
+  )
+
+p_sampling_ambient <- pm25_ambient_daily_mean %>%
+  ggplot(
+    aes(
+      x = collection_date,
+      y = ambient_mean_pm25,
+      group = interaction(timepoint, ambient_collection_run)
+    )
+  ) +
+  geom_blank(
+    data = pm25_collection_axis_anchors,
+    aes(x = collection_date, y = 0),
+    inherit.aes = FALSE
+  ) +
+  geom_line(color = pm25_collection_colors[["Ambient monitors"]], linewidth = 0.65) +
+  geom_point(color = pm25_collection_colors[["Ambient monitors"]], size = 1.7) +
+  facet_grid(. ~ timepoint, scales = "free_x", space = "free_x") +
+  scale_x_date(
+    date_breaks = "2 weeks",
+    date_labels = "%b %d\n%Y",
+    expand = expansion(mult = c(0.025, 0.025)),
+    guide = guide_axis(check.overlap = TRUE)
+  ) +
+  scale_y_continuous(
+    limits = c(0, NA),
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  labs(
+    x = "Collection date",
+    y = "Daily mean ambient PM2.5 (ug/m3)",
+    caption = paste(
+      "Daily ambient values are arithmetic means across valid, timestamp-deduplicated",
+      "ambient site-hours. Lines do not bridge days without valid ambient measurements."
+    )
+  ) +
+  theme_bw(base_size = 10) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(size = 8),
+    strip.text.x = element_blank(),
+    strip.background = element_blank(),
+    plot.margin = margin(t = 1.5, r = 5.5, b = 5.5, l = 5.5)
+  )
+
+pm25_sampling_timeline_grob <- ggplotGrob(p_sampling_combined_top)
+pm25_sampling_ambient_grob <- ggplotGrob(p_sampling_ambient)
+pm25_sampling_aligned_widths <- grid::unit.pmax(
+  pm25_sampling_timeline_grob$widths,
+  pm25_sampling_ambient_grob$widths
+)
+pm25_sampling_timeline_grob$widths <- pm25_sampling_aligned_widths
+pm25_sampling_ambient_grob$widths <- pm25_sampling_aligned_widths
+
+p_sampling_with_ambient <- gridExtra::arrangeGrob(
+  pm25_sampling_timeline_grob,
+  pm25_sampling_ambient_grob,
+  ncol = 1,
+  heights = c(1.15, 1)
+)
+
+ggsave(
+  file.path(
+    figure_dir,
+    "fig_descriptive_pm25_sampling_timeline_with_ambient_pm25.png"
+  ),
+  p_sampling_with_ambient,
+  width = 12.5,
+  height = 8.5,
+  dpi = 300
+)
 
 p_ambient_date <- common_periods %>%
   ggplot(aes(x = collection_date)) +
   geom_point(aes(y = indoor_mean_pm25_24h, color = study_arm_overall), alpha = 0.65, size = 1.4) +
-  geom_point(aes(y = ambient_mean_pm25_24h), color = "black", alpha = 0.45, size = 1.2, shape = 17) +
+  geom_point(
+    aes(y = ambient_mean_pm25_24h, shape = "Concurrent outdoor PM2.5"),
+    color = "black",
+    alpha = 0.55,
+    size = 1.4
+  ) +
   facet_wrap(~timepoint, scales = "free_x") +
+  scale_x_date(
+    date_breaks = "1 month",
+    date_labels = "%b %d",
+    expand = expansion(mult = c(0.05, 0.05)),
+    guide = guide_axis(check.overlap = TRUE)
+  ) +
   scale_y_log10() +
-  labs(x = "Monitoring date", y = "24-hour mean PM2.5 (ug/m3, log scale)", color = "Indoor study arm") +
-  theme_bw(base_size = 10) + theme(legend.position = "bottom")
-ggsave(file.path(figure_dir, "fig_descriptive_pm25_ambient_by_date.png"), p_ambient_date, width = 10, height = 5, dpi = 300)
+  scale_color_manual(values = hapin_arm_colors, drop = FALSE) +
+  scale_shape_manual(values = c("Concurrent outdoor PM2.5" = 17)) +
+  labs(
+    x = "Monitoring date",
+    y = "24-hour mean PM2.5 (ug/m3, log scale)",
+    color = "Indoor study arm",
+    shape = "Series",
+    caption = "Triangles show concurrent outdoor 24-hour means matched to household monitoring periods."
+  ) +
+  theme_bw(base_size = 10) +
+  theme(
+    legend.position = "bottom",
+    panel.spacing.x = grid::unit(1.2, "lines"),
+    axis.text.x = element_text(size = 8)
+  )
+ggsave(file.path(figure_dir, "fig_descriptive_pm25_ambient_by_date.png"), p_ambient_date, width = 11, height = 5.5, dpi = 300)
 
 p_paired <- pm25_household_timepoint_internal %>%
   filter(timepoint %in% c("baseline", "midline", "endline")) %>%
   mutate(timepoint = factor(timepoint, levels = timepoint_levels)) %>%
-  ggplot(aes(x = timepoint, y = pm25_ambient_excess_f075, group = fcn_id, color = study_arm_overall)) +
+  ggplot(aes(x = timepoint, y = pm25_ambient_excess_f025, group = fcn_id, color = study_arm_overall)) +
   geom_hline(yintercept = 0, color = "grey60", linewidth = 0.4) +
   geom_line(alpha = 0.18, linewidth = 0.35) +
   geom_point(alpha = 0.45, size = 1.1) +
   facet_wrap(~study_arm_overall) +
-  labs(x = NULL, y = "Indoor minus 0.75 x outdoor PM2.5 (ug/m3)", color = "Study arm") +
+  scale_color_manual(values = hapin_arm_colors, drop = FALSE) +
+  scale_y_continuous(trans = hapin_pseudo_log_trans) +
+  labs(
+    x = NULL,
+    y = sprintf(
+      "Indoor minus %.2f x outdoor PM2.5 (ug/m3)",
+      default_material_infiltration_factor
+    ),
+    color = "Study arm"
+  ) +
   theme_bw(base_size = 10) + theme(legend.position = "none")
 ggsave(file.path(figure_dir, "fig_descriptive_pm25_paired_household_change.png"), p_paired, width = 9, height = 5, dpi = 300)
 
@@ -11386,7 +12389,7 @@ if (length(child_figure_outcomes) > 0) {
     facet_wrap(~ outcome_label, ncol = 4) +
     scale_y_continuous(labels = label_number(suffix = "%")) +
     scale_fill_manual(
-      values = c(comparison = "#4E79A7", intervention = "#F28E2B"),
+      values = rf105_arm_colors,
       na.translate = FALSE
     ) +
     labs(
@@ -11638,7 +12641,7 @@ write_plot_if_data <- function(data, plot, filename, width, height) {
   save_reviewed_plot(plot, filename, width = width, height = height)
 }
 
-arm_colors <- c(comparison = "#3B6EA8", intervention = "#C94C4C", all_arms = "#6F6F6F")
+arm_colors <- c(rf105_arm_colors, all_arms = rf105_complementary_colors[["grey"]])
 
 survey_raw <- readr::read_rds(file_survey_refugee_household) %>%
   add_rf105_aliases()
@@ -12486,8 +13489,8 @@ if (nrow(plot_data) == 0) {
 }
 
 arm_colors_requested <- c(
-  "Comparison" = "#3B6EA8",
-  "Intervention" = "#C94C4C"
+  "Comparison" = rf105_arm_colors[["comparison"]],
+  "Intervention" = rf105_arm_colors[["intervention"]]
 )
 position_arm <- position_dodge(width = 0.72)
 
@@ -12770,8 +13773,8 @@ study_arm_labels <- c(
   intervention = "Intervention group"
 )
 study_arm_colors <- c(
-  "Comparison group" = "#3B6EA8",
-  "Intervention group" = "#C94C4C"
+  "Comparison group" = rf105_arm_colors[["comparison"]],
+  "Intervention group" = rf105_arm_colors[["intervention"]]
 )
 
 income_long <- purrr::pmap_dfr(income_source_labels, function(source_variable,
@@ -13400,8 +14403,8 @@ study_arm_labels <- c(
   all_arms = "All households"
 )
 study_arm_colors <- c(
-  "Comparison group" = "#3B6EA8",
-  "Intervention group" = "#C94C4C"
+  "Comparison group" = rf105_arm_colors[["comparison"]],
+  "Intervention group" = rf105_arm_colors[["intervention"]]
 )
 
 forest_reason_summary <- purrr::pmap_dfr(
@@ -13928,9 +14931,8 @@ read_reviewed_csv_required <- function(filename) {
 }
 
 arm_colors <- c(
-  comparison = "#430154",
-  intervention = "#138B87",
-  all_arms = "#6F6F6F"
+  rf105_arm_colors,
+  all_arms = rf105_complementary_colors[["grey"]]
 )
 stove_colors <- c(lpg = "#0072B2", biomass = "#D55E00")
 change_colors <- c(more = "#2F8F5B", less = "#B6463A")
@@ -15930,77 +16932,8 @@ save_plot_if_data(
 # Physical-health figure for the manuscript child/caregiver figure
 ################################################################################
 
-physical_health_plot_data <- read_reviewed_csv_required(
-  "table_descriptive_physical_health_symptoms.csv"
-) %>%
-  filter(
-    n_nonmissing > 0,
-    !is.na(percent),
-    study_arm_overall %in% arm_levels,
-    source_variable %notin% physical_health_figure_exclusions
-  ) %>%
-  mutate(
-    timepoint = factor(as.character(timepoint), levels = timepoint_levels),
-    study_arm_overall = factor(
-      as.character(study_arm_overall),
-      levels = arm_levels
-    ),
-    respondent_group = factor(respondent_group, levels = c("Child", "Caregiver")),
-    facet_label = factor(
-      str_wrap(paste(respondent_group, outcome_label, sep = ": "), width = 24),
-      levels = str_wrap(
-        paste(
-          physical_health_figure_labels$respondent_group,
-          physical_health_figure_labels$outcome_label,
-          sep = ": "
-        ),
-        width = 24
-      )
-    )
-  )
-
-write_reviewed_csv(
-  physical_health_plot_data,
-  "table_descriptive_health_panel_plot_data.csv"
-)
-
-fig_physical_health <- ggplot(
-  physical_health_plot_data,
-  aes(
-    x = timepoint,
-    y = percent,
-    color = study_arm_overall,
-    group = study_arm_overall
-  )
-) +
-  geom_line(linewidth = 0.7, na.rm = TRUE) +
-  geom_point(size = 1.8, na.rm = TRUE) +
-  geom_errorbar(
-    aes(ymin = ci_lower, ymax = ci_upper),
-    width = 0.08,
-    linewidth = 0.4,
-    na.rm = TRUE
-  ) +
-  facet_wrap(
-    ~ facet_label,
-    ncol = sum(physical_health_figure_labels$respondent_group == "Child")
-  ) +
-  scale_color_manual(values = arm_colors[arm_levels], drop = FALSE) +
-  scale_y_continuous(labels = function(x) paste0(round(x), "%"), limits = c(0, 100)) +
-  theme_classic() +
-  theme(
-    axis.text.x = element_text(angle = 35, hjust = 1),
-    strip.text = element_text(size = 8)
-  ) +
-  labs(x = "Timepoint", y = "Percent reporting outcome", color = "Study arm")
-
-save_plot_if_data(
-  physical_health_plot_data,
-  fig_physical_health,
-  "fig_descriptive_health_symptom_panel.png",
-  width = 16,
-  height = 8
-)
+# Both physical-health filenames are generated from the single shared definition
+# in physical_health_figures.R earlier in this script.
 
 ################################################################################
 # Food consumption score and dietary diversity figure for manuscript FCS/HDDS plot
@@ -16469,7 +17402,7 @@ fig_fcs_hdds <- ggplot(
     name = "Study arm",
     breaks = c("intervention", "comparison"),
     labels = c("Intervention", "Comparison"),
-    values = c(intervention = "#138B87", comparison = "#430154")
+    values = rf105_arm_colors[c("intervention", "comparison")]
   ) +
   theme_bw() +
   labs(

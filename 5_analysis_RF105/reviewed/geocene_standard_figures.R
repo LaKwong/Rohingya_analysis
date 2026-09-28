@@ -295,7 +295,7 @@ fig_exclusive_lpg_month <- ggplot(
     y = pct_days_exclusive_lpg
   )
 ) +
-  geom_jitter(width = 0.15, height = 0, alpha = 0.45, color = "#4E79A7") +
+  geom_jitter(width = 0.15, height = 0, alpha = 0.45, color = "#ea801c") +
   stat_summary(
     fun = mean,
     geom = "point",
